@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "@antithesishq/bombadil": "^0.6.1"
+  }
+}

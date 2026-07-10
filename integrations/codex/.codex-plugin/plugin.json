@@ -1,0 +1,22 @@
+{
+  "name": "aegis",
+  "version": "0.1.1",
+  "description": "Connect Codex to a scoped Aegis instance.",
+  "author": {
+    "name": "Aegis"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Aegis",
+    "shortDescription": "Use scoped Aegis tools from Codex.",
+    "longDescription": "Connects Codex terminal sessions to Aegis through user-controlled scoped API tokens. Codex must use /api/codex/* endpoints so Aegis Settings can enforce tool access.",
+    "developerName": "Aegis",
+    "category": "Productivity",
+    "capabilities": [
+      "todos",
+      "email",
+      "scoped-api"
+    ],
+    "defaultPrompt": "Use Aegis only through configured scoped access. Check capabilities before reading or writing data."
+  }
+}
