@@ -1,0 +1,52 @@
+# llama-swap config — one stable OpenAI-compatible endpoint that hot-swaps GGUFs
+# on demand (only one model in VRAM at a time; idle models unload after `ttl`).
+# setup-engine.ps1 copies this to <engine>/llama-swap.yaml. EDIT THE PATHS below
+# to match your machine, then add one block per model.
+#
+# Paths must be ABSOLUTE. The default layout puts the engine next to the repo:
+#   <parent>/aegis/          <- this repo
+#   <parent>/engine/         <- llamacpp/, llama-swap/, node/, aider-venv/, sdcpp/
+# so llama-server.exe is at <parent>/engine/llamacpp/llama-server.exe and your
+# GGUFs live in <parent>/aegis/models/.
+#
+# Key flags: --jinja enables OpenAI tool-call parsing; -fa on = flash attention
+# (halves KV memory); -c is the context window (use /engine in-app to auto-size
+# it to your GPU); --mmproj <projector> makes a model vision-capable.
+
+healthCheckTimeout: 300
+logLevel: info
+
+models:
+  # ---- Example: a general chat / tool-calling model -------------------------
+  # "my-model":
+  #   cmd: |
+  #     "C:/path/to/engine/llamacpp/llama-server.exe"
+  #     -m "C:/path/to/aegis/models/my-model.gguf"
+  #     --host 127.0.0.1 --port ${PORT}
+  #     -ngl 99 -c 8192 -fa on --jinja --no-webui
+  #   ttl: 600
+
+  # ---- Example: a vision model (adds --mmproj) ------------------------------
+  # "my-vision":
+  #   cmd: |
+  #     "C:/path/to/engine/llamacpp/llama-server.exe"
+  #     -m "C:/path/to/aegis/models/vl/model.gguf"
+  #     --mmproj "C:/path/to/aegis/models/vl/mmproj.gguf"
+  #     --host 127.0.0.1 --port ${PORT}
+  #     -ngl 99 -c 8192 --no-webui
+  #   ttl: 600
+
+  # ---- Example: local image generation via stable-diffusion.cpp -------------
+  # sd-server speaks OpenAI's /v1/images/generations. `--backend clip=cpu` keeps
+  # the diffusion weights VRAM-resident (huge speedup). checkEndpoint is needed
+  # because sd-server has no /health route.
+  # "my-image":
+  #   cmd: |
+  #     "C:/path/to/engine/sdcpp/sd-server.exe"
+  #     --diffusion-model "C:/path/to/aegis/models/img/diffusion.gguf"
+  #     --llm "C:/path/to/aegis/models/img/text-encoder.gguf"
+  #     --vae "C:/path/to/aegis/models/img/vae.safetensors"
+  #     --backend clip=cpu --diffusion-fa --vae-tiling
+  #     --listen-port ${PORT}
+  #   checkEndpoint: /v1/models
+  #   ttl: 300

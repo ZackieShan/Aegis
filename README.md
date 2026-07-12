@@ -19,7 +19,8 @@ Aegis is a heavily extended fork of [Odysseus](https://github.com/pewdiepie-arch
 rebuilt around a **local-first, closed-loop** philosophy — everything runs on your own
 hardware, no cloud API keys required. The differentiated engine binaries (llama.cpp,
 llama-swap, Node/Playwright, Aider, stable-diffusion.cpp) live *outside* the repo and are
-set up separately; this repo is the application. What's new:
+set up with one command — `scripts\setup-engine.ps1` (see the
+**[engine setup guide](docs/engine-setup.md)**); this repo is the application. What's new:
 
 ### Local model engine
 - **llama.cpp + llama-swap** — hot-swap GGUF models through one OpenAI-compatible endpoint,
