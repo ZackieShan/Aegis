@@ -1,73 +1,86 @@
 <h1 align="center">Aegis</h1>
 
 <p align="center">
-  A self-hosted AI workspace for chat, agents, research, documents, email, notes, calendar, and local model workflows.
+  <b>Your own AI workspace — every model, agent, and tool running on your hardware.</b><br>
+  Private by default. No cloud accounts, no API keys, no per-token bill.
 </p>
 
 <p align="center">
   <a href="QUICKSTART.md">Quickstart</a> ·
-  <a href="docs/setup.md">Setup Guide</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="docs/setup.md">Setup</a> ·
+  <a href="docs/engine-setup.md">Local engine</a> ·
   <a href="ROADMAP.md">Roadmap</a>
 </p>
 
 ---
 
-## What Aegis adds over Odysseus
+## What Aegis is
 
-Aegis is a heavily extended fork of [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus),
-rebuilt around a **local-first, closed-loop** philosophy — everything runs on your own
-hardware, no cloud API keys required. The differentiated engine binaries (llama.cpp,
-llama-swap, Node/Playwright, Aider, stable-diffusion.cpp) live *outside* the repo and are
-set up with one command — `scripts\setup-engine.ps1` (see the
-**[engine setup guide](docs/engine-setup.md)**); this repo is the application. What's new:
+Aegis is a **fully self-hosted AI workspace**. Chat, autonomous agents, deep research,
+coding, a web browser the AI can drive, image generation, and voice — all in one place,
+all running on **your machine**. Nothing you do leaves your hardware unless you choose to
+send it.
 
-### Local model engine
-- **llama.cpp + llama-swap** — hot-swap GGUF models through one OpenAI-compatible endpoint,
-  with grammar-locked **native tool calls** (far more reliable than text-parsed tools).
-- **Zero-config model drop folder** — drop a `.gguf` (or a folder with a GGUF + `mmproj`) into
-  `models/` and it's auto-discovered; serve it with one click.
-- **Context auto-tuner** (`/engine`) — reads each model's GGUF metadata + your GPU VRAM and
-  **right-sizes the context window automatically** — no hand-editing configs, no "context
-  exceeded" errors.
+The premise is simple: the most capable AI tools shouldn't require renting someone else's
+computer and handing over your data to use them. If you have a GPU, you should be able to
+run a private assistant that browses, writes and runs code, researches, makes images, and
+talks with you — and **own the whole thing**.
 
-### Agentic capabilities
-- **Toolboxes** — themed MCP tool collections the agent can summon (opt-in per message):
-  **OSINT** (recon), **Market** (analysis), **Troubleshoot** (network/systems), **Web**
-  (crawl & extract).
-- **Recipes** — a visual node editor to chain tools + models into workflows, with **branch**
-  (conditional) and **loop** (refine) nodes.
-- **Coding agent** (`/code`) — Aider wrapped as a workspace-scoped, git-aware coding agent.
-- **Code Canvas** (`/canvas`) — an artifact-style editor: generate code, edit it inline, tell
-  the AI what to change, and **run it** (Python in-browser, HTML live preview, or server-side).
-- **Repo → Wiki** (`/wiki`) — point at any local repo and get a structured Overview /
-  Architecture / Module-guide wiki, generated locally.
-- **Browser automation** — a built-in Playwright MCP lets the agent navigate, read, and click
-  real web pages via accessibility snapshots.
+**What it unlocks**
 
-### Local media
-- **Image generation** — Qwen-Image (or any diffusion GGUF) via stable-diffusion.cpp, fully
-  local and OpenAI-images-compatible.
-- **Voice** — local Whisper speech-to-text + text-to-speech, plus a hands-free **Voice Mode**:
-  speak → the agent acts → it reads the reply back.
-- **Vision** — a vision model (Qwen2.5-VL) for screenshot / image understanding.
+- **Sovereignty** — your models, your data, your machine. Works offline; nothing is metered,
+  logged, or trained on by a third party.
+- **No ceiling** — run as much as your hardware allows. No usage caps, no per-token cost, no
+  rate limits.
+- **One integrated loop** — models, agents, knowledge, memory, and media work *together*
+  instead of scattered across a dozen apps, tabs, and subscriptions.
+- **Cloud-grade capability, self-owned** — the agent can browse the web, edit real code in a
+  git repo, generate images, and take voice commands — locally.
 
-### Knowledge, memory & observability
-- **Knowledge-graph memory** (`/graph`) — a local *(subject, relation, object)* graph extracted
-  from your notes and chats.
-- **Local tracing** (`/traces`) — every model/agent call recorded to a local SQLite store
-  (with optional opik export). No data leaves the machine.
+**Where it's headed:** the default self-hosted AI environment for people who want serious
+capability without surrendering privacy or control — extensible (MCP tools, visual workflows,
+skills), approachable (one dashboard, one-click "try it"), and honest about running on
+hardware you own. See the [roadmap](ROADMAP.md).
 
-### Operability
-- **Control Center** — one dashboard showing every capability's **live status** with a one-click
-  "try it," so nothing is hidden behind commands.
-- **Doctor** (`/doctor`) — capability self-check with guarded, one-click fixes for missing
-  dependencies.
-- **Windows-native** — runs natively on Windows with no Docker, plus many Windows-specific fixes
-  (paths, shell, GPU serving).
-- **Aurora theme** — a purple/black aurora-borealis theme, JetBrains Mono, and a trident mark.
+## What you can do
 
-Everything above is opt-in and local. See [ROADMAP.md](ROADMAP.md) for what's next.
+**Talk to models, locally**
+- Chat with any local GGUF or API model — with tools, files, shell, skills, and long-term memory.
+- A **local model engine** (llama.cpp + llama-swap) hot-swaps GGUFs through one endpoint with
+  reliable **native tool calls**; drop a model in `models/` and serve it; the **context
+  auto-tuner** (`/engine`) sizes each model's window to your GPU automatically.
+
+**Put agents to work**
+- **Toolboxes** — summon themed tool sets: OSINT recon, market analysis, network troubleshooting, web crawl.
+- **Recipes** — chain tools and models into visual workflows, with branch and loop logic.
+- **Deep Research** — multi-step web research with source reading and report generation.
+- **Browser automation** — the agent navigates, reads, and clicks real web pages.
+
+**Build software**
+- **Coding agent** (`/code`) — edits real files in a git-aware workspace.
+- **Code Canvas** (`/canvas`) — generate code, edit it inline, tell the AI what to change, and **run it**.
+- **Repo → Wiki** (`/wiki`) — turn any local repo into a structured Overview / Architecture / module guide.
+
+**Create & converse**
+- **Image generation** — fully local diffusion, OpenAI-images-compatible.
+- **Voice** — on-device speech-to-text + text-to-speech, plus a hands-free **Voice Mode**:
+  speak, the agent acts, it reads the reply back.
+- **Vision** — a local vision model for images and screenshots.
+
+**Stay organized**
+- AI-assisted **Documents**, **Email** (IMAP/SMTP triage + drafts), **Notes / Tasks / Calendar**
+  (reminders, scheduled agent tasks, CalDAV), a **gallery / image editor**, and **web search**.
+
+**Own the operation**
+- **Control Center** — one dashboard with every capability's live status and a one-click "try it."
+- **Doctor** (`/doctor`) — self-check with guarded, one-click fixes for anything missing.
+- **Local observability** (`/traces`) and **knowledge-graph memory** (`/graph`) — insight and
+  recall that never leave the machine.
+- Runs **natively on Windows** (no Docker required) or via Docker.
+
+> The local inference binaries (llama.cpp, llama-swap, Node/Playwright, Aider,
+> stable-diffusion.cpp) install with one command — see the
+> **[engine setup guide](docs/engine-setup.md)**.
 
 ## Quick Start
 
@@ -88,7 +101,7 @@ starts the server at `http://127.0.0.1:7000`. Requires Python 3.11+.
 ### Linux / macOS (native, no Docker)
 
 ```bash
-./start-linux.sh    # Linux — requires Python 3.11+
+./start-linux.sh    # Linux -- requires Python 3.11+
 ./start-macos.sh    # macOS
 ```
 
@@ -105,17 +118,6 @@ Log in with **admin / admin** and change the password after first login
 (Settings → Account). Native installs, GPU notes, Windows/macOS instructions,
 HTTPS, and configuration live in the [setup guide](docs/setup.md).
 
-## Features
-
-- **Chat + Agents** — local/API models, tools, MCP, files, shell, skills, and memory.
-- **Cookbook** — hardware-aware model recommendations, downloads, and serving.
-- **Deep Research** — multi-step web research with source reading and report generation.
-- **Compare** — blind side-by-side model testing and synthesis.
-- **Documents** — writing-first editor with AI edits, suggestions, Markdown, HTML, CSV, and syntax highlighting.
-- **Email** — IMAP/SMTP inbox with triage, tags, summaries, reminders, and reply drafts.
-- **Notes, Tasks + Calendar** — reminders, todos, scheduled agent tasks, and CalDAV sync.
-- **Extras** — gallery/image editor, themes, uploads, web search, presets, sessions, and 2FA.
-
 ## Security
 
 Aegis is a self-hosted workspace with powerful local tools. Keep auth enabled, keep private data out of Git, and do not expose raw model/service ports publicly. Deployment details are in the [setup guide](docs/setup.md#security-notes).
@@ -124,5 +126,6 @@ Aegis is a self-hosted workspace with powerful local tools. Keep auth enabled, k
 
 AGPL-3.0-or-later -- see [LICENSE](LICENSE) and [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
 
-Aegis is based on [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus)
-(AGPL-3.0-or-later). See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for full attribution.
+Aegis began as a fork of [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus)
+(AGPL-3.0-or-later) and has grown well beyond it; with thanks for the foundation. Full
+attribution is in [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
