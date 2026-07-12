@@ -750,29 +750,30 @@ async function initImageSettings() {
   try {
     const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
     const modelsData = await modelsRes.json();
-    // Inpaint-compat allowlist — image gen here is scoped to inpainting only,
-    // so DALL-E / GPT-Image-1 (no inpaint API) are excluded. Currently:
-    //   - any model with 'inpaint' in the id
-    //   - Stable Diffusion 3.5 Medium (inpaint via diffusers pipeline)
-    const _isInpaintModel = (mid) => {
+    // This drives `image_model`, the text-to-image model used by chat/agent
+    // generate_image — so list any SERVED image-capable model, not just
+    // inpaint ones. A served model counts when its id OR its endpoint hints
+    // image generation (a local diffusion model like `qwen-image` is served
+    // under an llm-typed llama-swap endpoint, so key off the model id too).
+    const _isImageModel = (mid) => {
       const lower = String(mid || '').toLowerCase();
-      return lower.includes('inpaint')
-        || lower.includes('3.5-medium')
-        || lower.includes('3-5-medium')
-        || lower.includes('sd-3.5-med');
+      return /(?:image|dall-?e|gpt-image|flux|sdxl|sd3|sd-|stable[\s-]*diffusion|diffusion|inpaint|kandinsky|pixart|playground)/.test(lower);
     };
     const imageModels = [];
     (modelsData.items || []).forEach(item => {
+      const epIsImage = String(item.model_type || '').toLowerCase() === 'image';
       (item.models || []).forEach(mid => {
-        if (_isInpaintModel(mid)) imageModels.push(mid);
+        if (epIsImage || _isImageModel(mid)) imageModels.push(mid);
       });
     });
     sortModelIds(imageModels).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
-    // Hardcoded fallbacks shown as "(not detected)" so users know what to
-    // download/serve to enable inpaint here.
-    ['stable-diffusion-3.5-medium', 'stable-diffusion-inpainting'].forEach(mid => {
-      if (!imageModels.includes(mid)) { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid + ' (not detected)'; modelSel.appendChild(opt); }
-    });
+    // Hardcoded fallbacks shown as "(not detected)" so users know what serving
+    // one would enable — only when nothing image-capable was actually found.
+    if (!imageModels.length) {
+      ['qwen-image', 'stable-diffusion-3.5-medium', 'gpt-image-1'].forEach(mid => {
+        const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid + ' (not served)'; modelSel.appendChild(opt);
+      });
+    }
   } catch (e) { console.warn('Failed to load models for image settings', e); }
   try {
     const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
@@ -810,7 +811,9 @@ async function initVisionSettings() {
   const configWrap = vlSel ? vlSel.closest('div[style*="flex-direction"]') : null;
   var _visionEndpoints = [];
   var visionFallbackWidget = null;
-  var _vlExclude = ['audio', 'realtime', 'tts', 'dall-e', 'embedding', 'search', 'whisper'];
+  var _vlExclude = ['audio', 'realtime', 'tts', 'dall-e', 'embedding', 'search', 'whisper',
+    // video-generation pipelines (wan2.2-t2v, ltx2-…) aren't vision chat models
+    'wan2', 'ltx', 't2v', 'i2v', 'video'];
   function _isVisionModel(mid) {
     var lower = String(mid || '').toLowerCase();
     return !_vlExclude.some(function(kw) { return lower.includes(kw); });

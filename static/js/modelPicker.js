@@ -295,6 +295,9 @@ function _initModelPickerDropdown() {
         // when the same model is exposed by both.
         if (seen.has(mid)) return;
         seen.add(mid);
+        // Video pipelines (wan2.2-t2v, ltx2-…) can't chat — they belong to
+        // /video and the gallery, not this picker.
+        if (/(?:^|[/\-_.])(?:wan[0-9.]*|ltx[0-9.]*|t2v|i2v|video)(?:$|[/\-_.])/i.test(mid)) return;
         result.push({
           mid,
           display: (allDisplay[i] || mid).split('/').pop(),

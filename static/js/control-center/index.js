@@ -215,11 +215,26 @@ async function _load() {
   const body = _modal().querySelector('#cc-body');
   body.innerHTML = '<div class="cc-loading">Loading capabilities…</div>';
   try {
-    const r = await fetch('/api/control-center', { credentials: 'same-origin' });
+    // Abort rather than hang: the first snapshot after launch runs hardware
+    // probes while a background thread parses GGUF metadata, and the browser
+    // otherwise surfaces the stall as a bare "Failed to fetch" (same fix as
+    // the /engine command).
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45000);
+    let r;
+    try {
+      r = await fetch('/api/control-center', { credentials: 'same-origin', signal: ctrl.signal });
+    } finally { clearTimeout(timer); }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     _render(await r.json());
   } catch (e) {
-    body.innerHTML = `<div class="cc-loading">Couldn't load: ${_esc(e.message)}</div>`;
+    const msg = (e && e.name === 'AbortError')
+      ? 'the engine is busy (likely loading a model) — hit Refresh in a moment'
+      : (e.message === 'Failed to fetch'
+        ? 'the server didn\'t answer — it may be restarting or mid model-load; hit Refresh in a moment'
+        : e.message);
+    body.innerHTML = `<div class="cc-loading">Couldn't load: ${_esc(msg)} <button class="cc-btn" id="cc-retry">Refresh</button></div>`;
+    body.querySelector('#cc-retry')?.addEventListener('click', _load);
   }
 }
 

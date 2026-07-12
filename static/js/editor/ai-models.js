@@ -35,6 +35,9 @@ function modelCaps(modelId, endpointName, endpointType) {
   const id = (modelId || '').toLowerCase();
   const name = (endpointName || '').toLowerCase();
   const type = (endpointType || '').toLowerCase();
+  // Video pipelines (wan2.2-t2v, ltx2-…) belong to /video, not the image
+  // pickers — without this they'd slip in via the endpoint-name hints below.
+  if (/(?:^|[/\-_.])(?:wan[0-9.]*|ltx[0-9.]*|t2v|i2v|video)(?:$|[/\-_.])/i.test(id)) return { gen: false, inpaint: false };
   // Reject anything obviously text-only.
   const textOnly = /(?:^|[/\-_:])(gpt-?[345]|gpt-oss|claude|llama|qwen[^-]*chat|chat$|instruct$|coder)/i;
   if (textOnly.test(id) && !/image/i.test(id)) return { gen: false, inpaint: false };
@@ -47,6 +50,14 @@ function modelCaps(modelId, endpointName, endpointType) {
   if (/(?:^|[/\-_])(?:sd-?xl|sdxl|sd3|sd-|stable[\s-]*diffusion|flux|playground|pixart|kandinsky)/i.test(id)) {
     const isInpaintModel = /inpaint|edit|fill/i.test(id) || /inpaint|edit|fill/i.test(name);
     return { gen: !isInpaintModel || /base/i.test(id), inpaint: true };
+  }
+  // Local diffusion models whose ID carries "image" (e.g. qwen-image,
+  // qwen-image-edit) — served under a general llm-typed endpoint (llama-swap),
+  // so the endpoint type/name gives no hint; classify off the model id. An
+  // "-edit"/"-inpaint" variant is img2img/inpaint-capable, a plain one is gen.
+  if (/image/i.test(id)) {
+    const isEdit = /inpaint|edit|fill/i.test(id);
+    return { gen: !isEdit, inpaint: isEdit };
   }
   // Self-hosted diffusion server: model id often matches the repo
   // name; trust the endpoint name hint.

@@ -1270,6 +1270,20 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     return wrap;
   }
 
+  // Generated media can be video (wan/ltx via the engine) — same bubble,
+  // <video> instead of <img> (matches gallery.js's extension check).
+  const isVideo = /\.(mp4|mov|webm|mkv|m4v)(?:$|\?)/i.test(safeImageUrl);
+  if (isVideo) {
+    const vid = document.createElement('video');
+    vid.className = 'generated-image';
+    vid.controls = true;
+    vid.muted = false;
+    vid.playsInline = true;
+    vid.preload = 'metadata';
+    vid.title = prompt || 'Generated video';
+    vid.src = safeImageUrl;
+    body.appendChild(vid);
+  } else {
   const img = document.createElement('img');
   img.className = 'generated-image';
   img.alt = prompt || 'Generated image';
@@ -1286,6 +1300,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
     if (img.parentNode) img.parentNode.replaceChild(ph, img);
   }, { once: true });
   body.appendChild(img);
+  }
 
   if (prompt) {
     const caption = document.createElement('div');
@@ -1327,7 +1342,8 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
       const blob = await resp.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = (prompt || 'image').slice(0, 40).replace(/[^a-zA-Z0-9 ]/g, '') + '.png';
+      const dlExt = (imageUrl.match(/\.(mp4|mov|webm|mkv|m4v|png|jpe?g|webp|gif)(?:$|\?)/i) || [null, 'png'])[1];
+      a.download = (prompt || 'image').slice(0, 40).replace(/[^a-zA-Z0-9 ]/g, '') + '.' + dlExt;
       document.body.appendChild(a);
       a.click();
       a.remove();

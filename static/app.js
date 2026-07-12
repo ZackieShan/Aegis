@@ -1027,6 +1027,20 @@ function initializeEventListeners() {
     });
   }
 
+  // Engine tool button — opens Control Center, the visual hub for the local
+  // engine (per-model context tuning, Free VRAM, System health / Doctor).
+  const toolEngineBtn = el('tool-engine-btn');
+  if (toolEngineBtn) {
+    toolEngineBtn.addEventListener('click', () => {
+      if (window.controlCenterModule && typeof window.controlCenterModule.open === 'function') {
+        window.controlCenterModule.open();
+      } else {
+        const ctl = el('rail-control');
+        if (ctl) ctl.click();
+      }
+    });
+  }
+
   // Document library tool button
   const toolDoclibBtn = el('tool-doclib-btn');
   if (toolDoclibBtn) {

@@ -1805,6 +1805,134 @@ async function _cmdEngine(args) {
   return true;
 }
 
+// Local video generation on a served Wan/LTX model. Submits an async job to
+// /api/video/generate (sd-server vid_gen behind llama-swap) and polls until
+// the finished webm lands in the Gallery, then plays it inline.
+//   /video <prompt>              generate (auto-picks a served video model)
+//   /video model=<id> <prompt>   pick the model; also frames=/fps=/size=WxH/seed=
+//   /video models                list served video models
+async function _cmdVideo(args) {
+  const sub = (args[0] || '').toLowerCase();
+  if (!args.length || sub === 'help') {
+    slashReply([
+      '**Local video generation** — runs a served Wan/LTX model through the engine.',
+      '',
+      '&nbsp;&nbsp;`/video <prompt>` — generate a short clip (auto-picks a video model)',
+      '&nbsp;&nbsp;`/video model=<id> <prompt>` — choose the model',
+      '&nbsp;&nbsp;`/video frames=33 fps=16 size=832x480 <prompt>` — tune length/rate/size',
+      '&nbsp;&nbsp;`/video models` — list served video models',
+      '',
+      'Clips take a few minutes and are saved to the Gallery automatically.',
+    ].join('\n'));
+    return true;
+  }
+  if (sub === 'models') {
+    try {
+      const r = await fetch('/api/video/models', { credentials: 'same-origin' });
+      const d = await r.json();
+      const list = d.models || [];
+      slashReply(list.length
+        ? '**Served video models**\n' + list.map(m => `&nbsp;&nbsp;\`${m.model}\`` + (m.endpoint ? ' — ' + m.endpoint : '')).join('\n')
+        : 'No video models served yet — add a Wan/LTX entry to the engine config (`engine/llama-swap.yaml`).');
+    } catch (e) { slashReply('Video models lookup failed: ' + e.message); }
+    return true;
+  }
+
+  // Leading key=value options, then the prompt.
+  const opts = {};
+  const rest = [];
+  for (const a of args) {
+    const m = /^(model|frames|fps|size|seed)=(.+)$/i.exec(a);
+    if (m && !rest.length) opts[m[1].toLowerCase()] = m[2]; else rest.push(a);
+  }
+  const prompt = rest.join(' ').trim();
+  if (!prompt) { slashReply('Usage: `/video <prompt>` — e.g. `/video a red fox running through snow`'); return true; }
+
+  const payload = { prompt };
+  if (opts.model) payload.model = opts.model;
+  if (opts.frames) payload.video_frames = parseInt(opts.frames, 10);
+  if (opts.fps) payload.fps = parseInt(opts.fps, 10);
+  if (opts.seed) payload.seed = parseInt(opts.seed, 10);
+  const sizeMatch = opts.size && /^(\d+)x(\d+)$/i.exec(opts.size);
+  if (sizeMatch) { payload.width = parseInt(sizeMatch[1], 10); payload.height = parseInt(sizeMatch[2], 10); }
+
+  let jobId, model;
+  try {
+    const r = await fetch('/api/video/generate', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { slashReply('✗ ' + (d.detail || d.error || `Video start failed (${r.status})`)); return true; }
+    jobId = d.job_id; model = d.model;
+  } catch (e) { slashReply('Video start failed: ' + e.message); return true; }
+
+  const rep = slashReply(`🎬 Generating video with \`${model}\` — a clip takes a few minutes (the first run also loads the model). It lands here and in the Gallery.`);
+  const status = document.createElement('div');
+  status.className = 'generated-image-caption';
+  status.textContent = 'Queued…';
+  rep.body.appendChild(status);
+
+  const t0 = Date.now();
+  let pollFails = 0;
+  const timer = setInterval(async () => {
+    // The bubble is gone after a session switch or /clear — stop polling;
+    // the finished clip still lands in the Gallery server-side.
+    if (!document.contains(rep.el)) { clearInterval(timer); return; }
+    const elapsedS = Math.round((Date.now() - t0) / 1000);
+    if (elapsedS > 35 * 60) {
+      clearInterval(timer);
+      status.textContent = '✗ Gave up waiting after 35 minutes — check the Gallery later or the engine logs.';
+      return;
+    }
+    let d;
+    try {
+      const r = await fetch(`/api/video/status/${jobId}`, { credentials: 'same-origin' });
+      d = await r.json();
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      pollFails = 0;
+    } catch (e) {
+      // Tolerate transient blips (WiFi, brief server restart) — a multi-
+      // minute render shouldn't be abandoned over one dropped request.
+      pollFails += 1;
+      if (pollFails < 4) { status.textContent = `Still rendering… (status check failed, retrying ${pollFails}/3)`; return; }
+      clearInterval(timer);
+      status.textContent = '✗ Lost track of the job: ' + e.message + ' — if it finishes anyway, the clip appears in the Gallery.';
+      return;
+    }
+    if (d.status === 'done' && d.video_url) {
+      clearInterval(timer);
+      status.remove();
+      const vid = document.createElement('video');
+      vid.className = 'generated-image';
+      vid.controls = true;
+      vid.playsInline = true;
+      vid.preload = 'metadata';
+      vid.src = d.video_url;
+      rep.body.appendChild(vid);
+      const cap = document.createElement('div');
+      cap.className = 'generated-image-caption';
+      cap.textContent = prompt + ' — saved to Gallery';
+      rep.body.appendChild(cap);
+      uiModule.scrollHistory();
+      // The bubble's initial persist only captured the placeholder — record
+      // the outcome so a reloaded transcript isn't stuck on "Generating…".
+      _persistMsg('assistant', `🎬 Video ready: ${d.video_url} — "${prompt}" (saved to Gallery)`, { source: 'slash' });
+    } else if (d.status === 'error' || d.status === 'canceled') {
+      clearInterval(timer);
+      status.textContent = '✗ ' + (d.error || 'Video generation failed');
+      _persistMsg('assistant', `Video generation failed: ${d.error || 'unknown error'}`, { source: 'slash' });
+    } else {
+      const mm = String(Math.floor(elapsedS / 60));
+      const ss = String(elapsedS % 60).padStart(2, '0');
+      const pct = (typeof d.progress === 'number' && d.progress > 0 && d.progress < 1)
+        ? ` · ${Math.round(d.progress * 100)}%` : '';
+      status.textContent = `${d.status === 'running' ? 'Rendering' : 'Queued'}… ${mm}:${ss}${pct}`;
+    }
+  }, 4000);
+  return true;
+}
+
 async function _cmdSettings(args, ctx) {
   // Opens the Settings modal — primarily useful when the user has hidden the
   // Settings cog in Appearance and needs a way back in.
@@ -6544,6 +6672,13 @@ const COMMANDS = {
     help: 'Auto-size model context to your GPU: /engine, /engine tune, /engine set <m> <n>',
     handler: (args) => _cmdEngine(args),
     usage: '/engine'
+  },
+  video: {
+    alias: ['vid', 'videogen'],
+    category: 'Tools',
+    help: 'Generate video locally on a served Wan/LTX model: /video <prompt>, /video models',
+    handler: (args) => _cmdVideo(args),
+    usage: '/video <prompt>'
   },
   control: {
     alias: ['hub', 'dashboard', 'capabilities'],

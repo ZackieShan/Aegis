@@ -222,7 +222,9 @@ function _getSelectedAIEndpoint(type) {
   }
   if (!raw) raw = document.getElementById('ge-ai-model')?.value || '';
   if (!raw) return { endpoint: '', model: '' };
-  const idx = raw.indexOf('::');
+  // lastIndexOf: the base_url half may itself contain '::' (IPv6 hosts like
+  // http://[::1]:8080); model ids never do.
+  const idx = raw.lastIndexOf('::');
   if (idx < 0) return { endpoint: raw, model: '' };
   return { endpoint: raw.slice(0, idx), model: raw.slice(idx + 2) };
 }

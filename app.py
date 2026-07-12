@@ -180,6 +180,8 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/cookbook/setup",  # remote pacman/apt installs
     "/api/upload",          # large files
     "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
+    "/api/gallery/style-transfer",  # full-image edit — cold model load alone can exceed 45s; own 600s httpx timeout
+    "/api/video",           # video submit blocks while llama-swap cold-loads the model; own 600s httpx timeout
     "/api/memory/audit",    # retains own 120s LLM inactivity timeout
 )
 
@@ -824,6 +826,11 @@ logger.info("Engine tuner routes initialized")
 from routes.control_center_routes import setup_control_center_routes
 app.include_router(setup_control_center_routes())
 logger.info("Control Center routes initialized")
+
+# Video generation — async jobs on a served Wan/LTX model (sd-server vid_gen)
+from routes.video_routes import setup_video_routes
+app.include_router(setup_video_routes())
+logger.info("Video generation routes initialized")
 
 # Code canvas — generate + inline AI-edit a code buffer (local coder)
 from routes.canvas_routes import setup_canvas_routes

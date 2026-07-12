@@ -122,7 +122,10 @@ export function wireAIToolsMisc({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageB64, scale: 2 }),
       });
-      if (!res.ok) throw new Error('Server returned ' + res.status);
+      if (!res.ok) {
+        const detail = await res.json().then(d => d.detail || d.error).catch(() => null);
+        throw new Error(detail || ('Server returned ' + res.status));
+      }
       const data = await res.json();
       if (data.image) {
         const img = new Image();
@@ -173,8 +176,23 @@ export function wireAIToolsMisc({
       fd.append('image', blob, 'style.png');
       fd.append('prompt', prompt);
       fd.append('strength', String(strength));
+      // Honor the tool's model picker (value is "base_url::model_id"); fall
+      // back to the inpaint picker, whose edit models also style-transfer.
+      const modelSel = document.querySelector('select.ge-tool-model[data-ge-tool-model="style"]')
+        || document.getElementById('ge-ai-inpaint');
+      const selVal = modelSel?.value || '';
+      if (selVal.includes('::')) {
+        const idx = selVal.lastIndexOf('::');
+        fd.append('_endpoint', selVal.slice(0, idx));
+        fd.append('_model', selVal.slice(idx + 2));
+      }
       const res = await fetch(`${apiBase}/api/gallery/style-transfer`, { method: 'POST', credentials: 'same-origin', body: fd });
-      if (!res.ok) throw new Error('Server returned ' + res.status);
+      if (!res.ok) {
+        // Surface the server's reason (e.g. "No image generation endpoint
+        // configured.") instead of an opaque status code.
+        const detail = await res.json().then(d => d.detail || d.error).catch(() => null);
+        throw new Error(detail || ('Server returned ' + res.status));
+      }
       const data = await res.json();
       if (data.image) {
         const img = new Image();

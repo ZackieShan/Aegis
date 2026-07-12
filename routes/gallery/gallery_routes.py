@@ -2,6 +2,7 @@
 
 import os
 import hashlib
+import json
 import logging
 import re
 import uuid
@@ -119,8 +120,44 @@ def _visible_image_endpoint_query(db, owner: str | None):
     return owner_filter(q, ModelEndpoint, owner)
 
 
+# Mirrors the frontend's _isImageModel (settings.js) so an image model served
+# under an llm-typed endpoint (e.g. qwen-image behind llama-swap) is treated
+# as an image source server-side too — the endpoint's model_type alone says
+# nothing about what the aggregator actually serves.
+_IMAGE_MODEL_ID_RE = re.compile(
+    r"image|dall-?e|flux|sd-?xl|sd3|sd-|stable[\s-]*diffusion|diffusion|inpaint|kandinsky|pixart|playground",
+    re.I,
+)
+
+# Edit-capable model ids (mirrors editor/ai-models.js modelCaps): these speak
+# the OpenAI /v1/images/edits shape rather than a bare /images/inpaint route.
+_EDIT_MODEL_ID_RE = re.compile(r"inpaint|edit|fill", re.I)
+
+
+def _endpoint_lists_image_model(ep) -> bool:
+    try:
+        cached = json.loads(getattr(ep, "cached_models", None) or "[]")
+    except Exception:
+        cached = []
+    return any(_IMAGE_MODEL_ID_RE.search(str(m) or "") for m in cached)
+
+
+def _visible_gallery_endpoints(db, owner: str | None):
+    """Endpoints usable for gallery image ops: image-typed rows first, then any
+    enabled endpoint whose cached model list contains an image-capable id."""
+    from src.auth_helpers import owner_filter
+    q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)  # noqa: E712
+    rows = owner_filter(q, ModelEndpoint, owner).all()
+    image_typed = [ep for ep in rows if getattr(ep, "model_type", None) == "image"]
+    by_models = [
+        ep for ep in rows
+        if getattr(ep, "model_type", None) != "image" and _endpoint_lists_image_model(ep)
+    ]
+    return image_typed + by_models
+
+
 def _first_visible_image_endpoint(db, owner: str | None):
-    endpoints = _visible_image_endpoint_query(db, owner).all()
+    endpoints = _visible_gallery_endpoints(db, owner)
     if owner:
         for ep in endpoints:
             if getattr(ep, "owner", None) == owner:
@@ -133,13 +170,34 @@ def _visible_image_endpoint_for_base(db, base: str, owner: str | None):
     if not target:
         return None
     fallback = None
-    for ep in _visible_image_endpoint_query(db, owner).all():
+    for ep in _visible_gallery_endpoints(db, owner):
         if _normalize_image_endpoint_base(getattr(ep, "base_url", "")) == target:
             if owner and getattr(ep, "owner", None) == owner:
                 return ep
             if fallback is None:
                 fallback = ep
     return fallback
+
+
+def _local_edit_size(width: int, height: int) -> str:
+    """Cap a local-diffusion edit render to 512-family sizes, preserving aspect.
+
+    Edit models carry a reference-image conditioning pass on top of the
+    diffusion weights, so they need more VRAM than plain generation — a
+    768x768 edit on the 24GB card with the Q8 model spills into system RAM
+    (verified: 512x512 renders in ~30s, 768x768 crawled for 7+ minutes until
+    the engine's idle TTL killed it). The result is composited back onto the
+    full-res source, so the cap costs sharpness only inside the edited region.
+    """
+    try:
+        w, h = int(width or 0), int(height or 0)
+    except Exception:
+        w = h = 0
+    if w > h * 1.15:
+        return "768x512"
+    if h > w * 1.15:
+        return "512x768"
+    return "512x512"
 
 
 async def _fetch_result_image_b64(url: str) -> Optional[str]:
@@ -426,7 +484,13 @@ def setup_gallery_routes() -> APIRouter:
     # ---- POST /api/gallery/style-transfer ----
     @router.post("/api/gallery/style-transfer")
     async def gallery_style_transfer(request: Request):
-        """Style transfer using img2img with the diffusion server."""
+        """Full-image AI edit / style transfer.
+
+        Honors the editor's model selection (_endpoint/_model form fields).
+        Edit-capable models (qwen-image-edit, *-inpaint, *-fill) go through the
+        OpenAI /v1/images/edits multipart shape with the whole frame as the
+        reference image; everything else keeps the legacy img2img-style JSON
+        POST to /v1/images/generations (aegis's own diffusion server)."""
         import base64, httpx
 
         user = require_privilege(request, "can_generate_images")
@@ -434,32 +498,90 @@ def setup_gallery_routes() -> APIRouter:
         file = form.get("image")
         prompt = form.get("prompt", "")
         strength = float(form.get("strength", "0.55"))
+        requested_base = str(form.get("_endpoint", "") or "").rstrip("/")
+        chosen_model = str(form.get("_model", "") or "").strip()
         if not file: raise HTTPException(400, "No image")
+
+        if requested_base:
+            from src.url_safety import check_outbound_url
+            ok, reason = check_outbound_url(
+                requested_base,
+                block_private=os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true",
+            )
+            if not ok:
+                raise HTTPException(400, f"Rejected endpoint URL: {reason}")
 
         image_bytes = await read_upload_limited(file, GALLERY_TRANSFORM_UPLOAD_MAX_BYTES, "Image upload")
         b64 = base64.b64encode(image_bytes).decode()
 
         db = SessionLocal()
         try:
-            ep = _first_visible_image_endpoint(db, user)
+            ep = None
+            if requested_base:
+                ep = _visible_image_endpoint_for_base(db, requested_base, user)
+            if not ep:
+                ep = _first_visible_image_endpoint(db, user)
         finally:
             db.close()
 
         if not ep:
-            raise HTTPException(400, "No image generation endpoint configured.")
+            raise HTTPException(400, "No image generation endpoint configured. Serve an image model (e.g. qwen-image) and it will be picked up automatically.")
 
         base_url = ep.base_url.rstrip("/")
         if not base_url.endswith("/v1"):
             base_url += "/v1"
+        api_key = getattr(ep, "api_key", None)
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        is_local = not _is_openai_api_base(base_url)
+        timeout = httpx.Timeout(connect=30.0, read=600.0 if is_local else 180.0, write=60.0, pool=30.0)
+
+        if chosen_model and _EDIT_MODEL_ID_RE.search(chosen_model):
+            # Instruction-edit path: whole image as reference, no mask.
+            try:
+                from PIL import Image
+                import io
+                w, h = Image.open(io.BytesIO(image_bytes)).size
+            except Exception:
+                w = h = 768
+            data = {
+                "model": chosen_model,
+                "prompt": prompt,
+                "n": "1",
+                "size": _local_edit_size(w, h) if is_local else "1024x1024",
+            }
+            files = {"image": ("source.png", image_bytes, "image/png")}
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(
+                        _join_checked_gallery_endpoint(base_url, "/images/edits"),
+                        headers=headers, data=data, files=files,
+                    )
+                    if resp.status_code == 200:
+                        item = resp.json().get("data", [{}])[0]
+                        img_data = item.get("b64_json", "")
+                        if not img_data and item.get("url"):
+                            img_data = await _fetch_result_image_b64(item["url"])
+                        if img_data:
+                            return {"image": img_data}
+                    logger.error("style_transfer edits: status %s %s", resp.status_code, resp.text[:200])
+                    return {"error": f"Image edit failed ({resp.status_code})"}
+            except httpx.TimeoutException:
+                return {"error": "Image edit timed out — the model may still be loading; try again."}
+            except Exception:
+                logger.exception("style_transfer: edits request failed")
+                return {"error": "Image edit failed"}
 
         try:
-            async with httpx.AsyncClient(timeout=180) as client:
-                resp = await client.post(f"{base_url}/images/generations", json={
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                payload = {
                     "prompt": prompt,
                     "image": b64,
                     "strength": strength,
                     "response_format": "b64_json",
-                })
+                }
+                if chosen_model:
+                    payload["model"] = chosen_model
+                resp = await client.post(f"{base_url}/images/generations", json=payload, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     img_data = data.get("data", [{}])[0].get("b64_json", "")
@@ -1128,14 +1250,19 @@ def setup_gallery_routes() -> APIRouter:
             base += "/v1"
 
         is_openai = _is_openai_api_base(base)
+        # Local edit-capable models (qwen-image-edit, *-inpaint, *-fill) speak
+        # the same OpenAI /v1/images/edits multipart shape — route them through
+        # the edits branch too instead of the bare /images/inpaint route that
+        # only aegis's own diffusion server implements.
+        use_edits = is_openai or bool(chosen_model and _EDIT_MODEL_ID_RE.search(chosen_model))
 
-        if is_openai:
-            # OpenAI path: /v1/images/edits with gpt-image-1.
+        if use_edits:
+            # /v1/images/edits path (OpenAI or a local edits-capable server).
             # Mask convention differs from Stable Diffusion:
             #   SD:     white pixels = regenerate, black = keep
             #   OpenAI: transparent alpha = regenerate, opaque = keep
             # So we convert the incoming PNG mask into an alpha-channel PNG.
-            if not api_key:
+            if is_openai and not api_key:
                 raise HTTPException(400, "OpenAI endpoint has no api_key stored — edit it in Endpoints settings.")
             import base64, io
             try:
@@ -1170,14 +1297,17 @@ def setup_gallery_routes() -> APIRouter:
 
             width = int(body.get("width") or 1024)
             height = int(body.get("height") or 1024)
-            # gpt-image-1 only accepts 1024x1024, 1024x1536, 1536x1024 (no 'auto'
-            # for edits). Pick the closest to preserve aspect, default square.
-            if width > height * 1.15:
-                size = "1536x1024"
-            elif height > width * 1.15:
-                size = "1024x1536"
+            if is_openai:
+                # gpt-image-1 only accepts 1024x1024, 1024x1536, 1536x1024 (no
+                # 'auto' for edits). Pick the closest to preserve aspect.
+                if width > height * 1.15:
+                    size = "1536x1024"
+                elif height > width * 1.15:
+                    size = "1024x1536"
+                else:
+                    size = "1024x1024"
             else:
-                size = "1024x1024"
+                size = _local_edit_size(width, height)
 
             files = {
                 "image": ("source.png", src_buf.getvalue(), "image/png"),
@@ -1194,13 +1324,16 @@ def setup_gallery_routes() -> APIRouter:
                 "size": size,
                 "n": "1",
             }
-            headers = {"Authorization": f"Bearer {api_key}"}
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            # A local edit model cold-loads 20GB+ of weights before the first
+            # render — give it the same 600s read budget as do_generate_image.
+            _edit_timeout = httpx.Timeout(connect=30.0, read=120.0 if is_openai else 600.0, write=60.0, pool=30.0)
             try:
-                async with httpx.AsyncClient(timeout=120) as client:
+                async with httpx.AsyncClient(timeout=_edit_timeout) as client:
                     r = await client.post(_join_checked_gallery_endpoint(base, "/images/edits"), headers=headers, data=data, files=files)
                     if r.status_code != 200:
-                        logger.error("inpaint_proxy OpenAI edit: status %s", r.status_code)
-                        raise HTTPException(r.status_code, "OpenAI edit failed")
+                        logger.error("inpaint_proxy edits: status %s %s", r.status_code, r.text[:200])
+                        raise HTTPException(r.status_code, "Image edit failed")
                     result = r.json()
                     raw_b64 = None
                     if result.get("data"):
@@ -1211,7 +1344,7 @@ def setup_gallery_routes() -> APIRouter:
                         elif item.get("url"):
                             raw_b64 = await _fetch_result_image_b64(item["url"])
                     if not raw_b64:
-                        raise HTTPException(502, "OpenAI returned no image")
+                        raise HTTPException(502, "Edit endpoint returned no image")
 
                     # OpenAI's edits API doesn't truly preserve unmasked
                     # pixels — gpt-image-1 regenerates the whole image,
@@ -1238,7 +1371,7 @@ def setup_gallery_routes() -> APIRouter:
                         logger.warning(f"Inpaint compose failed, returning raw: {comp_err}")
                         return {"image": raw_b64}
             except httpx.TimeoutException:
-                raise HTTPException(504, "OpenAI inpaint timed out (120s)")
+                raise HTTPException(504, "Image edit timed out — a local edit model may still be loading; try again.")
 
         # Self-hosted diffusion server path
         try:
