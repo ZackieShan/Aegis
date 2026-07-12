@@ -157,3 +157,66 @@ def test_autotune_applies_and_skips(monkeypatch, tmp_path):
     by = {a["model"]: a for a in res["applied"]}
     assert by["qwen3-coder-30b"]["new_ctx"] == 40960   # applied
     assert "skipped" in by["big-27b"]                   # partial offload skipped
+
+
+# ── GGUF metadata cache (the "/engine fails to fetch" fix) ───────────────────
+def test_gguf_meta_cached_by_size_and_mtime(monkeypatch, tmp_path):
+    f = tmp_path / "m.gguf"
+    f.write_bytes(b"\0" * 64)
+    monkeypatch.setattr(t, "_meta_cache_path", lambda: str(tmp_path / "cache.json"))
+    monkeypatch.setattr(t, "_META_CACHE", {}, raising=False)
+    monkeypatch.setattr(t, "_META_CACHE_LOADED", True, raising=False)
+    calls = {"n": 0}
+
+    def _fake_parse(path):
+        calls["n"] += 1
+        return {"arch": "x", "n_layers": 1, "n_kv_heads": 1,
+                "key_length": 8, "value_length": 8, "n_ctx_train": 4096}
+    monkeypatch.setattr(t, "_gguf_meta_uncached", _fake_parse)
+
+    m1 = t.gguf_meta(str(f))
+    m2 = t.gguf_meta(str(f))
+    assert m1 == m2 and m1["arch"] == "x"
+    assert calls["n"] == 1, "second read must come from the cache"
+
+    # Changing the file invalidates the cached entry.
+    f.write_bytes(b"\0" * 128)
+    t.gguf_meta(str(f))
+    assert calls["n"] == 2
+
+
+def test_gguf_meta_empty_parse_not_cached(monkeypatch, tmp_path):
+    f = tmp_path / "m.gguf"
+    f.write_bytes(b"\0" * 64)
+    monkeypatch.setattr(t, "_meta_cache_path", lambda: str(tmp_path / "cache.json"))
+    monkeypatch.setattr(t, "_META_CACHE", {}, raising=False)
+    monkeypatch.setattr(t, "_META_CACHE_LOADED", True, raising=False)
+    calls = {"n": 0}
+
+    def _fake_parse(path):
+        calls["n"] += 1
+        return {}  # e.g. `gguf` package missing
+    monkeypatch.setattr(t, "_gguf_meta_uncached", _fake_parse)
+
+    assert t.gguf_meta(str(f)) == {}
+    assert t.gguf_meta(str(f)) == {}
+    assert calls["n"] == 2, "empty parses must be retried, not remembered"
+
+
+def test_gguf_meta_cache_persists(monkeypatch, tmp_path):
+    f = tmp_path / "m.gguf"
+    f.write_bytes(b"\0" * 64)
+    cache_file = tmp_path / "cache.json"
+    monkeypatch.setattr(t, "_meta_cache_path", lambda: str(cache_file))
+    monkeypatch.setattr(t, "_META_CACHE", {}, raising=False)
+    monkeypatch.setattr(t, "_META_CACHE_LOADED", True, raising=False)
+    monkeypatch.setattr(t, "_gguf_meta_uncached", lambda p: {"arch": "x", "n_layers": 2})
+    t.gguf_meta(str(f))
+    assert cache_file.exists()
+
+    # Fresh process: empty in-memory cache, loads from disk, no re-parse.
+    monkeypatch.setattr(t, "_META_CACHE", {}, raising=False)
+    monkeypatch.setattr(t, "_META_CACHE_LOADED", False, raising=False)
+    monkeypatch.setattr(t, "_gguf_meta_uncached",
+                        lambda p: pytest.fail("should have been served from the persisted cache"))
+    assert t.gguf_meta(str(f))["arch"] == "x"

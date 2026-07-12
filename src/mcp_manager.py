@@ -5,6 +5,7 @@ Manages connections to MCP (Model Context Protocol) tool servers.
 Each server exposes tools that are made available to the agent loop.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -23,10 +24,17 @@ def _format_mcp_connection_error(name: str, command: str = "", args: Optional[Li
     lower_command = command_line.lower()
 
     if "@playwright/mcp" in lower_command:
+        # `command` is the already-resolved npx path (often the portable
+        # engine copy, which is NOT on PATH) — print it verbatim so the fix
+        # command is copy-paste runnable. Same for the pinned package spec.
+        npx = command or "npx"
+        pkg = next((a for a in args if a.startswith("@playwright/mcp")), "@playwright/mcp@latest")
         return (
             f"{raw_error}\n\n"
             "Browser MCP could not start. On fresh installs, cache the Playwright MCP package once before connecting:\n\n"
-            "npx -y @playwright/mcp@latest --version\n\n"
+            f"{npx} -y {pkg} --version\n\n"
+            f"If no browser is installed yet, also run:\n\n"
+            f"{npx} -y {pkg} install-browser chromium --only-shell\n\n"
             "Then restart Aegis and reconnect the Browser MCP server."
         )
 
@@ -144,6 +152,13 @@ class McpManager:
         self._stacks: Dict[str, Any] = {}
         # server_id -> background connect task (HTTP transport / OAuth)
         self._connect_tasks: Dict[str, Any] = {}
+        # stdio only: server_id -> (owner_task, close_event). The AsyncExitStack
+        # for a stdio server is entered AND exited inside the owner task, so
+        # anyio's cancel scope is never crossed between tasks (the shutdown
+        # "Attempted to exit cancel scope in a different task" RuntimeError,
+        # which also left child processes half-killed).
+        self._owner_tasks: Dict[str, Any] = {}
+        self._close_events: Dict[str, Any] = {}
         # Tracking updates to tools/connections for RAG indexing / prompt cache
         self._generation = 0
 
@@ -179,70 +194,84 @@ class McpManager:
             return False
 
     async def _connect_stdio(self, server_id: str, name: str, command: str, args: List[str], env: Dict[str, str]) -> bool:
-        """Connect to an MCP server via stdio transport."""
+        """Connect to an MCP server via stdio transport.
+
+        The stdio ClientSession + subprocess live behind an AsyncExitStack that
+        anyio binds to the entering task's cancel scope. Entering it here and
+        aclose()-ing it later from the shutdown/lifespan task raised "Attempted
+        to exit cancel scope in a different task" and could leave the child
+        process half-terminated. So a dedicated OWNER task enters, holds, and
+        exits the stack — one task for the whole lifecycle. This coroutine just
+        waits for the owner to report ready and returns the bool."""
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
             from contextlib import AsyncExitStack
+        except ImportError:
+            logger.warning("MCP package not installed. Install with: pip install mcp")
+            self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
+            return False
 
-            server_params = StdioServerParameters(
-                command=command,
-                args=args,
-                env={**os.environ, **env} if env else None,
-            )
+        server_params = StdioServerParameters(
+            command=command,
+            args=args,
+            env={**os.environ, **env} if env else None,
+        )
+        ready: "asyncio.Future[bool]" = asyncio.get_running_loop().create_future()
+        close_event = asyncio.Event()
 
+        async def _owner():
             stack = AsyncExitStack()
             try:
                 transport = await stack.enter_async_context(stdio_client(server_params))
                 read_stream, write_stream = transport
                 session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-
                 await session.initialize()
-
-                # Discover tools
                 tools_result = await session.list_tools()
-            except Exception:
-                await stack.aclose()
-                raise
-            tools = []
-            for tool in tools_result.tools:
-                tools.append({
+                tools = [{
                     "name": tool.name,
                     "description": tool.description or "",
                     "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
-                    # MCP tool annotations (readOnlyHint / destructiveHint) drive
-                    # plan-mode read-only gating. Absent on many servers, so we
-                    # fall back to a name heuristic in mcp_tool_is_readonly().
                     "annotations": getattr(tool, 'annotations', None),
-                })
+                } for tool in tools_result.tools]
 
-            self._sessions[server_id] = session
-            self._stacks[server_id] = stack
-            self._tools[server_id] = tools
-            # Extract identity hints from env vars (e.g. email address, API name)
-            # so tool descriptions can distinguish between multiple instances of
-            # the same MCP server (e.g. two email accounts).
-            identity_hints = []
-            for k, v in (env or {}).items():
-                k_lower = k.lower()
-                if any(x in k_lower for x in ['email_address', 'account', 'user', 'username']):
-                    identity_hints.append(v)
-            identity = ", ".join(identity_hints) if identity_hints else ""
+                self._sessions[server_id] = session
+                self._tools[server_id] = tools
+                identity_hints = [v for k, v in (env or {}).items()
+                                  if any(x in k.lower() for x in ['email_address', 'account', 'user', 'username'])]
+                identity = ", ".join(identity_hints) if identity_hints else ""
+                self._connections[server_id] = {
+                    "status": "connected", "name": name, "transport": "stdio",
+                    "tool_count": len(tools), "identity": identity,
+                }
+                logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via stdio")
+                if not ready.done():
+                    ready.set_result(True)
+                # Hold the context open in THIS task until asked to close.
+                await close_event.wait()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                if not ready.done():
+                    ready.set_exception(e)
+            finally:
+                # Exit the stack in the SAME task that entered it → clean shutdown.
+                try:
+                    await stack.aclose()
+                except Exception as e:
+                    logger.debug(f"stdio stack aclose for {server_id}: {e}")
 
-            self._connections[server_id] = {
-                "status": "connected",
-                "name": name,
-                "transport": "stdio",
-                "tool_count": len(tools),
-                "identity": identity,
-            }
+        task = asyncio.create_task(_owner(), name=f"mcp-owner-{server_id}")
+        self._owner_tasks[server_id] = task
+        self._close_events[server_id] = close_event
 
-            logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via stdio")
-            return True
-
-        except ImportError:
-            logger.warning("MCP package not installed. Install with: pip install mcp")
-            self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
+        try:
+            return await ready
+        except Exception as e:
+            logger.error(f"Failed to connect MCP server {name} ({server_id}) via stdio: {e}")
+            self._connections[server_id] = {"status": "error", "error": str(e), "name": name}
+            self._owner_tasks.pop(server_id, None)
+            self._close_events.pop(server_id, None)
             return False
 
     async def _connect_sse(self, server_id: str, name: str, url: str) -> bool:
@@ -390,6 +419,27 @@ class McpManager:
         except Exception:
             pass
 
+        # stdio servers: signal the owner task to exit its own stack (same
+        # task that entered it), then await it so the child process is fully
+        # reaped before we return.
+        owner = self._owner_tasks.pop(server_id, None)
+        close_event = self._close_events.pop(server_id, None)
+        if owner is not None:
+            if close_event is not None:
+                close_event.set()
+            try:
+                await asyncio.wait_for(asyncio.shield(owner), timeout=8)
+            except asyncio.TimeoutError:
+                logger.warning(f"MCP owner task for {server_id} didn't exit in time; cancelling")
+                owner.cancel()
+                try:
+                    await owner
+                except (asyncio.CancelledError, Exception):
+                    pass
+            except (asyncio.CancelledError, Exception) as e:
+                logger.debug(f"MCP owner task for {server_id} ended: {e}")
+
+        # Non-stdio (SSE/HTTP) transports still use the shared _stacks path.
         stack = self._stacks.pop(server_id, None)
         if stack:
             try:
@@ -518,7 +568,33 @@ class McpManager:
     async def _reconnect_builtin(self, server_id: str) -> bool:
         """Tear down and reconnect a crashed builtin MCP server."""
         import sys
-        from src.builtin_mcp import _BUILTIN_SERVERS
+        from src.builtin_mcp import _BUILTIN_SERVERS, _BUILTIN_NPX_SERVERS
+
+        # NPX builtins (the Browser — the server most likely to crash
+        # mid-session). Without this branch the auto-reconnect was a no-op
+        # for it: every browser call after a node/browser crash failed
+        # forever until a manual Admin → MCP reconnect. Recomputing the args
+        # lets the fallback ladder pick a different browser rung when the
+        # crash was launch-related.
+        if server_id in _BUILTIN_NPX_SERVERS:
+            from src.builtin_mcp import _engine_node_env, _find_npx
+            cfg = _BUILTIN_NPX_SERVERS[server_id]
+            await self.disconnect_server(server_id)
+            try:
+                ok = await self.connect_server(
+                    server_id=server_id,
+                    name=cfg["name"],
+                    transport="stdio",
+                    command=_find_npx(),
+                    args=cfg["args_factory"]() if "args_factory" in cfg else cfg.get("args", []),
+                    env=_engine_node_env(),
+                )
+                if ok:
+                    logger.info(f"Reconnected builtin NPX MCP server: {cfg['name']}")
+                return ok
+            except Exception as e:
+                logger.error(f"Failed to reconnect builtin NPX MCP server {cfg['name']}: {e}")
+                return False
 
         if server_id not in _BUILTIN_SERVERS:
             return False
@@ -526,6 +602,11 @@ class McpManager:
         script_rel, name = _BUILTIN_SERVERS[server_id]
         base_dir = get_app_root()
         script_path = os.path.join(base_dir, script_rel)
+        from src.runtime_paths import get_python_exe
+        python = get_python_exe()
+        if not python:
+            logger.error(f"Cannot reconnect {name}: no Python interpreter (frozen build)")
+            return False
 
         # Clean up old connection
         await self.disconnect_server(server_id)
@@ -535,7 +616,7 @@ class McpManager:
                 server_id=server_id,
                 name=name,
                 transport="stdio",
-                command=sys.executable,
+                command=python,
                 args=[script_path],
                 env={"PYTHONPATH": base_dir},
             )
@@ -618,7 +699,21 @@ class McpManager:
         return disabled_map, qualified
 
     def is_builtin(self, server_id: str) -> bool:
-        """Check if a server is a built-in (auto-registered) server."""
+        """Check if a server is a built-in (auto-registered) server.
+
+        Delegates to the authoritative BUILTIN_MCP_IDS set so this stays in
+        sync with what register_builtin_servers actually creates — the old
+        hardcoded {image_gen,memory,rag,email} literal OMITTED the four
+        toolbox servers (osint/troubleshoot/market/web), so a crashed toolbox
+        was never routed through _reconnect_builtin and stayed dead until a
+        manual reconnect. The literal is kept only as an import-failure
+        fallback."""
+        try:
+            from src.builtin_mcp import BUILTIN_MCP_IDS
+            if server_id in BUILTIN_MCP_IDS:
+                return True
+        except Exception:
+            pass
         return server_id.startswith("builtin_") or server_id in {
             "image_gen",
             "memory",

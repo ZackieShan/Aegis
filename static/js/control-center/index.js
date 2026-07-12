@@ -11,10 +11,13 @@
  *   panel           → click the target rail/tool button.
  */
 
+import { trapFocus } from '../modalA11y.js';
+
 const DOT = { ok: '#3ecf8e', warn: '#f5a623', off: '#8a7fa8', error: '#e5484d' };
 const DOT_LABEL = { ok: 'working', warn: 'needs a step', off: 'not set up', error: 'error' };
 
 let _built = false;
+let _releaseFocus = null;
 
 function _el(tag, cls, html) {
   const e = document.createElement(tag);
@@ -121,6 +124,41 @@ function _act(action) {
   }
 }
 
+// Direct in-panel action: call the endpoint, show the outcome on the card,
+// then refresh so statuses (e.g. "loaded now") update. No chat round-trip —
+// this is the "tuning belongs in the UI" surface.
+async function _apiAction(action, btn, card) {
+  const detail = card.querySelector('.cc-detail');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch(action.value, { method: action.method || 'POST', credentials: 'same-origin' });
+    const d = await r.json().catch(() => ({}));
+    let msg;
+    if (r.ok && d.ok !== false) {
+      if (Array.isArray(d.applied)) {
+        const parts = d.applied.map(a => a.new_ctx ? `${a.model} → ${Math.round(a.new_ctx / 1024)}K`
+          : a.unchanged ? `${a.model} ✓` : `${a.model} skipped`);
+        msg = '✓ ' + (parts.join(' · ') || 'nothing to tune');
+      } else if (Array.isArray(d.unloaded)) {
+        msg = d.unloaded.length ? `✓ freed: ${d.unloaded.join(', ')}` : '✓ nothing was loaded';
+      } else {
+        msg = '✓ ' + (d.note || 'done');
+      }
+    } else {
+      msg = '✗ ' + (d.detail || d.error || ('HTTP ' + r.status));
+    }
+    if (detail) detail.textContent = msg;
+    setTimeout(_load, 2500);
+  } catch (e) {
+    if (detail) detail.textContent = '✗ ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
 function _card(item) {
   const card = _el('div', 'cc-card');
   const top = _el('div', 'cc-card-top');
@@ -131,14 +169,24 @@ function _card(item) {
   top.appendChild(_el('span', 'cc-name', _esc(item.name)));
   card.appendChild(top);
   card.appendChild(_el('div', 'cc-detail', _esc(item.detail || '')));
-  if (item.action && item.action.type !== 'none') {
+  const hasMain = item.action && item.action.type !== 'none';
+  const extras = Array.isArray(item.extra_actions) ? item.extra_actions : [];
+  if (hasMain || extras.length) {
     const actions = _el('div', 'cc-card-actions');
-    const label = (item.action.type === 'chat') ? 'Try it'
-      : (item.action.type === 'panel' || item.action.type === 'settings') ? 'Open'
-      : 'Run';
-    const btn = _el('button', 'cc-try' + (item.status === 'off' ? ' secondary' : ''), label);
-    btn.addEventListener('click', () => _act(item.action));
-    actions.appendChild(btn);
+    if (hasMain) {
+      const label = (item.action.type === 'chat') ? 'Try it'
+        : (item.action.type === 'panel' || item.action.type === 'settings') ? 'Open'
+        : 'Run';
+      const btn = _el('button', 'cc-try' + (item.status === 'off' ? ' secondary' : ''), label);
+      btn.addEventListener('click', () => _act(item.action));
+      actions.appendChild(btn);
+    }
+    extras.forEach(a => {
+      const b = _el('button', 'cc-try secondary', _esc(a.label || 'Run'));
+      if (a.type === 'api') b.addEventListener('click', () => _apiAction(a, b, card));
+      else b.addEventListener('click', () => _act(a));
+      actions.appendChild(b);
+    });
     card.appendChild(actions);
   }
   return card;
@@ -175,8 +223,19 @@ async function _load() {
   }
 }
 
-export async function open() { _build(); _modal().classList.remove('hidden'); await _load(); }
-export function close() { const m = _modal(); if (m) m.classList.add('hidden'); }
+export async function open() {
+  _build();
+  _modal().classList.remove('hidden');
+  const panel = _modal().querySelector('.cc-panel');
+  if (_releaseFocus) _releaseFocus();
+  _releaseFocus = trapFocus(panel, { onEscape: close });
+  await _load();
+}
+export function close() {
+  const m = _modal();
+  if (m) m.classList.add('hidden');
+  if (_releaseFocus) { _releaseFocus(); _releaseFocus = null; }
+}
 export function isOpen() { const m = _modal(); return !!m && !m.classList.contains('hidden'); }
 export function toggle() { isOpen() ? close() : open(); }
 

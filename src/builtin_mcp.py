@@ -128,21 +128,170 @@ def _find_playwright_headless_shell() -> "str | None":
     return sorted(matches, key=_ver)[-1]
 
 
+# Known-good @playwright/mcp version. _playwright_mcp_spec() prefers whatever
+# is already in the npx cache (exact offline resolution, no surprise upgrade);
+# this is the fallback pin for fresh installs. Bump deliberately.
+_PLAYWRIGHT_MCP_FALLBACK_VERSION = "0.0.78"
+
+
+def _playwright_mcp_spec() -> str:
+    """Pinned npm spec for @playwright/mcp.
+
+    '@latest' defeated the pre-connect cache guard: the guard matches the
+    cached package by NAME only, then npx re-resolves 'latest' against the
+    registry — a new release triggers exactly the multi-minute download/hang
+    the guard exists to prevent (and breaks offline). Resolving the CACHED
+    version pins npx to the exact installed tree.
+    """
+    for cache_root in _npm_cache_roots():
+        npx_root = os.path.join(cache_root, "_npx")
+        if not os.path.isdir(npx_root):
+            continue
+        try:
+            entries = list(os.scandir(npx_root))
+        except OSError:
+            continue
+        for entry in entries:
+            pkg_json = os.path.join(entry.path, "node_modules", "@playwright", "mcp", "package.json")
+            try:
+                with open(pkg_json, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                ver = str(data.get("version", "")).strip()
+                if data.get("name") == "@playwright/mcp" and ver:
+                    return f"@playwright/mcp@{ver}"
+            except (OSError, ValueError):
+                continue
+    return f"@playwright/mcp@{_PLAYWRIGHT_MCP_FALLBACK_VERSION}"
+
+
+_chromium_probe_cache: "dict[str, bool]" = {}
+
+
+def _find_playwright_chromium() -> "str | None":
+    """Locate an installed FULL Playwright chromium that actually launches.
+
+    Fallback rung 2: only consulted when the headless shell is absent. The
+    full build is probed with a quick --version run because on some Windows
+    boxes it fails a side-by-side (VC++ SxS) runtime check at launch — a
+    browser that can't start must not be pinned."""
+    import glob
+    import re
+
+    patterns = []
+    if IS_WINDOWS:
+        local = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
+        patterns.append(os.path.join(local, "ms-playwright", "chromium-*",
+                                     "chrome-win*", "chrome.exe"))
+    else:
+        home = os.path.expanduser("~")
+        patterns += [
+            os.path.join(home, ".cache", "ms-playwright", "chromium-*", "chrome-linux*", "chrome"),
+            os.path.join(home, "Library", "Caches", "ms-playwright", "chromium-*",
+                         "chrome-mac*", "Chromium.app", "Contents", "MacOS", "Chromium"),
+        ]
+    matches: "list[str]" = []
+    for p in patterns:
+        matches += glob.glob(p)
+    if not matches:
+        return None
+
+    def _ver(path: str) -> int:
+        m = re.search(r"chromium-(\d+)", path)
+        return int(m.group(1)) if m else 0
+
+    for exe in sorted(matches, key=_ver, reverse=True):
+        if exe not in _chromium_probe_cache:
+            try:
+                r = subprocess.run([exe, "--version"], capture_output=True, timeout=5)
+                _chromium_probe_cache[exe] = r.returncode == 0
+            except (OSError, subprocess.TimeoutExpired, ValueError):
+                _chromium_probe_cache[exe] = False
+        if _chromium_probe_cache[exe]:
+            return exe
+    return None
+
+
+def _find_browser_channel() -> "str | None":
+    """Fallback rung 3: a system browser Playwright can drive by channel name.
+
+    Edge ships with Windows (Chromium-based, fully Playwright-compatible), so
+    a machine with no Playwright download at all can still browse."""
+    if IS_WINDOWS:
+        pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        local = os.environ.get("LOCALAPPDATA", "")
+        candidates = [
+            ("msedge", os.path.join(pf86, "Microsoft", "Edge", "Application", "msedge.exe")),
+            ("msedge", os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe")),
+            ("chrome", os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe")),
+            ("chrome", os.path.join(pf86, "Google", "Chrome", "Application", "chrome.exe")),
+            ("chrome", os.path.join(local, "Google", "Chrome", "Application", "chrome.exe") if local else ""),
+        ]
+        for channel, path in candidates:
+            if path and os.path.isfile(path):
+                return channel
+        return None
+    for channel, name in (("chrome", "google-chrome"), ("chrome", "chrome"),
+                          ("msedge", "microsoft-edge"), ("chromium", "chromium")):
+        if shutil.which(name):
+            return channel
+    return None
+
+
 def _browser_server_args() -> "list[str]":
-    """Args for the built-in Browser MCP; pins the headless shell when present."""
-    args = ["-y", "@playwright/mcp@latest", "--headless", "--caps", "vision"]
+    """Args for the built-in Browser MCP — a FALLBACK LADDER, not a single rung.
+
+    In --headless mode playwright demands the exact-revision chromium headless
+    shell unless told otherwise, so each rung pins an explicit browser:
+      1. chrome-headless-shell (lightest, most robust on Windows)
+      2. full Playwright chromium — only if a --version probe passes (catches
+         the known Windows side-by-side launch failure before committing)
+      3. system Edge/Chrome via --browser <channel> (always present on Windows)
+      4. bare args — connect still works; browser launch will fail with
+         playwright's own message naming the install command.
+    """
+    args = ["-y", _playwright_mcp_spec(), "--headless", "--caps", "vision"]
     shell = _find_playwright_headless_shell()
     if shell:
-        args += ["--executable-path", shell]
+        return args + ["--executable-path", shell]
+    chromium = _find_playwright_chromium()
+    if chromium:
+        logger.info(f"Browser MCP: no headless shell; using full chromium {chromium}")
+        return args + ["--executable-path", chromium]
+    channel = _find_browser_channel()
+    if channel:
+        logger.info(f"Browser MCP: no Playwright browser installed; using system channel '{channel}'")
+        return args + ["--browser", channel]
+    logger.warning(
+        "Browser MCP: no usable browser found. Install one with: "
+        f"{_find_npx()} -y {_playwright_mcp_spec()} install-browser chromium --only-shell"
+    )
     return args
 
 
-# NPX-based built-in servers (run via npx, not Python)
+def _engine_node_env() -> "dict[str, str]":
+    """PATH override so the npx child can find node.exe.
+
+    npx.cmd resolves 'node' via PATH; the portable engine Node isn't on the
+    system PATH unless the app was started by launch-windows.ps1, so a bare
+    app start (uvicorn/IDE) made the Browser server die with
+    '\"node\" is not recognized'. mcp_manager merges this over os.environ."""
+    npx = _find_npx()
+    node_dir = os.path.dirname(npx) if os.path.sep in npx else ""
+    if not node_dir:
+        return {}
+    return {"PATH": node_dir + os.pathsep + os.environ.get("PATH", "")}
+
+
+# NPX-based built-in servers (run via npx, not Python). args are computed at
+# register/connect time (not import time) so the fallback-ladder probes never
+# run during a cold module import (e.g. tests), and a reconnect can pick a
+# different rung than the original launch.
 _BUILTIN_NPX_SERVERS = {
     "builtin_browser": {
         "name": "Built-in: Browser",
         "command": "npx",
-        "args": _browser_server_args(),
+        "args_factory": _browser_server_args,
     }
 }
 
@@ -225,7 +374,20 @@ async def register_builtin_servers(mcp_manager):
         return
 
     base_dir = get_app_root()
-    python = sys.executable
+    from src.runtime_paths import get_python_exe
+    python = get_python_exe()
+    if not python:
+        # Frozen build: sys.executable is Aegis.exe — spawning it with a
+        # script path would fork whole new app instances, one per server.
+        logger.warning(
+            "No Python interpreter available to spawn built-in MCP servers "
+            "(frozen build without a system python). Built-in servers "
+            "(image gen, memory, RAG, email, toolboxes) are disabled — "
+            "install Python and add it to PATH to enable them."
+        )
+        _BUILTIN_SERVERS_TO_START = {}
+    else:
+        _BUILTIN_SERVERS_TO_START = _BUILTIN_SERVERS
 
     async def _connect_python_server(server_id: str, script_path: str, name: str):
         try:
@@ -247,7 +409,7 @@ async def register_builtin_servers(mcp_manager):
         except BaseException as e:
             logger.warning(f"Built-in MCP server {name} error: {type(e).__name__}: {e}")
 
-    for server_id, (script, name) in _BUILTIN_SERVERS.items():
+    for server_id, (script, name) in _BUILTIN_SERVERS_TO_START.items():
         script_path = os.path.join(base_dir, script)
         if not os.path.exists(script_path):
             logger.warning(f"Built-in MCP server script not found: {script_path}")
@@ -271,7 +433,7 @@ async def register_builtin_servers(mcp_manager):
     async def _start_npx_servers():
         await asyncio.sleep(3)  # let Python servers finish first
         for server_id, cfg in _BUILTIN_NPX_SERVERS.items():
-            args = cfg["args"]
+            args = cfg["args_factory"]() if "args_factory" in cfg else cfg["args"]
             # Always upsert the panel row FIRST — even if npx/the package isn't
             # ready — so the server (e.g. the built-in Browser) is DISCOVERABLE
             # and fixable in the admin MCP panel instead of silently vanishing.
@@ -297,7 +459,7 @@ async def register_builtin_servers(mcp_manager):
                     f"{cfg['name']} is not available.\n"
                     f"  Reason: npm package {pkg_spec!r} is not installed in the npx cache.\n"
                     f"  Impact: tools provided by this MCP server will be unavailable.\n"
-                    f"  Fix:    {os.path.basename(npx_path)} -y {pkg_spec} --version\n"
+                    f"  Fix:    {npx_path} -y {pkg_spec} --version\n"
                     f"          (run once, then restart Aegis)\n"
                     f"  Notes:  this server is optional; see README.md "
                     f"'Built-in MCP servers' for details."
@@ -312,6 +474,7 @@ async def register_builtin_servers(mcp_manager):
                     transport="stdio",
                     command=npx_path,
                     args=args,
+                    env=_engine_node_env(),
                 )
                 if ok:
                     logger.info(f"Built-in NPX server registered: {cfg['name']}")

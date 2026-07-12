@@ -141,19 +141,29 @@ def _probe_stt() -> CheckResult:
 
 
 def _probe_browser() -> CheckResult:
-    """Full browser-automation readiness: npx present AND a Playwright browser installed."""
+    """Full browser-automation readiness: npx present AND a usable browser.
+
+    Mirrors the launch fallback ladder in builtin_mcp._browser_server_args:
+    headless shell → full chromium (probe-passing) → system Edge/Chrome."""
     npx = _probe_npx()
     if not npx.ok:
         return npx
     try:
-        from src.builtin_mcp import _find_playwright_headless_shell
-        shell = _find_playwright_headless_shell()
-    except Exception:
-        shell = None
-    if shell:
-        return CheckResult(True, "Playwright MCP ready (npx + chromium headless shell)")
-    return CheckResult(False, "npx is available, but no Playwright browser is installed yet — "
-                              "run `npx @playwright/mcp@latest install-browser chromium`")
+        from src.builtin_mcp import (_find_playwright_headless_shell, _find_playwright_chromium,
+                                     _find_browser_channel, _find_npx, _playwright_mcp_spec)
+        if _find_playwright_headless_shell():
+            return CheckResult(True, "Playwright MCP ready (npx + chromium headless shell)")
+        if _find_playwright_chromium():
+            return CheckResult(True, "Playwright MCP ready (npx + full chromium)")
+        channel = _find_browser_channel()
+        if channel:
+            return CheckResult(True, f"Playwright MCP ready (npx + system {channel} — "
+                                     "install the headless shell for the most robust automation)")
+        fix_cmd = f"{_find_npx()} -y {_playwright_mcp_spec()} install-browser chromium --only-shell"
+        return CheckResult(False, "npx is available, but no usable browser was found — "
+                                  f"run `{fix_cmd}`")
+    except Exception as e:
+        return CheckResult(False, f"browser check errored: {e}")
 
 
 def _probe_coding_agent() -> CheckResult:
@@ -166,6 +176,31 @@ def _probe_coding_agent() -> CheckResult:
         return CheckResult(False, "Aider isn't installed — the coding agent (/code) can't run")
     except Exception as e:
         return CheckResult(False, f"coding agent check errored: {e}")
+
+
+def _browser_pkg_spec() -> str:
+    """Pinned @playwright/mcp spec (cached version preferred, known-good fallback)."""
+    try:
+        from src.builtin_mcp import _playwright_mcp_spec
+        return _playwright_mcp_spec()
+    except Exception:
+        return "@playwright/mcp@0.0.78"
+
+
+def _resolve_npx() -> "str | None":
+    """Same npx resolution the Browser MCP uses (portable engine Node first).
+
+    apply_fix used shutil.which() while the probe used _find_npx() — on a bare
+    app start (portable Node not on PATH) the probe passed but the Fix button
+    said 'npx is not installed'."""
+    try:
+        from src.builtin_mcp import _find_npx
+        exe = _find_npx()
+        if exe and (os.path.sep in exe and os.path.isfile(exe)):
+            return exe
+    except Exception:
+        pass
+    return shutil.which("npx") or shutil.which("npx.cmd")
 
 
 # ── registry ─────────────────────────────────────────────────────────────────
@@ -186,9 +221,10 @@ def _checks() -> List[Check]:
               lambda: _probe_module("fitz", "PyMuPDF"),
               Remedy("pip", "PyMuPDF", "Page rendering for the PDF viewer and form-filling.", restart=True)),
         Check("browser", "Browser automation (Playwright MCP)", "features", _probe_browser,
-              Remedy("npx", "@playwright/mcp@latest",
-                     "Warms the Playwright MCP package. If npx works but no browser is installed, also run "
-                     "`npx @playwright/mcp@latest install-browser chromium`. Requires Node.js (Aegis bundles a portable one at engine/node).",
+              Remedy("npx", _browser_pkg_spec(),
+                     "Warms the Playwright MCP package, then installs the chromium headless shell "
+                     "if no usable browser is present (two-stage; the download can take a few minutes). "
+                     "Requires Node.js (Aegis bundles a portable one at engine/node).",
                      restart=True)),
         Check("opik", "Trace export to opik (optional)", "features",
               lambda: _probe_module("opik", "opik"),
@@ -246,22 +282,43 @@ def apply_fix(check_id: str) -> Dict:
         return {"ok": False, "error": "no remedy for this check"}
     rem = chk.remedy
     if rem.kind == "pip":
+        from src.runtime_paths import get_python_exe
+        python = get_python_exe()
+        if not python:
+            return {"ok": False, "error": "no Python interpreter available for pip "
+                                          "(portable build) — install the package manually."}
         return _run(["pip install", rem.package],
-                    [sys.executable, "-m", "pip", "install", rem.package], rem)
+                    [python, "-m", "pip", "install", rem.package], rem)
     if rem.kind == "npx":
-        exe = shutil.which("npx") or shutil.which("npx.cmd")
+        exe = _resolve_npx()
         if not exe:
             return {"ok": False, "error": "npx (Node.js) is not installed — install Node.js first, then retry."}
-        return _run([exe, rem.package], [exe, "-y", rem.package, "--version"], rem)
+        warm = _run([exe, rem.package], [exe, "-y", rem.package, "--version"], rem)
+        # Browser check: warming the npm package alone can never turn the
+        # check green when no browser is installed — stage 2 installs the
+        # chromium headless shell (the lightest, most Windows-robust build;
+        # --only-shell skips the SxS-prone full chromium). Downloads are
+        # slow, so this stage gets its own generous timeout.
+        if check_id == "browser" and warm.get("ok"):
+            try:
+                from src.builtin_mcp import _find_playwright_headless_shell
+                needs_browser = not _find_playwright_headless_shell()
+            except Exception:
+                needs_browser = True
+            if needs_browser:
+                return _run([exe, rem.package, "install-browser"],
+                            [exe, "-y", rem.package, "install-browser", "chromium", "--only-shell"],
+                            rem, timeout=900)
+        return warm
     return {"ok": False, "error": "this problem has no automatic fix — follow the guidance shown."}
 
 
-def _run(label_parts: List[str], cmd: List[str], rem: Remedy) -> Dict:
+def _run(label_parts: List[str], cmd: List[str], rem: Remedy, timeout: int = 300) -> Dict:
     logger.info("doctor: applying fix: %s", " ".join(label_parts))
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "the fix timed out (300s)."}
+        return {"ok": False, "error": f"the fix timed out ({timeout}s)."}
     except Exception as e:
         return {"ok": False, "error": f"could not run the fix: {e}"}
     tail = ((p.stdout or "") + (p.stderr or "")).strip().splitlines()[-8:]

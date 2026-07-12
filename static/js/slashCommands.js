@@ -1736,6 +1736,19 @@ async function _cmdEngine(args) {
     return true;
   }
 
+  if (sub === 'unload') {
+    await typewriterReply('Unloading engine models to free VRAM…');
+    try {
+      const r = await fetch('/api/engine/unload', { method: 'POST', credentials: 'same-origin' });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) {
+        const what = (d.unloaded || []).length ? '`' + d.unloaded.join('`, `') + '`' : 'nothing was loaded';
+        slashReply(`✓ Engine VRAM freed (${what}). Models reload automatically on next use.`);
+      } else slashReply('✗ ' + (d.detail || d.error || 'unload failed'));
+    } catch (e) { slashReply('Engine unload failed: ' + e.message); }
+    return true;
+  }
+
   if (sub === 'help') {
     slashReply([
       '**Engine tuner** — right-size each model\'s token window to your GPU automatically.',
@@ -1744,6 +1757,7 @@ async function _cmdEngine(args) {
       '&nbsp;&nbsp;`/engine tune` — apply the recommended size to every model',
       '&nbsp;&nbsp;`/engine tune <model>` — auto-tune just one',
       '&nbsp;&nbsp;`/engine set <model> <tokens>` — set it yourself',
+      '&nbsp;&nbsp;`/engine unload` — free engine VRAM now (models reload on next use)',
       '',
       'No YAML editing, no restart — llama-swap hot-reloads the change.',
     ].join('\n'));
@@ -1752,11 +1766,21 @@ async function _cmdEngine(args) {
 
   // default: status
   try {
-    const d = await (await fetch('/api/engine/status', { credentials: 'same-origin' })).json();
+    // Abort rather than hang forever: a cold GGUF-metadata read under disk
+    // contention (e.g. a 20GB model mid-load) used to exceed the browser's
+    // patience and surface as a bare "Failed to fetch".
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    let resp;
+    try {
+      resp = await fetch('/api/engine/status', { credentials: 'same-origin', signal: ctrl.signal });
+    } finally { clearTimeout(timer); }
+    const d = await resp.json();
     if (d.detail || (d.models == null)) { slashReply('Engine tuner unavailable — is the llama-swap engine configured?'); return true; }
     const vram = d.vram_mb ? (d.vram_mb / 1024).toFixed(0) + ' GB VRAM' : 'no GPU detected';
     const ram = d.ram_mb ? ' · ' + (d.ram_mb / 1024).toFixed(0) + ' GB RAM' : '';
     const lines = [`**Engine context** — ${vram}${ram}`];
+    if ((d.running || []).length) lines.push(`&nbsp;&nbsp;_loaded now: \`${d.running.join('`, `')}\` — \`/engine unload\` frees the VRAM_`);
     if (!(d.models || []).length) lines.push('&nbsp;&nbsp;_no tunable models in the llama-swap config_');
     (d.models || []).forEach(m => {
       const cur = _fmtCtx(m.current_ctx);
@@ -1771,7 +1795,13 @@ async function _cmdEngine(args) {
     const anyRec = (d.models || []).some(m => m.recommended && m.recommended !== m.current_ctx);
     if (anyRec) lines.push('\nApply all with `/engine tune`, or set one: `/engine set <model> <tokens>`.');
     slashReply(lines.join('\n'));
-  } catch (e) { slashReply('Engine status failed: ' + e.message); }
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      slashReply('Engine status timed out — the engine is probably busy loading a model. Try again in a moment.');
+    } else {
+      slashReply('Engine status failed: ' + e.message);
+    }
+  }
   return true;
 }
 
@@ -6161,7 +6191,11 @@ async function _cmdHelp(args, ctx) {
       categories[cat].push(`  ${usage.padEnd(21)}${desc}`);
     }
   }
-  const order = ['Getting started', 'Tours', 'Chats', 'Settings', 'Memory', 'Productivity', 'AI Tools'];
+  // Order the real category names (no command uses 'AI Tools'). 'Tools' and
+  // 'Utility' are the biggest groups (doctor/traces/engine/mcp/graph/wiki/
+  // code/canvas live there) — surface them prominently instead of dumping
+  // them in the unordered tail.
+  const order = ['Getting started', 'Tours', 'Tools', 'Chats', 'Settings', 'Memory', 'Productivity', 'Toolboxes', 'Utility'];
   let lines = [];
   for (const cat of order) {
     if (categories[cat] && categories[cat].length) {
@@ -6684,8 +6718,10 @@ const COMMANDS = {
   help: {
     alias: ['?', 'man', 'commands'],
     category: 'Utility',
-    hidden: true,
-    help: 'This help',
+    // Was hidden:true, so it never appeared in the '/' autocomplete — users
+    // couldn't discover the command list without already knowing /help exists
+    // (the user's stated pain). Surfaced now.
+    help: 'List every slash command',
     handler: _cmdHelp,
     usage: '/help'
   },
@@ -6980,6 +7016,14 @@ async function handleSlashCommand(input) {
 export function initSlashCommands(deps) {
   API_BASE = deps.apiBase || '';
   if (deps.isStreaming) _isStreamingFn = deps.isStreaming;
+
+  // Rail "?" button → the command list. The user's stated pain was that the
+  // ~40 slash commands were undiscoverable; this gives them one visible click.
+  const _helpBtn = document.getElementById('rail-help');
+  if (_helpBtn && !_helpBtn._wired) {
+    _helpBtn._wired = true;
+    _helpBtn.addEventListener('click', () => { try { _cmdHelp([], {}); } catch (_e) {} });
+  }
 
   // Global delegation for onboarding and setup clicks
   document.addEventListener('click', (e) => {

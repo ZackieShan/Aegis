@@ -3206,6 +3206,16 @@ function _rerenderCachedModels() {
               return Number.isFinite(mb) ? mb / 1024 : 0;
             };
             const _selFreeGb = _selIdx.reduce((s, i) => s + _freeFor(i), 0);
+            // VRAM held by llama-swap-managed engine models is reclaimable —
+            // the swap layer releases it on demand. Without this, an idle
+            // 20GB model made the gate report "only 0.8 GB free" for a
+            // launch that actually fits.
+            const _reclaimFor = (idx) => {
+              const mb = _hwGpus[idx]?.reclaimable_mb;
+              return Number.isFinite(mb) ? mb / 1024 : 0;
+            };
+            const _selReclaimGb = _selIdx.reduce((s, i) => s + _reclaimFor(i), 0);
+            const _fitsAfterReclaim = _selReclaimGb > 0 && _needGb <= _selFreeGb + _selReclaimGb;
             // Skip the gate when we don't have any free-VRAM data (probe
             // failed) — better to let the launch try than silently refuse
             // on a missing data point.
@@ -3233,6 +3243,9 @@ function _rerenderCachedModels() {
                 ov.className = 'modal';
                 ov.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10050;position:fixed;inset:0;background:rgba(0,0,0,0.4);';
                 const _btnRow = [];
+                if (_selReclaimGb > 0) {
+                  _btnRow.push(`<button data-vram-action="free_engine" class="confirm-btn ${_fitsAfterReclaim ? 'confirm-btn-primary' : 'confirm-btn-secondary'}" style="width:100%;">Free engine VRAM (~${_selReclaimGb.toFixed(1)} GB) &amp; launch</button>`);
+                }
                 if (_recCtx > 1024 && _recCtx < _ctx) {
                   _btnRow.push(`<button data-vram-action="reduce" class="confirm-btn confirm-btn-primary" style="width:100%;">Reduce ctx to ${_recCtx.toLocaleString()}</button>`);
                 }
@@ -3241,15 +3254,19 @@ function _rerenderCachedModels() {
                 }
                 _btnRow.push(`<button data-vram-action="allow_cpu" class="confirm-btn confirm-btn-secondary" style="width:100%;">Allow CPU overflow (slow)</button>`);
                 _btnRow.push(`<button data-vram-action="cancel" class="confirm-btn confirm-btn-secondary" style="width:100%;">Cancel</button>`);
+                const _intro = _fitsAfterReclaim
+                  ? 'This fits once the local engine releases the VRAM it\'s holding (an idle model that swaps out on demand). Free it and launch, or pick another option.'
+                  : 'Model + KV cache would overflow VRAM on the selected GPU' + (_selIdx.length > 1 ? 's' : '') + '. llama-cpp-python will silently spill to CPU → very slow inference.';
                 ov.innerHTML = '<div class="modal-content" style="max-width:480px;">'
-                  + '<div class="modal-header"><h4>Will not fit on selected GPU' + (_selIdx.length > 1 ? 's' : '') + '</h4></div>'
+                  + '<div class="modal-header"><h4>' + (_fitsAfterReclaim ? 'GPU VRAM is held by the local engine' : 'Will not fit on selected GPU' + (_selIdx.length > 1 ? 's' : '')) + '</h4></div>'
                   + '<div class="modal-body" style="font-size:12px;line-height:1.5;">'
-                  +   '<p>Model + KV cache would overflow VRAM on the selected GPU' + (_selIdx.length > 1 ? 's' : '') + '. llama-cpp-python will silently spill to CPU → very slow inference.</p>'
+                  +   '<p>' + _intro + '</p>'
                   +   '<ul style="opacity:0.75;padding-left:18px;">'
                   +     '<li>Model: ~' + _modelGb.toFixed(1) + ' GB</li>'
                   +     '<li>KV cache (ctx ' + _ctx.toLocaleString() + '): ~' + _kvGb.toFixed(1) + ' GB</li>'
                   +     '<li>Total needed: ~' + _needGb.toFixed(1) + ' GB</li>'
                   +     '<li>Free on GPU ' + _selIdx.join(', ') + ': ~' + _selFreeGb.toFixed(1) + ' GB</li>'
+                  +     (_selReclaimGb > 0 ? '<li>Reclaimable from the local engine (idle swap-managed model): ~' + _selReclaimGb.toFixed(1) + ' GB</li>' : '')
                   +   '</ul>'
                   + '</div>'
                   + '<div class="modal-footer" style="flex-direction:column;gap:6px;align-items:stretch;">' + _btnRow.join('') + '</div>'
@@ -3283,6 +3300,14 @@ function _rerenderCachedModels() {
                   _ov.dispatchEvent(new Event('change', { bubbles: true }));
                 }
                 serveState.llama_cpu_overflow = true;
+              } else if (_action === 'free_engine') {
+                // Ask llama-swap (via Aegis) to drop its resident models,
+                // then give the process a moment to actually exit and hand
+                // the VRAM back before we launch into it.
+                try {
+                  await fetch('/api/engine/unload', { method: 'POST', credentials: 'same-origin' });
+                  await new Promise(r => setTimeout(r, 2500));
+                } catch {}
               }
               // After mutation, rebuild the serve cmd preview so the
               // launched cmd matches what the user just chose.

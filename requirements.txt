@@ -3,6 +3,11 @@ uvicorn
 python-multipart
 python-dotenv
 httpx
+# Synchronous HTTP client used on two runtime paths (the email endpoint
+# fallback in routes/email_routes.py and model resolution in
+# routes/chat_helpers.py). It was only present transitively; declare it so a
+# fresh install can't break those paths.
+requests
 httpcore>=1.0,<2.0
 pydantic>=2.13.4
 pydantic-settings>=2.14.1

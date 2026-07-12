@@ -1384,7 +1384,7 @@ def setup_chat_routes(
                                 "requested_model": _requested_model,
                             },
                         )
-                        sess.add_message(ChatMessage("assistant", _stopped_content, metadata=_stopped_md))
+                        sess.add_message(ChatMessage("assistant", _stopped_content, metadata=_stopped_md), persist=not incognito)
                         if not incognito:
                             session_manager.save_sessions()
                     raise
@@ -1552,12 +1552,42 @@ def setup_chat_routes(
                                     "requested_model": _requested_model,
                                 },
                             )
-                            sess.add_message(ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2))
+                            sess.add_message(ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2), persist=not incognito)
                             if not incognito:
                                 session_manager.save_sessions()
                     except Exception:
                         logger.exception("Failed to save partial response on disconnect (session %s)", session)
                     raise
+                except Exception as _loop_exc:
+                    # The agent loop raised mid-stream (e.g. a tool result that
+                    # won't JSON-serialize, or an uncaught tool error) BEFORE
+                    # it emitted its own [DONE]. Without this branch the save
+                    # (gated on [DONE]) never ran → the turn reloaded blank, and
+                    # in compare mode the pane hung with no terminal event.
+                    # Save whatever we have and terminate the stream cleanly.
+                    logger.exception("Agent stream failed mid-loop (session %s)", session)
+                    try:
+                        if full_response:
+                            _err_content, _err_md = clean_thinking_for_save(
+                                full_response,
+                                {
+                                    "stopped": True,
+                                    "error": str(_loop_exc)[:200],
+                                    "model": _actual_model or _answered_by or _requested_model,
+                                    "requested_model": _requested_model,
+                                },
+                            )
+                            sess.add_message(ChatMessage("assistant", _err_content, metadata=_err_md), persist=not incognito)
+                            if not incognito:
+                                session_manager.save_sessions()
+                    except Exception:
+                        logger.exception("Failed to save partial response after loop error (session %s)", session)
+                    _stream_set(session, status="error")
+                    try:
+                        yield f'data: {json.dumps({"type": "error", "error": "The response was interrupted by an internal error."})}\n\n'
+                    except Exception:
+                        pass
+                    yield "data: [DONE]\n\n"
                 finally:
                     _active_streams.pop(session, None)
 

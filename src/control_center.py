@@ -29,13 +29,24 @@ _CACHE_TTL = 20.0
 
 
 def _item(key: str, name: str, status: str, detail: str = "",
-          action: Optional[Dict[str, Any]] = None, fix: str = "") -> Dict[str, Any]:
-    return {"key": key, "name": name, "status": status, "detail": detail,
-            "action": action or {"type": "none"}, "fix": fix}
+          action: Optional[Dict[str, Any]] = None, fix: str = "",
+          extra_actions: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    out = {"key": key, "name": name, "status": status, "detail": detail,
+           "action": action or {"type": "none"}, "fix": fix}
+    if extra_actions:
+        out["extra_actions"] = extra_actions
+    return out
 
 
 def _cmd(value: str) -> Dict[str, Any]:
     return {"type": "command", "value": value}
+
+
+def _api(label: str, path: str, method: str = "POST") -> Dict[str, Any]:
+    """A direct in-panel action: the frontend calls the endpoint and shows the
+    result on the card — no chat round-trip. For the 'tuning should be in the
+    UI, not a slash command' class of controls."""
+    return {"type": "api", "label": label, "value": path, "method": method}
 
 
 def _panel(button_id: str) -> Dict[str, Any]:
@@ -88,6 +99,23 @@ def _setting(key: str, default: Any = None) -> Any:
 
 
 # ── capability groups ─────────────────────────────────────────────────────────
+def _swap_running() -> List[str]:
+    """Models llama-swap currently holds in VRAM ([] if none/unreachable)."""
+    try:
+        import os
+        import httpx
+        port = os.getenv("LLAMA_SWAP_PORT", "9090")
+        r = httpx.get(f"http://127.0.0.1:{port}/running", timeout=2)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        items = data.get("running", data) if isinstance(data, dict) else data
+        return [str(it["model"]) if isinstance(it, dict) and it.get("model") else str(it)
+                for it in (items or []) if it]
+    except Exception:
+        return []
+
+
 def _models_group(doc: Dict) -> Dict[str, Any]:
     items = []
     # Local model engine (llama-swap) + context tuner
@@ -99,12 +127,18 @@ def _models_group(doc: Dict) -> Dict[str, Any]:
         if models:
             names = ", ".join(m["model"] for m in models[:4])
             vtxt = f" · {round(vram/1024)}GB VRAM" if vram else ""
+            running = _swap_running()
+            rtxt = (f" — loaded now: {', '.join(running)}" if running
+                    else " — nothing loaded (VRAM free)")
             items.append(_item("engine", "Local model engine (llama.cpp)", "ok",
-                               f"{len(models)} models{vtxt}: {names}", _cmd("/engine")))
+                               f"{len(models)} models{vtxt}: {names}{rtxt}",
+                               _cmd("/engine"),
+                               extra_actions=[_api("Free VRAM now", "/api/engine/unload")] if running else None))
             ctxs = ", ".join(f"{m['model'].split('-')[0]} {m['current_ctx']//1024 or m['current_ctx']}K"
                              for m in models[:3])
             items.append(_item("context", "Context auto-tuner", "ok",
-                               f"windows sized to your GPU ({ctxs}) — /engine to re-tune", _cmd("/engine")))
+                               f"windows sized to your GPU ({ctxs})", _cmd("/engine"),
+                               extra_actions=[_api("Auto-tune now", "/api/engine/tune")]))
         else:
             items.append(_item("engine", "Local model engine (llama.cpp)", "off",
                                "no llama-swap models configured", _cmd("/engine")))
@@ -271,6 +305,20 @@ def _workflow_group(doc: Dict) -> Dict[str, Any]:
         on = tracing.is_enabled()
         items.append(_item("tracing", "Observability (traces)", "ok" if on else "off",
                            f"{st.get('total', 0)} calls recorded" if on else "off", _cmd("/traces")))
+    except Exception:
+        pass
+    # System health (Doctor) — the diagnostics run doubles as this dashboard's
+    # status source (`doc`), so surface it as a one-click card too: /doctor was
+    # otherwise reachable only by typing the command.
+    try:
+        checks = list(doc.values())
+        problems = [c for c in checks if not c.get("ok")]
+        if checks:
+            status = "ok" if not problems else "warn"
+            detail = (f"{len(checks)} checks, all green" if not problems
+                      else f"{len(problems)} of {len(checks)} need attention: "
+                           + ", ".join(c.get("label", c.get("id", "?")) for c in problems[:3]))
+            items.append(_item("doctor", "System health (Doctor)", status, detail, _cmd("/doctor")))
     except Exception:
         pass
     return {"title": "Workflow & observability", "items": items}

@@ -16,6 +16,13 @@ venv/
 !.env.example
 # Local uv lockfile (optional, per-platform — see "Faster installs with uv" in README)
 requirements.lock
+# constraints.txt (pip freeze lock) IS committed for reproducibility — do NOT ignore it.
+
+# Test / scratch artifacts that can appear at the repo root
+tmp_pytest_probe/
+.pytest_cache/
+# A nested throwaway git clone directory (not the working tree's own repo)
+/Aegis/
 
 # SOPS workflow — encrypted `secrets.env` is intentionally committable,
 # but every variant (plaintext, manual decrypt copy, editor backup)

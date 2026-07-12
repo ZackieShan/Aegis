@@ -15,10 +15,13 @@
  * /api/recipes. Toggled by #tool-recipes-btn (and #rail-recipes via app.js).
  */
 
+import { trapFocus } from '../modalA11y.js';
+
 const API = ''; // same-origin
 const MODAL_ID = 'recipes-modal';
 
 let _built = false;
+let _releaseFocus = null;
 let _blocks = { models: [], tools: [] };   // building blocks from /api/recipes/tools
 let _nodes = [];                            // {id, type, x, y, config}
 let _edges = [];                            // {from, to}
@@ -891,11 +894,15 @@ export async function open() {
   _drawEdges();
   _syncEmptyHint();
   _modal().classList.remove('hidden');
+  const panel = _modal().querySelector('.modal-content');
+  if (_releaseFocus) _releaseFocus();
+  _releaseFocus = trapFocus(panel, { onEscape: close });
 }
 export function close() {
   const m = _modal();
   if (m) m.classList.add('hidden');
   document.querySelectorAll('.recipe-menu').forEach(x => x.remove());
+  if (_releaseFocus) { _releaseFocus(); _releaseFocus = null; }
 }
 export function isOpen() {
   const m = _modal();

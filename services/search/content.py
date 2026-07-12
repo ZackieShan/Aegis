@@ -359,11 +359,20 @@ def _get_public_url(url: str, headers: dict, timeout: int, max_redirects: int = 
 
     raise httpx.RequestError("Too many redirects", request=httpx.Request("GET", current))
 
-# PDF extraction (optional dependency)
+# PDF extraction. pdfminer.six gives the best layout-aware text when present,
+# but it is not a declared dependency — pypdf (a hard requirement, already
+# used for PDF text elsewhere in the app) is the always-available fallback.
+# Without the fallback every fetched PDF silently yielded no text.
 try:
     from pdfminer.high_level import extract_text as pdf_extract_text
 except ImportError:
     pdf_extract_text = None  # type: ignore
+
+
+def _pypdf_extract_text(pdf_bytes) -> str:
+    from pypdf import PdfReader
+    reader = PdfReader(pdf_bytes)
+    return "\n".join((page.extract_text() or "") for page in reader.pages)
 
 
 # ----------------------------------------------------------------------
@@ -562,13 +571,15 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0,
                 + (f" (size {_declared:,} bytes)" if _declared else "")
                 + "; retry with a larger budget if it fits under the hard cap",
             )
-        if pdf_extract_text is None:
-            logger.error("pdfminer.six is not installed; cannot extract PDF text.")
-            pdf_text = ""
-        else:
+        pdf_text = ""
+        if pdf_extract_text is not None:
             try:
-                pdf_bytes = io.BytesIO(response.content)
-                pdf_text = pdf_extract_text(pdf_bytes)
+                pdf_text = pdf_extract_text(io.BytesIO(response.content))
+            except Exception as e:
+                logger.warning(f"pdfminer extraction failed for {url}: {e}")
+        if not pdf_text:
+            try:
+                pdf_text = _pypdf_extract_text(io.BytesIO(response.content))
             except Exception as e:
                 logger.warning(f"PDF extraction failed for {url}: {e}")
                 pdf_text = ""

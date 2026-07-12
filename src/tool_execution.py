@@ -748,10 +748,22 @@ async def _execute_tool_block_impl(
             logger.info(f"Tool executed: {desc} -> bg job {rec['id']}")
             return desc, result
 
-    # Route MCP-extracted tools through the MCP manager. Forward
+    # generate_image runs through the in-process do_generate_image (NOT the
+    # stdio MCP server): the MCP subprocess has no request context, so its
+    # gallery rows were owner=None/session_id=None (hidden from the owner) and
+    # it skipped SSRF-check + local-download of returned URLs. do_generate_image
+    # is the single richer implementation — owner/session-scoped gallery,
+    # check_outbound_url, DALL-E URL localization, and the local-diffusion
+    # size cap / 600s timeout / autodetect fallback.
+    if tool == "generate_image":
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"generate_image: {first_line}"
+        from src.ai_interaction import do_generate_image
+        result = await do_generate_image(content, session_id=session_id, owner=owner)
+    # Route other MCP-extracted tools through the MCP manager. Forward
     # the progress callback so long-running subprocess tools
     # (bash, python) can stream `tool_progress` events to the UI.
-    if tool in _MCP_TOOL_MAP:
+    elif tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)

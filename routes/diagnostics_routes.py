@@ -95,12 +95,20 @@ def setup_diagnostics_routes(
     async def test_research(request: Request, query: str = Form("What is machine learning?")) -> Dict[str, Any]:
         require_admin(request)
         try:
-            endpoint = f"http://{DEFAULT_HOST}:8000/v1/chat/completions"
-            model = "gpt-oss-120b"
+            # Resolve the SAME endpoint/model real Deep Research uses (the
+            # configured research endpoint, falling back to the first enabled
+            # one) instead of a hardcoded dead localhost:8000 + phantom model.
+            from src.endpoint_resolver import resolve_endpoint
+            endpoint, model, _headers = resolve_endpoint("research", owner=None)
+            if not endpoint or not model:
+                return {"status": "error", "query": query,
+                        "error": "No research endpoint configured — set one in Settings → AI, or add a model endpoint."}
             result = await research_handler.call_research_service(query, endpoint, model)
             return {
                 "status": "success",
                 "query": query,
+                "endpoint": endpoint,
+                "model": model,
                 "result_preview": result[:200] + "..." if len(result) > 200 else result,
                 "result_length": len(result),
             }

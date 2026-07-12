@@ -3385,7 +3385,13 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           // errors (unsupported tools, 4xx/5xx, parse failures) surface right away
           // instead of burning the nudge budget on a guaranteed-to-fail retry.
           if (!(_isRecoverableStreamErr(err) && _tryAutoRecover(holder, accumulated, streamSessionId))) {
-            const errorHolder = document.querySelector('.msg-ai:last-of-type .body');
+            // Target THIS turn's bubble, not a global `.msg-ai:last-of-type`
+            // query — the globally-last AI bubble can be a just-generated
+            // image (class msg-ai generated-image-wrap), and typewriterInto
+            // clears the target's content first, wiping the image.
+            const errorHolder = (holder && holder.querySelector)
+              ? holder.querySelector('.body')
+              : document.querySelector('.msg-ai:last-of-type .body');
             if (errorHolder) {
               let errMsg = `Error: ${err.message}`;
               // Add hint for tool-call errors

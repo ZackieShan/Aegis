@@ -112,43 +112,55 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 
 # ---------------------------------------------------------------------------
-# Re-exports from sub-modules
+# Re-exports from sub-modules — LAZY (PEP 562).
+#
+# These used to be eager `from src.tool_parsing import ...` imports, which
+# closed an import cycle: tool_parsing/tool_schemas/tool_execution each do
+# `from src.agent_tools import ToolBlock, TOOL_TAGS` at module level, so any
+# cold entry into the cluster that did NOT start here (e.g.
+# `import src.tool_schemas` from a test or script) died with "cannot import
+# name ... from partially initialized module". Resolving the re-exports on
+# first attribute access instead means every entry order works: by the time
+# anyone *uses* a re-exported name, this module's own definitions (ToolBlock,
+# TOOL_TAGS, TOOL_HANDLERS) are complete. `from src.agent_tools import X`
+# still works — the import statement calls module __getattr__.
 # ---------------------------------------------------------------------------
+_LAZY_REEXPORTS = {
+    # Parsing
+    "parse_tool_blocks": "src.tool_parsing",
+    "strip_tool_blocks": "src.tool_parsing",
+    "_TOOL_NAME_MAP": "src.tool_parsing",
+    "_TOOL_BLOCK_RE": "src.tool_parsing",
+    "_TOOL_CALL_RE": "src.tool_parsing",
+    "_XML_TOOL_CALL_RE": "src.tool_parsing",
+    "_XML_INVOKE_RE": "src.tool_parsing",
+    "_XML_PARAM_RE": "src.tool_parsing",
+    # Schemas
+    "FUNCTION_TOOL_SCHEMAS": "src.tool_schemas",
+    "function_call_to_tool_block": "src.tool_schemas",
+    # Execution
+    "execute_tool_block": "src.tool_execution",
+    "format_tool_result": "src.tool_execution",
+    # Document functions
+    "set_active_document": "src.agent_tools.document_tools",
+    "set_active_model": "src.agent_tools.document_tools",
+    # Implementations
+    "do_search_chats": "src.tool_implementations",
+    "do_manage_skills": "src.tool_implementations",
+    "do_manage_tasks": "src.tool_implementations",
+    "do_api_call": "src.tool_implementations",
+}
 
-# Parsing
-from src.tool_parsing import (  # noqa: E402, F401
-    parse_tool_blocks,
-    strip_tool_blocks,
-    _TOOL_NAME_MAP,
-    _TOOL_BLOCK_RE,
-    _TOOL_CALL_RE,
-    _XML_TOOL_CALL_RE,
-    _XML_INVOKE_RE,
-    _XML_PARAM_RE,
-)
 
-# Schemas
-from src.tool_schemas import (  # noqa: E402, F401
-    FUNCTION_TOOL_SCHEMAS,
-    function_call_to_tool_block,
-)
+def __getattr__(name):
+    target = _LAZY_REEXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module 'src.agent_tools' has no attribute {name!r}")
+    import importlib
+    value = getattr(importlib.import_module(target), name)
+    globals()[name] = value  # cache so subsequent access skips __getattr__
+    return value
 
-# Execution
-from src.tool_execution import (  # noqa: E402, F401
-    execute_tool_block,
-    format_tool_result,
-)
 
-# Document functions
-from .document_tools import (
-    set_active_document, 
-    set_active_model
-)
-
-# Implementations
-from src.tool_implementations import (  # noqa: E402, F401
-    do_search_chats,
-    do_manage_skills,
-    do_manage_tasks,
-    do_api_call,
-)
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_REEXPORTS))

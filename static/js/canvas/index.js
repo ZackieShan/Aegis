@@ -9,9 +9,11 @@
  */
 
 import { runPython, runJavaScript, runHTML, runServer } from '../codeRunner.js';
+import { trapFocus } from '../modalA11y.js';
 
 const LANGS = ['python', 'javascript', 'html', 'bash', 'typescript', 'json', 'css', 'text'];
 let _undo = [];
+let _releaseFocus = null;
 
 function _el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
 function _modal() { return document.getElementById('code-canvas-modal'); }
@@ -42,10 +44,10 @@ function _styles() {
     border-radius: 7px; padding: 4px 8px; font-size: .78rem; }
   .cv-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #canvas-editor { flex: 1; width: 100%; box-sizing: border-box; resize: none; border: none; outline: none;
-    background: #0c0715; color: #e6dcff; padding: 14px 16px; font-family: 'JetBrains Mono','Fira Code',ui-monospace,monospace;
+    background: var(--code-bg, var(--panel,#0c0715)); color: var(--code-fg, var(--fg,#e6dcff)); padding: 14px 16px; font-family: 'JetBrains Mono','Fira Code',ui-monospace,monospace;
     font-size: 13px; line-height: 1.55; tab-size: 4; white-space: pre; overflow: auto; }
   .cv-ai { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--border,#3a2657); }
-  #canvas-ai-input { flex: 1; background: var(--input-bg,#0c0715); color: var(--fg,#cbb8ec); border: 1px solid var(--border,#3a2657);
+  #canvas-ai-input { flex: 1; background: var(--input-bg, var(--panel,#0c0715)); color: var(--fg,#cbb8ec); border: 1px solid var(--border,#3a2657);
     border-radius: 9px; padding: 8px 12px; font-size: .82rem; outline: none; }
   #canvas-ai-input:focus { border-color: var(--red,#b45de0); }
   .cv-note { font-size: .74rem; opacity: .72; padding: 0 14px 8px; min-height: 1em; }
@@ -174,6 +176,8 @@ export function open(code, language) {
   _modal().querySelector('#canvas-undo').disabled = true;
   _note('');
   _modal().classList.remove('hidden');
+  if (_releaseFocus) _releaseFocus();
+  _releaseFocus = trapFocus(_modal().querySelector('.cv-panel'), { onEscape: close });
   setTimeout(() => _ed().focus(), 40);
 }
 
@@ -182,6 +186,8 @@ export async function generate(prompt, language) {
   _ed().value = ''; _note('Generating…', true);
   if (language) _setLang(language);
   _modal().classList.remove('hidden');
+  if (_releaseFocus) _releaseFocus();
+  _releaseFocus = trapFocus(_modal().querySelector('.cv-panel'), { onEscape: close });
   try {
     const r = await fetch('/api/canvas/generate', {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
@@ -194,7 +200,11 @@ export async function generate(prompt, language) {
   } catch (e) { _note('✗ ' + e.message); }
 }
 
-export function close() { const m = _modal(); if (m) m.classList.add('hidden'); }
+export function close() {
+  const m = _modal();
+  if (m) m.classList.add('hidden');
+  if (_releaseFocus) { _releaseFocus(); _releaseFocus = null; }
+}
 export function isOpen() { const m = _modal(); return !!m && !m.classList.contains('hidden'); }
 
 const canvasModule = { open, close, isOpen, generate };

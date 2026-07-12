@@ -342,6 +342,27 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
         if not text:
             return {"error": "Memory text cannot be empty"}
 
+        # Dedup at write time — the agent tool path had NO guard, unlike the
+        # HTTP route and the memory extractor, so a looping agent (the
+        # generate_image→manage_memory incident) wrote ~90 near-identical
+        # rows before the every-5-adds "Memory Tidy" could react. Skip an
+        # exact duplicate, and a near-duplicate when the vector index is up.
+        try:
+            _existing = _memory_manager.load_all()
+            _dupes = _memory_manager.find_duplicates(text, _existing) if hasattr(_memory_manager, "find_duplicates") else []
+            if owner:
+                _dupes = [d for d in _dupes if (d.get("owner") or None) == owner]
+            if _dupes:
+                return {"action": "add", "memory_id": _dupes[0].get("id"),
+                        "results": f"Already remembered (duplicate skipped): {text[:120]}"}
+            if _memory_vector and getattr(_memory_vector, "healthy", False):
+                _near = _memory_vector.find_similar(text)
+                if _near:
+                    return {"action": "add", "memory_id": _near,
+                            "results": f"Already remembered something very similar (skipped): {text[:120]}"}
+        except Exception:
+            logger.debug("memory add dedup check failed; proceeding", exc_info=True)
+
         entry = _memory_manager.add_entry(text, source="ai_agent", category=category, owner=owner)
         memories = _memory_manager.load_all()
         memories.append(entry)
@@ -884,6 +905,12 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 # Image generation
 # ---------------------------------------------------------------------------
 
+# Autodetect priority: the local qwen-image diffusion pipeline first, then
+# hosted models. Single source of truth shared with the MCP image server so
+# the two paths can't drift on which model they pick.
+IMAGE_MODEL_AUTODETECT = ("qwen-image", "gpt-image-1.5", "gpt-image-1", "dall-e-3")
+
+
 async def do_generate_image(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
     """Generate an image using an image-capable model (e.g. gpt-image-1).
 
@@ -921,9 +948,11 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     if quality == "medium" and _settings.get("image_quality"):
         quality = _settings["image_quality"]
 
-    # Auto-detect best available image model if still not set
+    # Auto-detect best available image model if still not set. qwen-image is
+    # the local diffusion pipeline (sd-server behind llama-swap) — preferred
+    # when present; kept in sync with mcp_servers/image_gen_server.py.
     if not model_spec:
-        for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
+        for candidate in IMAGE_MODEL_AUTODETECT:
             try:
                 await asyncio.to_thread(_resolve_model, candidate, owner=owner)
                 model_spec = candidate
@@ -967,26 +996,50 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
         if not model_spec:
             return {"error": "No image model found. Configure one in Admin → Image Generation."}
 
-    # Resolve the model to find the right endpoint
+    # Resolve the model to find the right endpoint. If the configured model
+    # isn't served anywhere, fall back to the autodetect chain instead of
+    # hard-failing (a stale image_model setting used to kill every image);
+    # mirrors mcp_servers/image_gen_server.py.
+    _fallback_note = ""
     try:
         url, model_id, headers = await asyncio.to_thread(_resolve_model, model_spec, owner=owner)
     except ValueError:
-        return {"error": f"No endpoint found with image model '{model_spec}'. "
-                "Configure an OpenAI-compatible endpoint with image generation support."}
+        _requested = model_spec
+        url = model_id = headers = None
+        for candidate in IMAGE_MODEL_AUTODETECT:
+            if candidate == _requested:
+                continue
+            try:
+                url, model_id, headers = await asyncio.to_thread(_resolve_model, candidate, owner=owner)
+                _fallback_note = f" (configured model '{_requested}' unavailable — used '{candidate}')"
+                break
+            except ValueError:
+                continue
+        if not url:
+            return {"error": f"No endpoint found with image model '{model_spec}', and no fallback image "
+                    "model is available. Fix the image model in Settings → Images."}
 
-    # Detect if this is a GPT image model vs DALL-E vs local diffusion
+    # Detect GPT image vs DALL-E vs local diffusion. Local diffusion is matched
+    # by model-name keyword (robust) — not "not gpt and not dalle", which
+    # mislabels any unexpected cloud model as local.
     is_gpt_image = "gpt-image" in model_id.lower()
     is_dalle = "dall-e" in model_id.lower()
-    is_local_diffusion = not is_gpt_image and not is_dalle
+    is_local_diffusion = any(k in model_id.lower() for k in ("qwen-image", "sd-cpp", "flux", "stable-diffusion"))
 
     # Build the images endpoint URL from the chat completions URL
     base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
     images_url = base_url + "/images/generations"
 
-    # Validate size for cloud image models (local diffusion accepts any WxH)
+    # Validate/cap size per model family. Local diffusion on a 24GB card:
+    # resolution drives VRAM + time hard, so cap to a safe set (768x768 sweet
+    # spot) — 1024x1024 spills VRAM and blows past the proxy timeout. Mirrors
+    # image_gen_server.py.
     valid_gpt_sizes = {"1024x1024", "1024x1536", "1536x1024", "auto"}
     valid_dalle3_sizes = {"1024x1024", "1024x1792", "1792x1024"}
-    if is_gpt_image and size not in valid_gpt_sizes:
+    valid_local_sizes = {"512x512", "768x768", "512x768", "768x512"}
+    if is_local_diffusion and size not in valid_local_sizes:
+        size = "768x768"
+    elif is_gpt_image and size not in valid_gpt_sizes:
         size = "1024x1024"
     elif is_dalle and size not in valid_dalle3_sizes:
         size = "1024x1024"
@@ -1008,8 +1061,11 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     logger.info(f"Image generation: model={model_id}, size={size}, quality={quality}, prompt={prompt[:80]}")
 
     try:
-        # GPT image models can take 30-120s+ depending on quality
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)) as client:
+        # Cloud GPT image models take 30-120s+; local diffusion at higher
+        # resolutions on a 24GB card legitimately takes 2-5 min, so give it a
+        # 600s read budget (300s cut renders off mid-generation).
+        _read_timeout = 600.0 if is_local_diffusion else 300.0
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=_read_timeout, write=30.0, pool=30.0)) as client:
             resp = await client.post(images_url, json=payload, headers=headers)
 
             if resp.status_code != 200:
@@ -1091,7 +1147,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
                 return {"error": "Image API returned unexpected format (no b64_json or url)"}
 
             return {
-                "results": f"Generated image for: {prompt[:100]}",
+                "results": f"Generated image for: {prompt[:100]}{_fallback_note}",
                 "image_url": image_url,
                 "image_id": image_id,
                 "image_prompt": prompt,
@@ -1101,7 +1157,8 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
             }
 
     except httpx.TimeoutException:
-        return {"error": "Image generation timed out (300s). The model may be overloaded — try again or use quality=low."}
+        return {"error": f"Image generation timed out ({int(_read_timeout)}s). The model may be overloaded — "
+                "try again, a smaller size, or quality=low."}
     except Exception as e:
         return {"error": f"Image generation error: {str(e)}"}
 

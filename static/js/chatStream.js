@@ -176,11 +176,28 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'memories' || panel === 'skills' || panel === 'settings') {
-        // These live in the sidebar / settings drawer — most just need
-        // an existing button click.
-        var ids = { memories: 'tool-memory-btn', skills: 'skills-btn', settings: 'open-settings-btn' };
-        var btn = document.getElementById(ids[panel]);
-        if (btn) btn.click();
+        // These live in the sidebar / settings drawer. 'skills-btn' and
+        // 'open-settings-btn' were dead ids (silent no-op) — the real targets
+        // are rail-settings and the Brain panel's Skills tab.
+        if (panel === 'settings') {
+          if (window.settingsModule && typeof window.settingsModule.open === 'function') {
+            window.settingsModule.open();
+          } else {
+            var _cog = document.getElementById('rail-settings');
+            if (_cog) _cog.click();
+          }
+        } else if (panel === 'skills') {
+          // Open the Brain/memory panel, then activate its Skills tab.
+          var _brain = document.getElementById('tool-memory-btn');
+          if (_brain) _brain.click();
+          setTimeout(function () {
+            var _tab = document.querySelector('.memory-tab[data-memory-tab="skills"]');
+            if (_tab) _tab.click();
+          }, 80);
+        } else {
+          var btn = document.getElementById('tool-memory-btn');
+          if (btn) btn.click();
+        }
       }
 
     } else if (uiEvent === 'open_email_reply' || uiData.ui_event === 'open_email_reply') {

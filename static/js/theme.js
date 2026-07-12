@@ -268,6 +268,11 @@ export function applyColors(colors) {
   s.setProperty('--panel', colors.panel);
   s.setProperty('--border', colors.border);
   if (colors.red) s.setProperty('--red', colors.red);
+  // --accent was referenced by many panels (var(--accent, <fallback>)) but
+  // NEVER defined, so each panel painted a DIFFERENT fallback (purple/green/
+  // cyan). Define it = the themed accent so every panel agrees and follows
+  // the user's theme.
+  if (colors.red) s.setProperty('--accent', colors.red);
 
   // Keep the mobile browser toolbar / status bar matched to the theme bg
   // (same as the early head-script does on first paint).

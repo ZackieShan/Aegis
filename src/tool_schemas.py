@@ -25,6 +25,7 @@ _REQUIRED_NATIVE_TOOL_ARGS = {
     "read_file": ("path",),
     "write_file": ("path",),
     "edit_file": ("path",),
+    "generate_image": ("prompt",),
 }
 
 # ---------------------------------------------------------------------------
@@ -989,6 +990,28 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            # Without this schema, native-tool models get the generate_image
+            # PROMPT section (tool-RAG selects it) but no callable schema — so
+            # they substitute the nearest schema they do have (manage_memory)
+            # and loop until the round cap. Keep params in sync with
+            # mcp_servers/image_gen_server.py.
+            "name": "generate_image",
+            "description": "Generate an AI image from a text prompt using the configured image model (e.g. the local qwen-image diffusion pipeline). Returns a link to the saved image. Use for any 'draw/create/generate a picture/image/logo/photo' request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Image description prompt"},
+                    "model": {"type": "string", "description": "Image model name (omit to use the configured default)"},
+                    "size": {"type": "string", "description": "Image size WxH, e.g. 768x768 (invalid sizes are normalized per model)"},
+                    "quality": {"type": "string", "enum": ["low", "medium", "high", "auto"], "description": "Quality (gpt-image models only)"},
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "edit_image",
             "description": "Edit a gallery image: upscale, remove background, inpaint, or harmonize.",
             "parameters": {
@@ -1000,6 +1023,22 @@ FUNCTION_TOOL_SCHEMAS = [
                     "scale": {"type": "number", "description": "For upscale: scale factor (default 2)"},
                 },
                 "required": ["image_id", "action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_research",
+            "description": "List, read, or delete saved deep-research reports from the Library. Use action=list to find the most recent report id, then action=read with that id to get the report text. This is THE way to read a finished research report.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "read", "delete"], "description": "list = recent reports, read = report text by id, delete = remove by id"},
+                    "id": {"type": "string", "description": "Report id (required for read/delete)"},
+                    "search": {"type": "string", "description": "For list: filter by query text"},
+                },
+                "required": ["action"]
             }
         }
     },
@@ -1468,6 +1507,21 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
                 content += "\n" + args["category"]
         else:
             content = action
+    elif tool_type == "generate_image":
+        # do_generate_image (and the fenced prompt format) expect POSITIONAL
+        # line format: prompt / model / size / quality. Native calls deliver a
+        # JSON object, so serialize back to lines — keeping positions, since a
+        # size with no model still needs an empty model line above it. Trailing
+        # empties are dropped so a prompt-only call stays a single line.
+        _ln = [
+            str(args.get("prompt", "")).replace("\n", " "),
+            str(args.get("model", "") or ""),
+            str(args.get("size", "") or ""),
+            str(args.get("quality", "") or ""),
+        ]
+        while len(_ln) > 1 and not _ln[-1]:
+            _ln.pop()
+        content = "\n".join(_ln)
     elif tool_type == "list_models":
         content = args.get("filter", "")
     elif tool_type == "ui_control":

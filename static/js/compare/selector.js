@@ -153,8 +153,8 @@ async function showModelSelector() {
       uiModule.showToast('Mode: ' + (state._parallel ? 'Parallel' : 'Sequential'));
       _updateModeLabel();
       _setModeHint(state._parallel
-        ? '<span style="color:#5b8def">Parallel</span>: all models answer at once, side by side.'
-        : '<span style="color:#e0a050">Sequential</span>: models answer one at a time.');
+        ? '<span style="color:var(--accent,var(--red))">Parallel</span>: all models answer at once, side by side.'
+        : '<span style="color:var(--warn,#e0a050)">Sequential</span>: models answer one at a time.');
     });
     toggleRow.appendChild(parallelBtn);
 

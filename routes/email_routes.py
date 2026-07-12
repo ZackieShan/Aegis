@@ -2942,7 +2942,17 @@ def setup_email_routes():
                 try:
                     from docx import Document as _Docx
                 except ImportError:
-                    return {"error": "python-docx not installed", "filename": base}
+                    # python-docx isn't a declared dependency (markitdown's
+                    # docx extra pulls mammoth, not python-docx) — fall back
+                    # to the markitdown runtime, which handles .docx via
+                    # markitdown or its bundled zero-dep extractor instead of
+                    # hard-failing the import.
+                    from src.markitdown_runtime import convert_to_markdown
+                    content = convert_to_markdown(str(filepath))
+                    if content:
+                        doc_id = _create_markdown_doc(content, filepath.stem or "Imported document")
+                        return {"doc_id": doc_id, "filename": filepath.name}
+                    return {"error": "python-docx not installed and fallback extraction failed", "filename": base}
                 try:
                     d = _Docx(str(filepath))
                 except Exception as e:

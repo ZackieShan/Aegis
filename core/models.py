@@ -91,19 +91,25 @@ class Session:
     def _history(self, messages: List[ChatMessage]):
         self.history = messages
 
-    def add_message(self, message: ChatMessage):
+    def add_message(self, message: ChatMessage, persist: bool = True):
         """
         Add a message to this session.
 
         Appends to the authoritative history list and increments
         message_count. Delegates to SessionManager for persistence
         if available.
+
+        persist=False keeps the message IN MEMORY only (for conversation
+        context) and skips the DB write — the incognito contract. Callers
+        that guard save_sessions() with `if not incognito` must ALSO pass
+        persist=not incognito here, or the per-message DB row is written
+        anyway (chat_messages leaked incognito content before this).
         """
         self.history.append(message)
         self.message_count = len(self.history)
 
         # Delegate to session manager for persistence
-        if _SESSION_MANAGER_INSTANCE:
+        if persist and _SESSION_MANAGER_INSTANCE:
             _SESSION_MANAGER_INSTANCE._persist_message(self.id, message)
 
     def get_context_messages(self) -> List[Dict[str, Any]]:

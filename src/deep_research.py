@@ -223,6 +223,15 @@ class DeepResearcher:
         self.extraction_timeout = min(3600, max(15, int(extraction_timeout or 90)))
         self.planning_timeout = min(3600, max(15, int(planning_timeout or 90)))
         self.query_timeout = min(3600, max(15, int(query_timeout or 120)))
+        # Heavy generation calls (synthesis / final report / stop-decision) are
+        # capped at 180s, but a local GGUF served via llama-swap can COLD-LOAD
+        # for 30-90s before it even starts generating a max_report_tokens
+        # report — the 180s cap then timed out mid-stream and discarded the
+        # round's findings. Give local endpoints a much larger budget (they
+        # refuse instantly if truly dead, so this only waits on real loads).
+        _host = (llm_endpoint or "").lower()
+        _is_local = any(h in _host for h in ("127.0.0.1", "localhost", "0.0.0.0", "::1"))
+        self.synthesis_timeout = 600 if _is_local else 180
         self.extraction_concurrency = min(12, max(1, int(extraction_concurrency or 3)))
         self.min_rounds = min_rounds
         self.max_empty_rounds = max_empty_rounds
@@ -701,7 +710,7 @@ class DeepResearcher:
                 # (which gets 180s); a slow local model (e.g. a 20B served from
                 # LM Studio) routinely needs >60s for it. The old 60s cap timed
                 # out mid-stream and discarded the round's findings (#1551).
-                timeout=180,
+                timeout=self.synthesis_timeout,
             )
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
@@ -758,7 +767,7 @@ class DeepResearcher:
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=self.max_report_tokens,
-                timeout=180,
+                timeout=self.synthesis_timeout,
             )
 
             # If report is too short, ask the LLM to expand it
@@ -781,7 +790,7 @@ class DeepResearcher:
                     ],
                     temperature=0.4,
                     max_tokens=self.max_report_tokens,
-                    timeout=180,
+                    timeout=self.synthesis_timeout,
                 )
                 if len(expanded.split()) > len(result.split()):
                     return expanded

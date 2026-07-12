@@ -614,22 +614,41 @@ def setup_codex_routes(
         # moment vllm exits; the log file is the raw stdout/stderr and
         # survives unchanged. Falls back to pane for older tasks predating
         # the tee-to-log runner change.
-        log_path = f"/tmp/aegis-tmux/{session_id}.log"
-        inner = (
-            f"if [ -s {log_path} ]; then tail -n {tail} {log_path}; "
-            f"else tmux capture-pane -t {session_id} -p -S -{tail}; fi"
-        )
         if host:
+            # Remote: the POSIX snippet runs on the ssh target, where /tmp and
+            # tmux exist regardless of what this box runs.
             import shlex
+            log_path = f"/tmp/aegis-tmux/{session_id}.log"
+            inner = (
+                f"if [ -s {log_path} ]; then tail -n {tail} {log_path}; "
+                f"else tmux capture-pane -t {session_id} -p -S -{tail}; fi"
+            )
             cmd = f"ssh {port_flag}{host} {shlex.quote(inner)}"
+            result = await _run_shell(cmd, timeout=15)
+            exit_code, output = result.get("exit_code"), result.get("stdout", "")
         else:
-            cmd = inner
-        result = await _run_shell(cmd, timeout=15)
+            # Local: read the log file directly in Python. _run_shell is a
+            # bare create_subprocess_shell, i.e. cmd.exe on Windows, where the
+            # POSIX `if [ -s ... ]` snippet is a parse error — and the local
+            # log dir isn't /tmp there anyway (TMUX_LOG_DIR handles that).
+            from routes.shell_routes import TMUX_LOG_DIR
+            from pathlib import Path
+            log_file = Path(TMUX_LOG_DIR) / f"{session_id}.log"
+            try:
+                lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                output, exit_code = "\n".join(lines[-tail:]), 0
+            except OSError:
+                # Fall back to the tmux pane for older tasks predating the
+                # tee-to-log runner change (POSIX hosts only; on Windows
+                # there is no tmux and no pane to fall back to).
+                result = await _run_shell(
+                    f"tmux capture-pane -t {session_id} -p -S -{tail}", timeout=15)
+                exit_code, output = result.get("exit_code"), result.get("stdout", "")
         return {
             "session_id": session_id,
             "host": host or "local",
-            "exit_code": result.get("exit_code"),
-            "output": result.get("stdout", ""),
+            "exit_code": exit_code,
+            "output": output,
             "task": _redact_task(task),
         }
 

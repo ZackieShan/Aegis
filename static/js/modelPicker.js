@@ -204,6 +204,32 @@ function _initModelPickerDropdown() {
     }, 200);
   }
 
+  // Show which engine model llama-swap currently holds in VRAM. The swap
+  // layer hot-swaps + unloads on idle, so the resident model can differ from
+  // the current selection — surfaced at the top of the picker, the moment the
+  // user is choosing a model. Silent no-op when there's no engine.
+  async function _refreshLoadedModel() {
+    const el = document.getElementById('model-picker-loaded');
+    if (!el) return;
+    try {
+      const r = await fetch('/api/engine/running', { credentials: 'same-origin' });
+      if (!r.ok) { el.style.display = 'none'; return; }
+      const d = await r.json();
+      const running = (d && d.running) || [];
+      if (running.length) {
+        el.textContent = '● Loaded in VRAM: ' + running.join(', ');
+        el.style.color = 'var(--green, #50fa7b)';
+        el.style.display = '';
+      } else {
+        el.textContent = '○ No engine model loaded (loads on first use)';
+        el.style.color = '';
+        el.style.display = '';
+      }
+    } catch (_) {
+      el.style.display = 'none';  // no engine configured — hide entirely
+    }
+  }
+
   function _openPickerShortcut(kind) {
     _close();
     try {
@@ -655,6 +681,7 @@ function _initModelPickerDropdown() {
     if (menu.classList.contains('hidden') || menu.classList.contains('closing')) {
       // Force-clear any in-progress close animation
       menu.classList.remove('closing', 'hidden');
+      _refreshLoadedModel();
       _populate('');
       if (window.modelsModule && window.modelsModule.refreshModels) {
         window.modelsModule.refreshModels().then(() => {

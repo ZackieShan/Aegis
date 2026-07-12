@@ -32,3 +32,16 @@ markitdown[docx,pptx,xlsx,xls]==0.1.6
 # your GPU VRAM). Pure-Python, tiny. Without it the tuner still runs but can't
 # compute exact recommendations. Only relevant when serving local GGUFs.
 gguf
+
+# Better layout-aware PDF text extraction for the web-search / Deep Research
+# fetch path (services/search/content.py). Optional: without it that path
+# falls back to pypdf (a core dep), so PDFs still extract — pdfminer.six just
+# handles multi-column / complex layouts more faithfully.
+pdfminer.six
+
+# Content-based MIME sniffing for uploads (src/upload_handler.py). Optional:
+# without it uploads fall back to extension/heuristic detection (a harmless
+# startup warning). On Windows the pure `python-magic` needs a libmagic DLL,
+# so use the bundled-binary variant there.
+python-magic-bin; sys_platform == "win32"
+python-magic; sys_platform != "win32"

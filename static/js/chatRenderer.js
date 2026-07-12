@@ -1276,6 +1276,15 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   img.title = prompt || 'Generated image';
   img.src = safeImageUrl;
   img.addEventListener('click', () => { window.open(safeImageUrl, '_blank', 'noopener,noreferrer'); });
+  // safeDisplayImageSrc validates the URL FORMAT, not that the file loads —
+  // a deleted/expired local path would show the browser's broken-image glyph.
+  // Swap in a themed placeholder instead.
+  img.addEventListener('error', () => {
+    const ph = document.createElement('div');
+    ph.className = 'generated-image-caption';
+    ph.textContent = '[Image failed to load]';
+    if (img.parentNode) img.parentNode.replaceChild(ph, img);
+  }, { once: true });
   body.appendChild(img);
 
   if (prompt) {

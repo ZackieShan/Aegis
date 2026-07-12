@@ -3079,6 +3079,60 @@ def setup_cookbook_routes() -> APIRouter:
         except Exception:
             pass
 
+        # VRAM held by llama-swap-managed engine servers is RECLAIMABLE: the
+        # swap layer unloads them on demand (idle ttl, a request for another
+        # model, or POST /api/engine/unload). A preflight fit gate that counts
+        # it as permanently occupied refuses launches that would actually fit
+        # ("only 0.8 GB free" while a 20GB model just idles in VRAM).
+        # Local host only — remote GPUs aren't behind this machine's engine.
+        if gpus and not host:
+            for g in gpus:
+                g["reclaimable_mb"] = 0
+            try:
+                from src.engine_tuner import _engine_dir
+                _edir = os.path.normcase(os.path.normpath(_engine_dir())) + os.sep
+                for g in gpus:
+                    rec = 0
+                    for p in g["processes"]:
+                        pn = os.path.normcase(os.path.normpath(str(p.get("name") or "")))
+                        if os.path.basename(pn) in (
+                            "llama-server.exe", "llama-server", "sd-server.exe", "sd-server",
+                        ) and pn.startswith(_edir):
+                            rec += int(p.get("used_mb") or 0)
+                            p["reclaimable"] = True
+                    g["reclaimable_mb"] = rec
+            except Exception:
+                pass
+            # Windows WDDM often hides per-process memory from nvidia-smi
+            # ([N/A]), so process attribution can come back empty even while a
+            # swap-managed model is resident. Fall back to estimating from what
+            # llama-swap says is running: weights (GGUF file size) + a KV/CUDA
+            # overhead allowance, attributed to GPU 0 (the engine's device),
+            # capped at that GPU's actual used memory.
+            try:
+                if gpus[0].get("reclaimable_mb", 0) == 0:
+                    from routes.engine_routes import swap_running_models
+                    from src import engine_tuner
+                    running = await swap_running_models()
+                    est = 0
+                    if running:
+                        text = engine_tuner._read_config() or ""
+                        blocks = {b["name"]: b["text"] for b in engine_tuner._model_blocks(text)}
+                        for m in running:
+                            body = blocks.get(m, "")
+                            pm = engine_tuner._M_RE.search(body)
+                            dm = re.search(r'--diffusion-model\s+"([^"]+)"', body)
+                            path = (pm or dm).group(1) if (pm or dm) else None
+                            try:
+                                est += int(os.path.getsize(path) / (1024 * 1024)) + 1500 if path else 0
+                            except OSError:
+                                pass
+                    if est:
+                        gpus[0]["reclaimable_mb"] = min(est, gpus[0].get("used_mb", 0))
+                        gpus[0]["reclaimable_models"] = running
+            except Exception:
+                pass
+
         if gpus:
             return {"ok": True, "gpus": gpus, "backend": "cuda", "source": "nvidia-smi"}
 

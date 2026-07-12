@@ -1223,9 +1223,16 @@ def setup_shell_routes() -> APIRouter:
                 "target": "remote",
             },
             {
+                # CPU rembg on purpose: rembg[gpu] pulls onnxruntime-gpu, which
+                # shares the `onnxruntime` package namespace — installing it
+                # into the app venv (and especially uninstalling it later)
+                # clobbers plain onnxruntime and takes down fastembed → all
+                # RAG/embeddings. Bit this machine once already. Without a CUDA
+                # toolkit it only spams cublasLt64 errors and falls back to CPU
+                # anyway.
                 "name": "rembg",
-                "pip": "rembg[gpu]",
-                "desc": "AI background removal for image editor",
+                "pip": "rembg",
+                "desc": "AI background removal for image editor (CPU — safe alongside RAG embeddings)",
                 "category": "Image",
                 "target": "local",
             },
@@ -1581,22 +1588,24 @@ def setup_shell_routes() -> APIRouter:
         if not pip_name:
             return {"ok": False, "error": "No package specified"}
         # Validate against known packages to prevent arbitrary pip install
+        # onnxruntime-gpu and rembg[gpu] are deliberately NOT allowlisted:
+        # they share the `onnxruntime` namespace with the plain package that
+        # fastembed needs — install/uninstall clobbers it and silently breaks
+        # all RAG/embeddings (happened on 2026-07-10). CPU variants only.
         known = {
-            "rembg[gpu]",
+            "rembg",
             "hf_transfer",
             "llama-cpp-python[server]",
             "sglang[all]",
             "diffusers",
             "diffusers[torch]",
             "transformers",
-            "TTS",
             "bark",
             "faster-whisper",
             "playwright",
             "realesrgan",
             "gfpgan",
             "insightface",
-            "onnxruntime-gpu",
             "onnxruntime",
             "hdbscan",
             "vllm",
@@ -1604,7 +1613,11 @@ def setup_shell_routes() -> APIRouter:
         }
         if pip_name not in known:
             return {"ok": False, "error": f"Unknown package: {pip_name}"}
-        cmd = [_sys.executable, "-m", "pip", "install", pip_name]
+        from src.runtime_paths import get_python_exe
+        _py = get_python_exe()
+        if not _py:
+            return {"ok": False, "error": "no Python interpreter available for pip (portable build)"}
+        cmd = [_py, "-m", "pip", "install", pip_name]
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )

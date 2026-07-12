@@ -2549,6 +2549,33 @@ def _detect_runaway_call(call_freq, threshold=15):
     return sig.split(":", 1)[0] if sig else None
 
 
+def _round_text_words(text):
+    """Normalized word set of a round's visible text, for near-repeat checks."""
+    return set(re.findall(r"[a-z0-9']+", (text or "").lower()))
+
+
+def _is_near_repeat_text(words, recent_word_sets, threshold=0.6):
+    """Whether this round's narration is essentially a rerun of a recent round's.
+
+    Jaccard similarity over word sets: catches the wrong-tool-substitution loop
+    where the model re-announces the same plan with light rephrasing ("I'll
+    create a photorealistic image..." / "I need to generate a photorealistic
+    image...") while its actual calls vary just enough to dodge the identical-
+    signature detectors. Empty text never matches (the no-text case is already
+    covered by the stricter identical-call check).
+    """
+    if not words:
+        return False
+    for prev in recent_word_sets:
+        if not prev:
+            continue
+        inter = len(words & prev)
+        union = len(words | prev)
+        if union and inter / union >= threshold:
+            return True
+    return False
+
+
 async def stream_agent_loop(
     endpoint_url: str,
     model: str,
@@ -2609,6 +2636,12 @@ async def stream_agent_loop(
         # the loop is safe regardless of caller. MCP stays available but is
         # filtered to read-only tools below (after the disabled map is loaded).
         disabled_tools.update(plan_mode_disabled_tools())
+
+    # Keep the native generate_image schema in sync with the prompt gate in
+    # _build_base_prompt: when image generation is off, neither the prompt
+    # section nor the callable schema may be offered.
+    if not get_setting("image_gen_enabled", False):
+        disabled_tools.add("generate_image")
 
     uploaded_files = uploaded_files or []
     _upload_msg = _uploaded_files_context_message(uploaded_files)
@@ -2681,6 +2714,18 @@ async def stream_agent_loop(
                     _mcp_disabled_map.setdefault(_sid, set()).add(_t["name"])
         except Exception as _e:
             logger.debug(f"toolbox gating skipped: {_e}")
+    # ENFORCE the disabled map at RUNTIME too, not just in the schema/prompt.
+    # The map only strips tools from what the model is OFFERED; a tool call the
+    # model emits anyway (an admin-disabled tool, or a non-summoned toolbox
+    # tool whose name is still in conversation history) would otherwise still
+    # execute because the session is connected. Mirror plan mode: add the
+    # qualified mcp__{server}__{tool} names to the runtime disabled_tools set,
+    # which execute_tool_block checks. (Bare names are covered by the schema
+    # filter; qualified names are what MCP calls actually carry.)
+    if _mcp_disabled_map:
+        for _sid, _names in _mcp_disabled_map.items():
+            for _n in _names:
+                disabled_tools.add(f"mcp__{_sid}__{_n}")
     if _direct_low_signal:
         logger.info("[agent] direct low-signal reply path for latest=%r", _last_user[:80])
         direct_messages = (
@@ -3171,10 +3216,18 @@ async def stream_agent_loop(
     prep_timings["prompt_build"] = time.time() - _t2
 
     _t3 = time.time()
+    # Captured from the pre-loop trim so the SAME budget can be re-applied
+    # inside the round loop (tool results accumulate ~2 messages/round and the
+    # full list is re-sent every round; a single pre-loop trim can't see that
+    # growth, so a long agentic session overflows a local model's window).
+    _soft_trim_budget = 0
+    _soft_trim_reserve = 512
+    _trim_for_context = None
     try:
         from src.context_compactor import trim_for_context
         from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX, DEFAULT_BUDGET, budget_is_explicit as _budget_is_explicit
         from src.model_context import budget_context_for_model
+        _trim_for_context = trim_for_context
 
         soft_budget = int(get_setting("agent_input_token_budget", DEFAULT_BUDGET) or 0)
         if soft_budget > 0:
@@ -3218,6 +3271,9 @@ async def stream_agent_loop(
                     reserve_tokens,
                 )
                 messages = trimmed_messages
+            # Remember the budget so each round can re-trim as tool results grow.
+            _soft_trim_budget = effective_budget
+            _soft_trim_reserve = reserve_tokens
     except Exception as e:
         logger.warning("[agent] Soft context trim skipped: %s", e)
     prep_timings["context_trim"] = time.time() - _t3
@@ -3263,6 +3319,17 @@ async def stream_agent_loop(
     # all 20 rounds, looks like the chat "died". Track recent call
     # signatures + consecutive no-text tool rounds to bail early.
     _recent_call_sigs = collections.deque(maxlen=6)
+    # Companion detectors for the narrated variant of the same stall: the model
+    # re-announces an identical plan each round (so text "progress" resets the
+    # classic detector) while calling the same tool TYPE with slightly varying
+    # args (so the identical-signature checks never match). Seen 2026-07-12:
+    # generate_image had no native schema, the model substituted manage_memory
+    # and burned all 20 rounds narrating "I'll generate the image..." each time.
+    _recent_type_sigs = collections.deque(maxlen=6)
+    _recent_text_words = collections.deque(maxlen=6)
+    # Every distinct call signature seen this turn — a round that issues a
+    # signature not in here is doing NEW work and must not read as circling.
+    _seen_call_sigs: set = set()
     _stuck_rounds = 0
     # Frequency of each exact call signature (tool + args), for the runaway
     # backstop. Counting identical repeats — not distinct same-tool calls —
@@ -3307,6 +3374,23 @@ async def stream_agent_loop(
     _exhausted_rounds = False
 
     for round_num in range(1, max_rounds + 1):
+        # Re-trim as tool results accumulate. The pre-loop trim runs once and
+        # can't see the ~2 messages/round the loop appends; without this a long
+        # agentic session overflows a local model's window (llama.cpp then
+        # context-shifts away the system prompt + original request, or 400s).
+        # Preserves the first system message and the latest user turn.
+        if _trim_for_context and _soft_trim_budget > 0 and round_num > 1:
+            try:
+                _cur_tokens = estimate_tokens(messages)
+                if _cur_tokens > _soft_trim_budget:
+                    _re = _trim_for_context(messages, _soft_trim_budget, reserve_tokens=_soft_trim_reserve)
+                    _re_tokens = estimate_tokens(_re)
+                    if _re_tokens < _cur_tokens:
+                        logger.info("[agent] mid-loop re-trim round %s: %s -> %s tokens (budget=%s)",
+                                    round_num, _cur_tokens, _re_tokens, _soft_trim_budget)
+                        messages = _re
+            except Exception as _e:
+                logger.debug("[agent] mid-loop re-trim skipped: %s", _e)
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         native_tool_calls = []  # populated if model uses function calling
@@ -3384,6 +3468,15 @@ async def stream_agent_loop(
 
         _tool_names_sent = [t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")]
         logger.info(f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}")
+        # A relevant tool that is neither disabled nor sent has NO native
+        # schema — the prompt may still describe it, and a native model that
+        # reads about an uncallable tool substitutes the nearest schema it
+        # does have (the generate_image→manage_memory loop). Surface the gap
+        # loudly on round 1 so it's caught before it burns a session.
+        if _is_api_model and _relevant_tools and round_num == 1 and not _force_answer:
+            _schema_gap = set(_relevant_tools) - set(_tool_names_sent) - set(disabled_tools or [])
+            if _schema_gap:
+                logger.warning(f"[agent-debug] relevant tools missing from sent schemas (no native schema?): {sorted(_schema_gap)}")
 
         # Primary target + any configured fallback models. stream_llm_with_fallback
         # only switches on a pre-content failure, so streamed output is never
@@ -3862,13 +3955,29 @@ async def stream_agent_loop(
             # tool doesn't pin us in a forever loop.
             _intent_text = _strip_think_blocks(cleaned_round).strip()
             _intent_match = _INTENT_RE.search(_intent_text) if _intent_text else None
+            # A completed short answer can still MATCH the intent regex
+            # ("Let me check — yes, that's correct, no changes needed."). The
+            # tell is what follows the promise: a bare dropped promise has only
+            # the action's object after it ("let me check the logs"), while a
+            # completion has a CONCLUSION after it. If a conclusion signal
+            # appears after the matched phrase, it's a finished answer, not a
+            # dropped tool call — don't nudge.
+            _concluded = False
+            if _intent_match is not None:
+                _after = _intent_text[_intent_match.end():].lower()
+                _concluded = any(sig in _after for sig in (
+                    "yes", "no ", "correct", "done", "already", "complete",
+                    "here it", "here's", "here is", "works", "passed", "confirmed",
+                    "no change", "looks good", "that's", "there are no", "nothing to",
+                ))
             # Only nudge when the round REALLY looks like an unfinished
-            # promise: short response (<400 chars), no fenced code/answer,
-            # and an action-intent phrase was matched. Long answers that
-            # happen to contain "let me know" are not stalls.
+            # promise: short response (<400 chars), no fenced code/answer, an
+            # action-intent phrase matched, and no concluding statement after
+            # it. Long answers that merely contain "let me know" are not stalls.
             _looks_like_promise = (
                 not guide_only
                 and _intent_match is not None
+                and not _concluded
                 and len(_intent_text) < 400
                 and "```" not in _intent_text
                 and _intent_nudge_count < _MAX_INTENT_NUDGES
@@ -3924,9 +4033,34 @@ async def stream_agent_loop(
         # rounds (just "<think>\n\n</think>" + a tool call) must not read as
         # progress, so strip think before checking.
         _real_text = _strip_think_blocks(cleaned_round).strip()
-        # Circling = repeating a recent call with nothing written. Any
-        # progress (a NEW distinct call, or actual answer text) resets it.
-        if _is_repeat and not _real_text:
+        # Narrated circling: the model rephrases the same announcement and
+        # varies its (wrong) tool ARGS each round, so neither identical-sig
+        # detector fires. We catch it WITHOUT punishing legitimate iterative
+        # work (build→test→fix narrated "let me run the tests again", or a
+        # sequence of distinct edit_document FIND/REPLACEs). Requirements to
+        # count a round as narrated-circling, ALL must hold:
+        #   - same tool TYPE(s) as a recent round,
+        #   - narration is a near-repeat of a recent round's, AND
+        #   - this round issued NO new distinct call signature (every call
+        #     here was already seen) — i.e. no fresh work is happening.
+        # A genuinely new call signature means real progress → reset.
+        _type_sig = "|".join(sorted({b.tool_type for b in tool_blocks}))
+        _is_type_repeat = bool(tool_blocks) and _type_sig in _recent_type_sigs
+        _recent_type_sigs.append(_type_sig)
+        _words = _round_text_words(_real_text)
+        _is_text_repeat = _is_near_repeat_text(_words, _recent_text_words)
+        _recent_text_words.append(_words)
+        _has_new_call = any(
+            f"{b.tool_type}:{(b.content or '').strip()[:120]}" not in _seen_call_sigs
+            for b in tool_blocks
+        )
+        for _b in tool_blocks:
+            _seen_call_sigs.add(f"{_b.tool_type}:{(_b.content or '').strip()[:120]}")
+        _narrated_circling = _is_type_repeat and _is_text_repeat and not _has_new_call
+        # Circling = repeating a recent call with nothing written, or re-running
+        # already-seen calls behind a recycled announcement. Any real progress
+        # (a NEW distinct call, or actual answer text) resets the streak.
+        if (_is_repeat and not _real_text) or _narrated_circling:
             _stuck_rounds += 1
         else:
             _stuck_rounds = 0

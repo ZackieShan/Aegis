@@ -1244,6 +1244,27 @@ function _renderGrid() {
   grid.innerHTML = html;
   _wireUploadTile();
 
+  // Deleted/expired local image files would render as the browser's
+  // broken-image glyph. A capture-phase listener (error events don't bubble,
+  // but they fire in capture on ancestors) swaps any failed tile <img> for a
+  // themed placeholder. One-time, CSP-safe (no inline onerror).
+  if (!grid._errWired) {
+    grid._errWired = true;
+    grid.addEventListener('error', (ev) => {
+      const t = ev.target;
+      if (t && t.tagName === 'IMG' && !t._brokeHandled) {
+        t._brokeHandled = true;
+        const ph = document.createElement('div');
+        ph.className = 'gallery-img-broken';
+        ph.textContent = 'Image unavailable';
+        ph.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;'
+          + 'min-height:120px;font-size:11px;opacity:.6;background:var(--panel,#1b1b1b);'
+          + 'border-radius:6px;text-align:center;padding:8px;';
+        if (t.parentNode) t.parentNode.replaceChild(ph, t);
+      }
+    }, true);
+  }
+
   // Domino-in cascade the first render after opening (not on filter/sort/
   // load-more re-renders) — mirrors the document library.
   if (!_galleryCascaded) {

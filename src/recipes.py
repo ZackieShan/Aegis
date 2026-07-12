@@ -124,6 +124,18 @@ def validate_recipe(data: Dict[str, Any]) -> Optional[str]:
             return "edge references a missing node"
     if _topo_order(nodes, edges) is None:
         return "recipe has a cycle — remove the loop"
+    # Validate {{ref}} placeholders in node config point at REAL nodes. A
+    # typo'd {{summry}} silently resolved to "" (outputs.get(key,"")), so the
+    # recipe ran with a missing input and produced garbage with no error.
+    # `{{input}}` is the reserved run-input token.
+    for n in nodes:
+        cfg = n.get("config", {}) or {}
+        for v in cfg.values():
+            if not isinstance(v, str):
+                continue
+            for ref in _REF_RE.findall(v):
+                if ref != "input" and ref not in ids:
+                    return f"node {n.get('id')!r} references unknown node {{{{{ref}}}}}"
     return None
 
 

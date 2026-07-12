@@ -300,11 +300,26 @@ def setup_mcp_routes(mcp_manager: McpManager):
 
             args = json.loads(srv.args) if srv.args else []
             env = json.loads(srv.env) if srv.env else {}
+            command = srv.command
+            # NPX builtins (the Browser): recompute launch args instead of
+            # replaying the DB row — the fallback ladder may pick a different
+            # browser rung than the one stored at first registration, and the
+            # child needs the portable-node PATH to find node.exe.
+            try:
+                from src.builtin_mcp import _BUILTIN_NPX_SERVERS, _engine_node_env, _find_npx
+                if server_id in _BUILTIN_NPX_SERVERS:
+                    cfg = _BUILTIN_NPX_SERVERS[server_id]
+                    if "args_factory" in cfg:
+                        args = cfg["args_factory"]()
+                    command = _find_npx()
+                    env = {**env, **_engine_node_env()}
+            except Exception:
+                pass
             connected = await mcp_manager.connect_server(
                 server_id=server_id,
                 name=srv.name,
                 transport=srv.transport,
-                command=srv.command,
+                command=command,
                 args=args,
                 env=env,
                 url=srv.url,

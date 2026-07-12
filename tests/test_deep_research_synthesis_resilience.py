@@ -28,6 +28,8 @@ def _researcher():
     r = DeepResearcher.__new__(DeepResearcher)
     r.synthesis_window = 10
     r.max_report_tokens = 4096
+    # Heavy generation calls read self.synthesis_timeout (180 remote / 600 local).
+    r.synthesis_timeout = 180
     return r
 
 

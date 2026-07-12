@@ -74,12 +74,79 @@ def _which(name: str) -> Optional[str]:
 
 
 # ── model metadata ────────────────────────────────────────────────────────────
+# GGUFReader parses the full tensor index — 10-30s on a 20GB+ file, and far
+# worse while another model is streaming off the same disk. That latency made
+# GET /api/engine/status exceed the browser's fetch patience ("/engine fails
+# to fetch"). Model files rarely change, so cache the parsed header per
+# (size, mtime) and persist across restarts.
+_META_CACHE: Dict[str, Dict[str, Any]] = {}
+_META_CACHE_LOADED = False
+
+
+def _meta_cache_path() -> str:
+    try:
+        from src.constants import DATA_DIR
+        return os.path.join(DATA_DIR, "cache", "gguf_meta.json")
+    except Exception:
+        return os.path.join(_engine_dir(), ".gguf_meta_cache.json")
+
+
+def _file_key(path: str) -> Optional[List[Any]]:
+    try:
+        st = os.stat(path)
+        return [st.st_size, int(st.st_mtime)]
+    except OSError:
+        return None
+
+
+def _load_meta_cache() -> None:
+    global _META_CACHE_LOADED
+    if _META_CACHE_LOADED:
+        return
+    _META_CACHE_LOADED = True
+    try:
+        import json
+        with open(_meta_cache_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _META_CACHE.update(data)
+    except Exception:
+        pass
+
+
+def _save_meta_cache() -> None:
+    try:
+        import json
+        p = _meta_cache_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(_META_CACHE, f)
+    except Exception as e:
+        logger.debug(f"gguf meta cache save failed: {e}")
+
+
 def gguf_meta(path: str) -> Dict[str, Any]:
     """Layers / KV-heads / head-dim / trained-context from a GGUF header.
 
     Uses the `gguf` package when available (exact); returns {} otherwise so the
-    caller falls back to a heuristic.
+    caller falls back to a heuristic. Results are cached per (size, mtime).
     """
+    _load_meta_cache()
+    key = _file_key(path)
+    if key:
+        cached = _META_CACHE.get(path)
+        if cached and cached.get("key") == key and isinstance(cached.get("meta"), dict):
+            return dict(cached["meta"])
+    meta = _gguf_meta_uncached(path)
+    # Only cache real parses — a missing `gguf` package or unreadable file
+    # returns {} and must be retried, not remembered.
+    if key and meta:
+        _META_CACHE[path] = {"key": key, "meta": meta}
+        _save_meta_cache()
+    return meta
+
+
+def _gguf_meta_uncached(path: str) -> Dict[str, Any]:
     try:
         import gguf
     except Exception:

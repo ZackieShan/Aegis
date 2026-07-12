@@ -101,11 +101,32 @@ async def _run_subprocess_streaming(
     )
 
 class BashTool:
+    @staticmethod
+    async def _spawn(content: str, **kwargs) -> asyncio.subprocess.Process:
+        """Spawn the agent's shell command under a REAL shell.
+
+        On Windows create_subprocess_shell means cmd.exe — but the agent
+        prompt teaches bash syntax (heredocs, `if [ ... ]`, $VARs), and the
+        background (#!bg, src/bg_jobs.py) and /api/shell/exec paths already
+        run Git Bash. Route the foreground tool through Git Bash too so the
+        same command doesn't succeed in background and fail in foreground.
+        PowerShell/cmd invocations pass through untouched (bash -c would
+        mangle $env:VAR and cmd flags). Mirrors routes/shell_routes.py.
+        """
+        from core.platform_compat import IS_WINDOWS, find_bash
+        if IS_WINDOWS:
+            cmd_trim = content.strip()
+            if not (cmd_trim.startswith("powershell") or cmd_trim.startswith("cmd ")):
+                bash = find_bash()
+                if bash:
+                    return await asyncio.create_subprocess_exec(bash, "-c", content, **kwargs)
+        return await asyncio.create_subprocess_shell(content, **kwargs)
+
     async def execute(self, content: str, ctx: dict) -> dict:
         from src.tool_execution import agent_cwd, _truncate
         progress_cb = ctx.get("progress_cb")
         _subproc_env = ctx.get("subproc_env")
-        proc = await asyncio.create_subprocess_shell(
+        proc = await self._spawn(
             content,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -129,10 +150,15 @@ class BashTool:
 class PythonTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         from src.tool_execution import agent_cwd, _truncate
+        from src.runtime_paths import get_python_exe
         progress_cb = ctx.get("progress_cb")
         _subproc_env = ctx.get("subproc_env")
+        python = get_python_exe()
+        if not python:
+            return {"error": "python tool unavailable: no Python interpreter found "
+                             "(portable build without a system python)", "exit_code": 1}
         proc = await asyncio.create_subprocess_exec(
-            (sys.executable or "python"), "-I", "-c", content,
+            python, "-I", "-c", content,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=_subproc_env,

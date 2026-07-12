@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'aegis-v363';
+const CACHE_NAME = 'aegis-v366';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -45,6 +45,11 @@ const PRECACHE = [
   '/static/js/control-center/index.js',
   '/static/js/canvas/index.js',
   '/static/js/voice-mode/index.js',
+  '/static/js/modalA11y.js',
+  '/static/js/a11y.js',
+  '/static/js/assistant.js',
+  '/static/js/cookbookSchedule.js',
+  '/static/js/tourAutoplay.js',
   '/static/js/theme.js',
   '/static/js/censor.js',
   '/static/js/settings.js',
@@ -65,6 +70,11 @@ const PRECACHE = [
   '/static/js/sidebar-layout.js',
   '/static/js/section-management.js',
   '/static/lib/highlight.min.js',
+  // Math + diagrams, vendored so they work offline (KaTeX fonts are loaded
+  // on demand by katex.min.css and cached by the asset handler as used).
+  '/static/lib/katex/katex.min.css?v=0.16.22',
+  '/static/lib/katex/katex.min.js?v=0.16.22',
+  '/static/lib/mermaid/mermaid.min.js?v=11',
 ];
 
 self.addEventListener('install', (e) => {
@@ -126,7 +136,10 @@ self.addEventListener('fetch', (e) => {
           caches.open(CACHE_NAME).then(cache => cache.put(e.request, copy));
         }
         return res;
-      }).catch(() => caches.match(e.request))
+        // Offline fallback: index.html loads modules with ?v= cache-busting
+        // query strings, but PRECACHE stores bare paths — so match ignoring
+        // the query, or the precache never satisfies an offline load.
+      }).catch(() => caches.match(e.request, { ignoreSearch: true }))
     );
     return;
   }
@@ -135,7 +148,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/static/')) {
     e.respondWith(
       caches.open(CACHE_NAME).then(async cache => {
-        const cached = await cache.match(e.request);
+        const cached = await cache.match(e.request, { ignoreSearch: true });
         const fetching = fetch(e.request).then(res => {
           if (res && res.ok) cache.put(e.request, res.clone());
           return res;

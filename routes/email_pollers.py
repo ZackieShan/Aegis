@@ -120,30 +120,29 @@ async def _run_auto_summarize_once(do_summary: bool = True, do_reply: bool = Tru
                                    account_id: str | None = None,
                                    max_process: int | None = None,
                                    progress_cb=None) -> str:
-    """One iteration of the email scan. Temporarily flips settings flags
-    so the existing background-loop logic runs exactly once for the requested ops."""
-    settings = _load_settings()
-    prev = {k: settings.get(k, False) for k in
-            ("email_auto_summarize", "email_auto_reply", "email_auto_tag",
-             "email_auto_spam", "email_auto_calendar")}
-    settings["email_auto_summarize"] = bool(do_summary)
-    settings["email_auto_reply"] = bool(do_reply)
-    settings["email_auto_tag"] = bool(do_tag)
-    settings["email_auto_spam"] = bool(do_spam)
-    settings["email_auto_calendar"] = bool(do_calendar)
-    _save_settings(settings)
-    try:
-        return await _auto_summarize_pass(
-            days_back=days_back,
-            account_id=account_id,
-            max_process=max_process,
-            progress_cb=progress_cb,
-        )
-    finally:
-        s2 = _load_settings()
-        for k, v in prev.items():
-            s2[k] = v
-        _save_settings(s2)
+    """One iteration of the email scan for the requested ops, passed as an
+    explicit override so the user's persisted email_auto_* settings are never
+    touched."""
+    # Pass the requested ops as an explicit override instead of flipping the
+    # user's persisted email_auto_* settings on disk and restoring them in a
+    # finally. That mutate/restore was a data-corruption hazard: two scheduled
+    # passes overlapping (or a crash mid-run) left the user's real auto-*
+    # settings permanently changed, and any concurrent reader saw the transient
+    # state. The override never touches settings.json.
+    flags = {
+        "email_auto_summarize": bool(do_summary),
+        "email_auto_reply": bool(do_reply),
+        "email_auto_tag": bool(do_tag),
+        "email_auto_spam": bool(do_spam),
+        "email_auto_calendar": bool(do_calendar),
+    }
+    return await _auto_summarize_pass(
+        days_back=days_back,
+        account_id=account_id,
+        max_process=max_process,
+        progress_cb=progress_cb,
+        flags=flags,
+    )
 
 
 def _latest_inbox_fallback_uids(conn, reconnect):
@@ -176,11 +175,14 @@ def _latest_inbox_fallback_uids(conn, reconnect):
         return [], reconnect()
 
 
-async def _auto_summarize_pass(days_back: int = 1, account_id: str | None = None, max_process: int | None = None, progress_cb=None) -> str:
+async def _auto_summarize_pass(days_back: int = 1, account_id: str | None = None, max_process: int | None = None, progress_cb=None, flags: dict | None = None) -> str:
     """Single pass of the auto-summarize/reply scan.
 
     When account_id is None, iterates over every enabled account in
     email_accounts and runs one pass per account, concatenating the results.
+
+    `flags` (optional) explicitly selects which ops to run (email_auto_* keys);
+    when None the persisted settings decide (the background-loop path).
     """
     # Multi-account fan-out: if the caller didn't pick an account, hit them all.
     if account_id is None:
@@ -208,6 +210,7 @@ async def _auto_summarize_pass(days_back: int = 1, account_id: str | None = None
                 account_id=(ids[0] if ids else None),
                 max_process=max_process,
                 progress_cb=progress_cb,
+                flags=flags,
             )
         outs = []
         for idx, aid in enumerate(ids, start=1):
@@ -218,6 +221,7 @@ async def _auto_summarize_pass(days_back: int = 1, account_id: str | None = None
                     account_id=aid,
                     max_process=max_process,
                     progress_cb=progress_cb,
+                    flags=flags,
                 )
                 outs.append(f"[{names.get(aid, aid[:8])}] {result}")
             except Exception as e:
@@ -229,22 +233,25 @@ async def _auto_summarize_pass(days_back: int = 1, account_id: str | None = None
         account_id=account_id,
         max_process=max_process,
         progress_cb=progress_cb,
+        flags=flags,
     )
 
 
-async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None = None, max_process: int | None = None, progress_cb=None) -> str:
+async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None = None, max_process: int | None = None, progress_cb=None, flags: dict | None = None) -> str:
     """Single pass of the auto-summarize/reply scan for ONE account.
-    Reads current settings flags."""
+
+    Reads the op flags from `flags` when provided (the one-shot manual runner),
+    else from persisted settings (the background loop)."""
     import asyncio
     import sqlite3 as _sql3
     from src.llm_core import _uses_max_completion_tokens
 
-    settings = _load_settings()
-    auto_sum = settings.get("email_auto_summarize", False)
-    auto_reply = settings.get("email_auto_reply", False)
-    auto_tag = settings.get("email_auto_tag", False)
-    auto_spam = settings.get("email_auto_spam", False)
-    auto_cal = settings.get("email_auto_calendar", False)
+    src = flags if flags is not None else _load_settings()
+    auto_sum = src.get("email_auto_summarize", False)
+    auto_reply = src.get("email_auto_reply", False)
+    auto_tag = src.get("email_auto_tag", False)
+    auto_spam = src.get("email_auto_spam", False)
+    auto_cal = src.get("email_auto_calendar", False)
     if not auto_sum and not auto_reply and not auto_tag and not auto_spam and not auto_cal:
         return "Nothing to do"
 

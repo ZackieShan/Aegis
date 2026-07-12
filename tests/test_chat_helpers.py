@@ -146,7 +146,8 @@ class _FakeSession:
         self.model = model
         self.history = []
 
-    def add_message(self, message):
+    def add_message(self, message, persist=True):
+        # persist mirrors the real Session.add_message (incognito passes False).
         self.history.append(message)
 
 
