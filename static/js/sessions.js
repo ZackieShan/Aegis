@@ -1759,6 +1759,11 @@ export async function loadSessions() {
 }
 
 export async function selectSession(id, { keepSidebar = false, showLoading = true, immediateLoading = false } = {}) {
+  // Exit compare mode cleanly if active
+  if (window.compareModule && window.compareModule.isActive()) {
+    window.compareModule.deactivate(true);
+    return; // deactivate does a page reload
+  }
   try {
     const navToken = ++_sessionNavToken;
     const prevSessionId = currentSessionId;
@@ -1813,6 +1818,11 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
       sendBtn.dataset.mode = '';
       sendBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
       sendBtn.title = 'Send message';
+    }
+    // Deactivate compare mode on session switch
+    if (window.compareModule) {
+      if (window.compareModule.isActive()) window.compareModule.deactivate(true);
+      else if (window.compareModule.hasVisibleResults()) window.compareModule.cleanupResults();
     }
     const msgInput = document.getElementById('message');
     if (msgInput) {

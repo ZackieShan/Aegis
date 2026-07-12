@@ -329,9 +329,18 @@ class DeepResearcher:
                     self._emit(phase="error", message=f"Search engine unavailable: {err_detail}")
                     if not findings:
                         return (
-                            f"**Search unavailable** — Web search failed after "
+                            f"**Search unavailable** — Web search returned nothing after "
                             f"{round_num} rounds. Error: {err_detail}\n\n"
-                            "Please check your search provider settings and ensure the service is running."
+                            "This usually means the current search provider is blocked or offline. "
+                            "DuckDuckGo (the keyless default) is frequently rate-limited and returns "
+                            "empty results.\n\n"
+                            "**Quickest fix:** run **`/doctor`** in chat — it checks the search "
+                            "backend and offers a one-command fix if a package is missing.\n\n"
+                            "**Or** open **Settings → Search** and either\n"
+                            "- pick **Brave**, **Tavily**, or **Serper** and paste an API key "
+                            "(all have free tiers), or\n"
+                            "- pick **SearXNG** and point it at a running SearXNG instance.\n\n"
+                            "Deep Research and the agent's web search both use whatever you set there."
                         )
                     break
 

@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from src.constants import RECIPES_DIR
 
-NODE_TYPES = {"input", "tool", "model", "output"}
+NODE_TYPES = {"input", "tool", "model", "output", "branch", "loop"}
 _REF_RE = re.compile(r"\{\{\s*([\w-]+)\s*\}\}")
 _MAX_OUTPUT_CHARS = 8000
 
@@ -170,6 +170,7 @@ async def run_recipe(recipe: Dict[str, Any], run_input: str, owner: Optional[str
 
     outputs: Dict[str, str] = {}
     steps: List[Dict[str, Any]] = []
+    skipped: set = set()   # nodes on a branch that wasn't taken
 
     from src.tool_utils import get_mcp_manager
     mcp = get_mcp_manager()
@@ -178,7 +179,16 @@ async def run_recipe(recipe: Dict[str, Any], run_input: str, owner: Optional[str
         node = nodes[nid]
         ntype = node.get("type")
         cfg = node.get("config", {}) or {}
-        upstream = [outputs.get(p, "") for p in parents.get(nid, [])]
+        _pars = parents.get(nid, [])
+        # Skip a node whose every upstream path was cut by a branch. A node with
+        # at least one live parent still runs (cut parents contribute nothing).
+        if ntype != "input" and _pars and all(p in skipped for p in _pars):
+            skipped.add(nid)
+            outputs[nid] = ""
+            steps.append({"id": nid, "type": ntype, "label": cfg.get("label") or _node_label(node),
+                          "output": "(skipped — upstream branch not taken)"})
+            continue
+        upstream = [outputs.get(p, "") for p in _pars]
         try:
             if ntype == "input":
                 out = run_input if not cfg.get("value") else _substitute(str(cfg["value"]), outputs, run_input)
@@ -188,12 +198,23 @@ async def run_recipe(recipe: Dict[str, Any], run_input: str, owner: Optional[str
                 out = await _run_tool_node(mcp, cfg, outputs, run_input)
             elif ntype == "model":
                 out = await _run_model_node(cfg, upstream, outputs, run_input, owner)
+            elif ntype == "loop":
+                out = await _run_loop_node(cfg, upstream, outputs, run_input, owner)
+            elif ntype == "branch":
+                _inval = "\n\n".join(u for u in upstream if u) or run_input
+                if _eval_condition(cfg.get("condition") or {}, _inval):
+                    out = _inval  # condition met — pass the data through
+                else:
+                    skipped.add(nid)
+                    out = "(branch: condition not met — downstream skipped)"
             else:
                 out = f"[unknown node type {ntype}]"
         except Exception as e:  # one bad node shouldn't kill the whole run
             out = f"[error in node {nid}: {type(e).__name__}: {e}]"
         out = (out or "")[:_MAX_OUTPUT_CHARS]
-        outputs[nid] = out
+        # A cut branch contributes nothing downstream (so its skip note doesn't
+        # bleed into a live node's context), but we still show it in the steps.
+        outputs[nid] = "" if nid in skipped else out
         steps.append({"id": nid, "type": ntype, "label": cfg.get("label") or _node_label(node), "output": out})
 
     out_nodes = [nid for nid, n in nodes.items() if n.get("type") == "output"]
@@ -205,11 +226,15 @@ async def run_recipe(recipe: Dict[str, Any], run_input: str, owner: Optional[str
 
 def _node_label(node: Dict) -> str:
     cfg = node.get("config", {}) or {}
-    if node.get("type") == "tool":
+    t = node.get("type")
+    if t == "tool":
         return cfg.get("tool", "tool")
-    if node.get("type") == "model":
-        return cfg.get("model", "model")
-    return node.get("type", "node")
+    if t in ("model", "loop"):
+        return cfg.get("model", t)
+    if t == "branch":
+        c = cfg.get("condition") or {}
+        return f"branch: {c.get('kind', '?')} {c.get('value', '')}".strip()
+    return t or "node"
 
 
 async def _run_tool_node(mcp, cfg: Dict, outputs: Dict[str, str], run_input: str) -> str:
@@ -239,24 +264,86 @@ def _qualify_tool(mcp, tool_name: str) -> Optional[str]:
     return None
 
 
-async def _run_model_node(cfg: Dict, upstream: List[str], outputs: Dict[str, str],
-                          run_input: str, owner: Optional[str]) -> str:
+async def _model_generate(model_spec: str, system: str, user: str, owner: Optional[str]) -> str:
+    """Resolve a model spec and run one completion. Shared by model + loop nodes."""
     from src.ai_interaction import _resolve_model
     from src.llm_core import llm_call_async
     import asyncio
+    if not (model_spec or "").strip():
+        return "[no model selected]"
+    url, model, headers = await asyncio.to_thread(_resolve_model, model_spec, owner=owner)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    return await llm_call_async(url, model, messages, headers=headers, timeout=180)
 
+
+async def _run_model_node(cfg: Dict, upstream: List[str], outputs: Dict[str, str],
+                          run_input: str, owner: Optional[str]) -> str:
     model_spec = (cfg.get("model") or "").strip()
     prompt = _substitute(cfg.get("prompt") or "", outputs, run_input)
     if not model_spec:
         return "[model node: no model selected]"
     if not prompt:
         prompt = "\n\n".join(u for u in upstream if u)
-    url, model, headers = await asyncio.to_thread(_resolve_model, model_spec, owner=owner)
     context = "\n\n".join(u for u in upstream if u)
     user_content = (f"Context from previous steps:\n\n{context}\n\n---\n\n{prompt}"
                     if context and "{{" not in (cfg.get("prompt") or "") else prompt)
-    messages = [
-        {"role": "system", "content": "You are one step in an automated workflow. Do exactly what the instruction asks, concisely."},
-        {"role": "user", "content": user_content},
-    ]
-    return await llm_call_async(url, model, messages, headers=headers, timeout=180)
+    return await _model_generate(
+        model_spec,
+        "You are one step in an automated workflow. Do exactly what the instruction asks, concisely.",
+        user_content, owner)
+
+
+# ── control-flow nodes ───────────────────────────────────────────────────────
+def _eval_condition(cond: Dict, value: str) -> bool:
+    """Evaluate a branch/loop condition against a text value."""
+    kind = (cond.get("kind") or "contains").lower()
+    needle = str(cond.get("value") or "")
+    v = value or ""
+    try:
+        if kind == "contains":
+            return needle.lower() in v.lower()
+        if kind == "not_contains":
+            return needle.lower() not in v.lower()
+        if kind == "regex":
+            return re.search(needle, v, re.I) is not None
+        if kind == "nonempty":
+            return bool(v.strip())
+        if kind == "empty":
+            return not v.strip()
+    except Exception:
+        return False
+    return False
+
+
+async def _run_loop_node(cfg: Dict, upstream: List[str], outputs: Dict[str, str],
+                         run_input: str, owner: Optional[str]) -> str:
+    """Iteratively run a model to refine a result: feed each output back as
+    {{prev}} up to max_iters times, stopping early if `until` matches."""
+    model_spec = (cfg.get("model") or "").strip()
+    if not model_spec:
+        return "[loop node: no model selected]"
+    try:
+        max_iters = int(cfg.get("max_iters", 3))
+    except Exception:
+        max_iters = 3
+    max_iters = max(1, min(max_iters, 8))
+    until = cfg.get("until") or {}
+    _stop_active = bool(until.get("kind")) and (bool(until.get("value")) or until.get("kind") in ("nonempty", "empty"))
+    prompt_tmpl = (cfg.get("prompt") or
+                   "Improve the result below. If it is already good, return it unchanged.\n\n{{prev}}")
+    prev = "\n\n".join(u for u in upstream if u) or run_input
+    out = prev
+    iters = 0
+    for _ in range(max_iters):
+        iters += 1
+        user = _substitute(prompt_tmpl, {**outputs, "prev": prev}, run_input)
+        out = await _model_generate(
+            model_spec,
+            "You are one step in an automated workflow that iterates to refine a result. Return only the improved result.",
+            user, owner)
+        if _stop_active and _eval_condition(until, out):
+            break
+        prev = out
+    if iters > 1:
+        out = f"{out}\n\n_(loop: {iters} iteration{'s' if iters != 1 else ''})_"
+    return out

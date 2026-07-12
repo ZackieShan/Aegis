@@ -17,7 +17,7 @@ export function syncRailSide() {
  * @param {Object} Storage - Storage module
  * @param {Object} opts
  * @param {Object} opts.documentModule - Document module (for swapSide)
- * @param {Function} opts._closeExclusiveOverlay
+ * @param {Function} opts._closeCompareIfActive
  * @param {Function} opts._deactivateIncognito
  * @param {Object} opts.presetsModule
  * @param {Object} opts.sessionModule
@@ -27,7 +27,7 @@ export function syncRailSide() {
  */
 export function initSidebarLayout(Storage, opts) {
   const {
-    documentModule, _closeExclusiveOverlay, _deactivateIncognito,
+    documentModule, _closeCompareIfActive, _deactivateIncognito,
     presetsModule, sessionModule, el, _defaultChat, _syncResearchIndicator
   } = opts;
 
@@ -115,6 +115,11 @@ export function initSidebarLayout(Storage, opts) {
   window._odyOpenSidebar = function(side) {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
+    // On mobile, never open the sidebar while Compare is running — the panes
+    // own the screen and stray gestures (swipe, dragging a dock chip to the X)
+    // were popping it open. Blocking the open helper covers every path.
+    const cc = document.getElementById('chat-container');
+    if (window.innerWidth < 768 && cc && cc.classList.contains('compare-active')) return;
     _userToggledSidebar = true;
     // Optionally place the sidebar on a specific edge (the swipe gesture passes
     // the direction). Persist it + re-anchor the doc panel.
@@ -500,6 +505,10 @@ function _initChatSwipeToOpenSidebar() {
     // (body.doc-view), notes is open (body.notes-view), or a tool modal is up.
     if (document.body.classList.contains('doc-view') ||
         document.body.classList.contains('notes-view')) return;
+    // Not while Compare is running — it takes over #chat-container with its own
+    // panes/scroll, and the swipe-to-open-sidebar gesture gets in the way there.
+    const cc = document.getElementById('chat-container');
+    if (cc && cc.classList.contains('compare-active')) return;
     const anyModalOpen = [...document.querySelectorAll('.modal')].some(
       m => !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none');
     if (anyModalOpen) return;

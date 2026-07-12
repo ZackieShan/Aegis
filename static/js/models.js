@@ -77,6 +77,8 @@ function _setSortMode(mode) {
  * Build a single model row element.
  */
 function _startChat(url, mid, endpointId) {
+  // Block model switching while compare mode is active
+  if (window.compareModule && window.compareModule.isActive()) return;
   _trackUsage(mid);
   if (sessionModule) {
     sessionModule.createDirectChat(url, mid, endpointId);

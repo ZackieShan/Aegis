@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from typing import List, Optional
 from urllib.parse import urljoin, urlparse, parse_qs
 
@@ -123,6 +124,37 @@ def _safesearch_for(provider: str) -> Optional[str]:
 
 # ── SearXNG ──
 
+# Circuit breaker: when the configured SearXNG instance is unreachable (not
+# running — the common case for users who never set one up), skip it for a
+# couple minutes instead of eating a connect timeout on EVERY search before the
+# provider fallback kicks in. One quick failure, then straight to the fallback.
+_searxng_down_until = 0.0
+_SEARXNG_COOLDOWN = 120.0
+
+
+def _searxng_is_cooling() -> bool:
+    return time.time() < _searxng_down_until
+
+
+def _mark_searxng_down() -> None:
+    global _searxng_down_until
+    _searxng_down_until = time.time() + _SEARXNG_COOLDOWN
+    logger.info("SearXNG unreachable — skipping it for %ds; using the fallback provider.", int(_SEARXNG_COOLDOWN))
+
+
+def _mark_searxng_up() -> None:
+    global _searxng_down_until
+    _searxng_down_until = 0.0
+
+
+def _is_conn_error(exc: Exception) -> bool:
+    """A connection-level failure (host down / refused / unreachable), not an HTTP error."""
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout)):
+        return True
+    s = str(exc).lower()
+    return any(k in s for k in ("refused", "10061", "unreachable", "no connection", "timed out", "getaddrinfo"))
+
+
 _NEWS_HINTS = ("news", "nyheter", "headlines", "breaking", "latest", "today", "idag")
 
 # Default general engines (google/duckduckgo/brave/startpage/wikipedia) are
@@ -135,6 +167,8 @@ _GENERAL_ENGINES = os.environ.get("SEARXNG_GENERAL_ENGINES", "bing,mojeek,presea
 def searxng_search_api(query: str, count: Optional[int] = None, categories: str = "general",
                        time_filter: Optional[str] = None) -> List[dict]:
     """Search using SearXNG JSON API. Returns list of {title, url, snippet}."""
+    if _searxng_is_cooling():
+        return []  # recently seen unreachable — skip fast, let the fallback answer
     count = count if count is not None else _get_result_count()
     instance = _get_search_instance()
     api_key = ""
@@ -188,7 +222,8 @@ def searxng_search_api(query: str, count: Optional[int] = None, categories: str 
                 f"{instance}/search",
                 params=search_params,
                 headers=headers or None,
-                timeout=15,
+                # Short connect timeout so a down instance fails in ~4s, not 15.
+                timeout=httpx.Timeout(connect=4.0, read=15.0, write=15.0, pool=4.0),
             )
             response.raise_for_status()
             data = response.json()
@@ -233,12 +268,19 @@ def searxng_search_api(query: str, count: Optional[int] = None, categories: str 
             )
             parsed, data = _run(fallback)
         logger.info(f"SearXNG JSON API returned {len(parsed)} results for: {query}")
+        _mark_searxng_up()
         if not parsed:
             unresponsive = data.get("unresponsive_engines") if isinstance(data, dict) else None
             if unresponsive:
                 logger.info(f"SearXNG unresponsive engines for {query!r}: {unresponsive}")
         return parsed
     except Exception as e:
+        # Host unreachable → open the circuit and bail to the provider fallback;
+        # the HTML fallback would just fail the same way and double the wait.
+        if _is_conn_error(e):
+            _mark_searxng_down()
+            logger.warning(f"SearXNG unreachable ({e}); skipping HTML fallback.")
+            return []
         logger.warning(f"SearXNG JSON API search failed: {e}")
         html_results = searxng_search(query, max_results=count)
         if html_results:

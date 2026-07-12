@@ -16,6 +16,7 @@ const TOUR_FOR_MODAL = {
   'doclib-modal':           'tour-library',
   'cookbook-modal':         'tour-cookbook',
   'research-overlay':       'tour-research',
+  'compare-model-overlay':  'tour-compare',
   'theme-modal':            'tour-theme',
   'settings-modal':         'tour-settings',
   'gallery-modal':          'tour-gallery',

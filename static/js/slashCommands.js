@@ -20,7 +20,7 @@ import documentModule from './document.js';
 import workspaceModule from './workspace.js';
 import settingsModule from './settings.js';
 import cookbookModule from './cookbook.js';
-import { EVAL_PROMPTS } from './samplePrompts.js';
+import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
 
 // ── Module state ──────────────────────────────────────────────────────
@@ -1338,7 +1338,7 @@ async function _cmdToggleSidebar(args, ctx) {
 async function _cmdOpen(args, ctx) {
   const target = (args[0] || '').trim().toLowerCase();
   if (!target) {
-    slashReply('Open what? Try /open Cookbook, /open Settings, /open Gallery, /open Notes, /open Tasks, /open Library, /open Research, or /open Recipes.');
+    slashReply('Open what? Try /open Cookbook, /open Settings, /open Gallery, /open Notes, /open Tasks, /open Library, /open Research, or /open Compare.');
     return true;
   }
   const clickFirst = (...ids) => {
@@ -1371,6 +1371,7 @@ async function _cmdOpen(args, ctx) {
       memory: ['tool-memory-btn', 'rail-memory'],
       memories: ['tool-memory-btn', 'rail-memory'],
       research: ['tool-research-btn', 'rail-research'],
+      compare: ['tool-compare-btn', 'rail-compare'],
       recipes: ['tool-recipes-btn', 'rail-recipes'],
       theme: ['tool-theme-btn', 'rail-theme'],
     };
@@ -1428,6 +1429,350 @@ async function _cmdToolPanel(tool, args, ctx) {
     return true;
   }
   return _cmdOpen([target], ctx);
+}
+
+// Capability self-check + guarded self-heal. `/doctor` lists what's healthy and
+// what's broken; `/doctor fix <id>` runs the ONE allowlisted remedy for that
+// check (typing it IS your consent — nothing installs without you asking).
+async function _cmdDoctor(args) {
+  const sub = (args[0] || '').toLowerCase();
+  if (sub === 'fix' && args[1]) {
+    const id = args[1].toLowerCase();
+    await typewriterReply(`Applying the fix for "${id}"…`);
+    try {
+      const r = await fetch(`/api/doctor/fix/${encodeURIComponent(id)}`, { method: 'POST', credentials: 'same-origin' });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) {
+        slashReply(`✓ Fixed **${id}**. ` + (d.restart ? 'Restart Aegis to apply it.' : 'It should work now.'));
+      } else {
+        slashReply(`✗ Couldn't fix **${id}**: ${d.error || 'unknown error'}` + (d.output ? `\n\n<pre>${(d.output || '').replace(/</g, '&lt;')}</pre>` : ''));
+      }
+    } catch (e) {
+      slashReply(`✗ Fix failed: ${e.message}`);
+    }
+    return true;
+  }
+  await typewriterReply('Running a system check…');
+  try {
+    const res = await fetch('/api/doctor', { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({ checks: [] }));
+    const lines = ['**System check**\n'];
+    (data.checks || []).forEach(c => {
+      lines.push(`${c.ok ? '✅' : '❌'} **${c.label}** — ${c.detail}`);
+      if (!c.ok && c.remedy) {
+        if (c.remedy.auto) {
+          const verb = c.remedy.kind === 'pip' ? `install \`${c.remedy.package}\`` : `set up \`${c.remedy.package}\``;
+          lines.push(`&nbsp;&nbsp;&nbsp;→ **Fixable:** type \`/doctor fix ${c.id}\` and I'll ${verb} (asks nothing else).`);
+        }
+        if (c.remedy.hint) lines.push(`&nbsp;&nbsp;&nbsp;→ ${c.remedy.hint}`);
+      }
+    });
+    lines.push(data.problems ? `\n${data.problems} issue(s) found.` : '\nEverything looks healthy. 🎉');
+    slashReply(lines.join('\n'));
+  } catch (e) {
+    slashReply(`System check failed: ${e.message}`);
+  }
+  return true;
+}
+
+// Local observability — show recent LLM/agent calls (model, latency, tools).
+async function _cmdTraces(args) {
+  await typewriterReply('Reading recent traces…');
+  try {
+    const [sres, lres] = await Promise.all([
+      fetch('/api/traces/stats', { credentials: 'same-origin' }),
+      fetch('/api/traces?limit=12', { credentials: 'same-origin' }),
+    ]);
+    const stats = await sres.json().catch(() => ({}));
+    const data = await lres.json().catch(() => ({ traces: [] }));
+    if (!stats.enabled) { slashReply('Tracing is **off**. Enable it in Settings (or set `tracing_enabled`).'); return true; }
+    const lines = [`**Observability** — ${stats.total || 0} calls recorded`];
+    (stats.by_model || []).slice(0, 5).forEach(m => {
+      lines.push(`&nbsp;&nbsp;• \`${m.model}\` — ${m.calls} calls, avg ${m.avg_latency_ms ?? '—'} ms, ${m.output_tokens} out-tokens`);
+    });
+    lines.push('\n**Recent:**');
+    (data.traces || []).forEach(t => {
+      const secs = t.latency_ms != null ? (t.latency_ms / 1000).toFixed(1) + 's' : '—';
+      const tools = (t.tool_calls && t.tool_calls.length) ? ` · 🔧 ${t.tool_calls.map(x => String(x).split('__').pop()).join(', ')}` : '';
+      const err = t.error ? ' · ⚠ ' + t.error : '';
+      lines.push(`&nbsp;&nbsp;\`${t.kind}\` ${t.model || '?'} — ${secs}${t.output_tokens ? ' · ' + t.output_tokens + ' tok' : ''}${tools}${err}`);
+    });
+    if (!(data.traces || []).length) lines.push('&nbsp;&nbsp;_(no calls yet — send a message)_');
+    slashReply(lines.join('\n'));
+  } catch (e) {
+    slashReply('Could not read traces: ' + e.message);
+  }
+  return true;
+}
+
+// Local knowledge-graph memory. `/graph <term>` recalls connected facts;
+// `/graph build` extracts a graph from your saved memories; `/graph stats`.
+async function _cmdGraph(args) {
+  const sub = (args[0] || '').toLowerCase();
+  try {
+    if (sub === 'build') {
+      await typewriterReply('Extracting a knowledge graph from your saved memories…');
+      const r = await fetch('/api/graph/build', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) slashReply(`Built the graph: **${d.triples_added}** new facts from ${d.processed} memories (total ${d.total}). Try \`/graph <term>\`.`);
+      else slashReply('Build failed: ' + (d.error || 'unknown'));
+      return true;
+    }
+    if (sub === 'stats' || !args.length) {
+      const d = await (await fetch('/api/graph/stats', { credentials: 'same-origin' })).json();
+      const ent = (d.entities || []).slice(0, 8).map(e => `\`${e.name}\` (${e.count})`).join(', ');
+      slashReply(`**Knowledge graph** — ${d.total || 0} facts${ent ? '\n\nTop entities: ' + ent : ''}` +
+                 (d.total ? '\n\nRecall with `/graph <term>`.' : '\n\nEmpty — run `/graph build` to extract from your memories.'));
+      return true;
+    }
+    const term = args.join(' ');
+    const d = await (await fetch('/api/graph/query?q=' + encodeURIComponent(term), { credentials: 'same-origin' })).json();
+    const facts = d.facts || [];
+    if (!facts.length) { slashReply(`No graph facts about \`${term}\`. (Run \`/graph build\` if you haven't.)`); return true; }
+    const lines = [`**Knowledge graph — ${term}**`];
+    facts.slice(0, 20).forEach(f => lines.push(`&nbsp;&nbsp;• ${f.subject} — *${f.relation}* — ${f.object}`));
+    slashReply(lines.join('\n'));
+  } catch (e) {
+    slashReply('Graph memory error: ' + e.message);
+  }
+  return true;
+}
+
+// Local coding agent (Aider). Set a workspace once, then describe edits in plain
+// English — Aegis drives Aider on your local model, scoped to that folder. Inside
+// a git repo each edit auto-commits, so anything is revertible with `git revert`.
+//   /code ws <path>     point at a repo/folder
+//   /code <task>        make the change
+//   /code status        what's available + current setup
+//   /code model <name>  pin a model (default: best local coder)
+async function _cmdCode(args) {
+  const sub = (args[0] || '').toLowerCase();
+
+  if (sub === 'ws' || sub === 'workspace' || sub === 'cwd' || sub === 'dir') {
+    const path = args.slice(1).join(' ').trim();
+    if (!path) {
+      const cur = localStorage.getItem('aegis_code_ws');
+      slashReply(cur ? `Coding workspace: \`${cur}\`` : 'No workspace set. Use `/code ws <path>` (point at a repo or folder).');
+      return true;
+    }
+    localStorage.setItem('aegis_code_ws', path);
+    slashReply(`Coding workspace set to \`${path}\`.\n\nNow describe an edit — e.g. \`/code add a --verbose flag to cli.py\`.`);
+    return true;
+  }
+
+  if (sub === 'model') {
+    const m = args.slice(1).join(' ').trim();
+    if (!m) {
+      const cur = localStorage.getItem('aegis_code_model');
+      slashReply(cur ? `Preferred coding model: \`${cur}\` (reset with \`/code model auto\`).`
+                     : 'Model: **auto** (best local coder). Override with `/code model <name>`.');
+      return true;
+    }
+    if (m.toLowerCase() === 'auto') { localStorage.removeItem('aegis_code_model'); slashReply('Coding model set to **auto**.'); return true; }
+    localStorage.setItem('aegis_code_model', m);
+    slashReply(`Coding model set to \`${m}\`.`);
+    return true;
+  }
+
+  if (sub === 'status' || sub === 'info') {
+    try {
+      const d = await (await fetch('/api/code/status', { credentials: 'same-origin' })).json();
+      if (!d.available) {
+        slashReply('Coding agent **unavailable** — Aider isn\'t installed.\n\nExpected an isolated venv at `engine/aider-venv`. Create it and `pip install aider-chat`.');
+        return true;
+      }
+      const ws = localStorage.getItem('aegis_code_ws');
+      const pref = localStorage.getItem('aegis_code_model');
+      const top = (d.models || []).slice(0, 6).map(m => `\`${m.model}\`${m.local ? ' (local)' : ''}`).join(', ');
+      const lines = [`**Coding agent** — Aider ${d.version || ''} ✅`];
+      lines.push(`Workspace: ${ws ? '`' + ws + '`' : '_not set_ — use `/code ws <path>`'}`);
+      lines.push(`Model: ${pref ? '`' + pref + '`' : '**auto** — ' + (top || 'no models found')}`);
+      if (d.code_root) lines.push(`Fenced to: \`${d.code_root}\``);
+      lines.push('\nDescribe an edit with `/code <task>`.');
+      slashReply(lines.join('\n'));
+    } catch (e) { slashReply('Coding status failed: ' + e.message); }
+    return true;
+  }
+
+  if (!args.length || sub === 'help') {
+    slashReply([
+      '**Coding agent** — drive Aider on your local model, scoped to a repo.',
+      '',
+      '&nbsp;&nbsp;`/code ws <path>` — point at a repo or folder',
+      '&nbsp;&nbsp;`/code <task>` — describe an edit in plain English',
+      '&nbsp;&nbsp;`/code status` — what\'s available + current setup',
+      '&nbsp;&nbsp;`/code model <name>` — pin a model (default: best local coder)',
+      '',
+      'Inside a git repo each edit auto-commits, so you can `git revert` anything.',
+    ].join('\n'));
+    return true;
+  }
+
+  const ws = localStorage.getItem('aegis_code_ws');
+  if (!ws) { slashReply('Set a workspace first: `/code ws <path>` (point at a repo or folder).'); return true; }
+  const task = args.join(' ').trim();
+  const model = localStorage.getItem('aegis_code_model') || undefined;
+  await typewriterReply(`Coding in \`${ws}\`… (running Aider on your local model — this can take a bit)`);
+  try {
+    const r = await fetch('/api/code/run', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: ws, task, model }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.ok === false && d.error && !d.output) { slashReply('✗ ' + d.error); return true; }
+    const lines = [];
+    lines.push(d.ok ? `✓ **Done** in ${d.seconds}s on \`${d.model}\``
+                    : `⚠ **Finished with issues** (${d.seconds}s, \`${d.model || '?'}\`)`);
+    if (d.changed && d.changed.length) lines.push('Changed: ' + d.changed.map(f => `\`${f}\``).join(', ') + (d.used_git ? ' _(auto-committed)_' : ''));
+    else lines.push('_No files changed._');
+    if (d.output) lines.push(`\n<pre>${String(d.output).replace(/</g, '&lt;').slice(0, 6000)}</pre>`);
+    if (d.error && !d.ok) lines.push('\n' + d.error);
+    slashReply(lines.join('\n'));
+  } catch (e) { slashReply('Coding run failed: ' + e.message); }
+  return true;
+}
+
+// Repo → wiki. Point at a local repo and Aegis writes a structured markdown wiki
+// (Overview / Architecture / Module guide) with your local model, saved locally.
+//   /wiki <path>   generate a wiki for a repo
+//   /wiki list     show saved wikis
+//   /wiki show <name>  print a saved wiki
+async function _cmdWiki(args) {
+  const sub = (args[0] || '').toLowerCase();
+
+  if (sub === 'list' || (!args.length)) {
+    try {
+      const d = await (await fetch('/api/wiki', { credentials: 'same-origin' })).json();
+      const wikis = d.wikis || [];
+      if (!wikis.length) { slashReply('No wikis yet. Generate one: `/wiki <path-to-repo>`.'); return true; }
+      const lines = ['**Saved wikis**'];
+      wikis.forEach(w => lines.push(`&nbsp;&nbsp;• \`${w.name}\` — ${(w.size / 1024).toFixed(1)} KB  ·  \`/wiki show ${w.name}\``));
+      slashReply(lines.join('\n'));
+    } catch (e) { slashReply('Could not list wikis: ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'show' && args[1]) {
+    try {
+      const d = await (await fetch('/api/wiki/' + encodeURIComponent(args[1]), { credentials: 'same-origin' })).json();
+      if (d.markdown) slashReply(d.markdown);
+      else slashReply('Wiki not found: `' + args[1] + '`');
+    } catch (e) { slashReply('Could not read wiki: ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'help') {
+    slashReply([
+      '**Repo wiki** — turn a local repo into a structured markdown wiki.',
+      '',
+      '&nbsp;&nbsp;`/wiki <path>` — scan a repo and write its wiki',
+      '&nbsp;&nbsp;`/wiki list` — saved wikis',
+      '&nbsp;&nbsp;`/wiki show <name>` — print a saved wiki',
+      '',
+      'Runs on your local model — Overview, Architecture, and a Module guide.',
+    ].join('\n'));
+    return true;
+  }
+
+  const path = args.join(' ').trim();
+  await typewriterReply(`Scanning \`${path}\` and writing its wiki with your local model… (this can take a bit)`);
+  try {
+    const r = await fetch('/api/wiki/generate', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!d.ok) { slashReply('✗ ' + (d.error || 'wiki generation failed')); return true; }
+    slashReply(`✓ **${d.name}** wiki — ${d.file_count} files, ${d.seconds}s on \`${d.model}\` (saved).\n\n---\n\n${d.markdown}`);
+  } catch (e) { slashReply('Wiki generation failed: ' + e.message); }
+  return true;
+}
+
+// Local engine (llama.cpp/llama-swap) context auto-tuner. Sizes each model's
+// token window to its GGUF metadata + your GPU VRAM, no YAML editing. Applies by
+// rewriting the config, which llama-swap hot-reloads.
+//   /engine            show VRAM + each model's current vs recommended context
+//   /engine tune       apply the recommended size to every model
+//   /engine tune <m>   auto-tune one model
+//   /engine set <m> <n>  set an explicit context (e.g. /engine set qwen3-coder-30b 65536)
+function _fmtCtx(n) { return n >= 1024 ? (n / 1024).toFixed(0) + 'K' : String(n); }
+async function _cmdEngine(args) {
+  const sub = (args[0] || '').toLowerCase();
+
+  if (sub === 'set' && args[1] && args[2]) {
+    const model = args[1], ctx = parseInt(args[2], 10);
+    if (!ctx) { slashReply('Usage: `/engine set <model> <tokens>` — e.g. `/engine set qwen3-coder-30b 65536`'); return true; }
+    await typewriterReply(`Setting \`${model}\` context to ${_fmtCtx(ctx)}…`);
+    try {
+      const r = await fetch('/api/engine/tune', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, context: ctx }) });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) slashReply(`✓ \`${model}\`: ${_fmtCtx(d.old_ctx)} → **${_fmtCtx(d.new_ctx)}** tokens. ${d.note || ''} (applies on the model's next load)`);
+      else slashReply('✗ ' + (d.error || d.detail || 'failed'));
+    } catch (e) { slashReply('Engine set failed: ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'tune') {
+    const model = args[1] || null;
+    await typewriterReply(model ? `Auto-tuning \`${model}\`…` : 'Auto-tuning every model to your GPU…');
+    try {
+      const r = await fetch('/api/engine/tune', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(model ? { model } : {}) });
+      const d = await r.json().catch(() => ({}));
+      if (!d.ok) { slashReply('✗ ' + (d.error || 'tune failed')); return true; }
+      const lines = ['**Auto-tuned context sizes**'];
+      (d.applied || []).forEach(a => {
+        if (a.new_ctx) lines.push(`&nbsp;&nbsp;✓ \`${a.model}\` — ${_fmtCtx(a.old_ctx)} → **${_fmtCtx(a.new_ctx)}**`);
+        else if (a.unchanged) lines.push(`&nbsp;&nbsp;• \`${a.model}\` — already ${_fmtCtx(a.unchanged)} (optimal)`);
+        else lines.push(`&nbsp;&nbsp;– \`${a.model}\` — skipped (${a.skipped || a.error})`);
+      });
+      lines.push('\n_Changes hot-reload on each model\'s next load — no restart._');
+      slashReply(lines.join('\n'));
+    } catch (e) { slashReply('Engine tune failed: ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'help') {
+    slashReply([
+      '**Engine tuner** — right-size each model\'s token window to your GPU automatically.',
+      '',
+      '&nbsp;&nbsp;`/engine` — show VRAM + current vs recommended context',
+      '&nbsp;&nbsp;`/engine tune` — apply the recommended size to every model',
+      '&nbsp;&nbsp;`/engine tune <model>` — auto-tune just one',
+      '&nbsp;&nbsp;`/engine set <model> <tokens>` — set it yourself',
+      '',
+      'No YAML editing, no restart — llama-swap hot-reloads the change.',
+    ].join('\n'));
+    return true;
+  }
+
+  // default: status
+  try {
+    const d = await (await fetch('/api/engine/status', { credentials: 'same-origin' })).json();
+    if (d.detail || (d.models == null)) { slashReply('Engine tuner unavailable — is the llama-swap engine configured?'); return true; }
+    const vram = d.vram_mb ? (d.vram_mb / 1024).toFixed(0) + ' GB VRAM' : 'no GPU detected';
+    const ram = d.ram_mb ? ' · ' + (d.ram_mb / 1024).toFixed(0) + ' GB RAM' : '';
+    const lines = [`**Engine context** — ${vram}${ram}`];
+    if (!(d.models || []).length) lines.push('&nbsp;&nbsp;_no tunable models in the llama-swap config_');
+    (d.models || []).forEach(m => {
+      const cur = _fmtCtx(m.current_ctx);
+      if (m.recommended && m.recommended !== m.current_ctx) {
+        lines.push(`&nbsp;&nbsp;\`${m.model}\` — now **${cur}**, recommend **${_fmtCtx(m.recommended)}**${m.note ? ' (' + m.note + ')' : ''}`);
+      } else if (m.recommended) {
+        lines.push(`&nbsp;&nbsp;\`${m.model}\` — **${cur}** ✓ optimal`);
+      } else {
+        lines.push(`&nbsp;&nbsp;\`${m.model}\` — **${cur}** (${m.reason || 'manual'})`);
+      }
+    });
+    const anyRec = (d.models || []).some(m => m.recommended && m.recommended !== m.current_ctx);
+    if (anyRec) lines.push('\nApply all with `/engine tune`, or set one: `/engine set <model> <tokens>`.');
+    slashReply(lines.join('\n'));
+  } catch (e) { slashReply('Engine status failed: ' + e.message); }
+  return true;
 }
 
 async function _cmdSettings(args, ctx) {
@@ -2536,6 +2881,289 @@ async function _cmdDemo(args, ctx) {
 
   _clearTour();
   await typewriterReply('Aegis is yours to explore, enjoy the voyage!');
+  return true;
+}
+
+// ── Compare tour ──
+async function _cmdTourCompare(args, ctx) {
+  // The slash dispatcher doesn't auto-clear the input, so explicitly
+  // wipe it — otherwise "/tour-compare" stays parked in the textarea
+  // and visually competes with the tour walkthrough.
+  const _msgEl = document.getElementById('message');
+  if (_msgEl) {
+    _msgEl.value = '';
+    _msgEl.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (!document.getElementById('tour-styles')) {
+    const s = document.createElement('style');
+    s.id = 'tour-styles';
+    s.textContent =
+      '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
+      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
+      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
+      '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
+      '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
+      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
+      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
+      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
+      '.tour-btn-arrow:hover{opacity:1}' +
+      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
+      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
+      '.tour-btn-skip:hover{opacity:0.6}';
+    document.head.appendChild(s);
+  }
+
+  let overlay = document.getElementById('compare-model-overlay');
+  if (!overlay) {
+    const opener = document.getElementById('tool-compare-btn') || document.getElementById('rail-compare');
+    if (opener) opener.click();
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 80));
+      overlay = document.getElementById('compare-model-overlay');
+      if (overlay) break;
+    }
+  }
+  if (!overlay) {
+    slashReply('Could not open Model Comparison. Try clicking the Compare tool first.');
+    return true;
+  }
+
+  document.body.classList.add('tour-active');
+  const tooltip = document.createElement('div');
+  tooltip.id = 'tour-tooltip';
+  document.body.appendChild(tooltip);
+
+  // Track halos so we can destroy them between steps. Halos sit on the
+  // body (above modals) so the outline isn't clipped by modal-content's
+  // overflow:auto — same pattern as _cmdDemo's makeHalo.
+  let _halos = [];
+  function _makeHalo(target) {
+    const halo = document.createElement('div');
+    halo.className = 'tour-halo';
+    document.body.appendChild(halo);
+    const update = () => {
+      const r = target.getBoundingClientRect();
+      halo.style.top    = (r.top - 4) + 'px';
+      halo.style.left   = (r.left - 4) + 'px';
+      halo.style.width  = (r.width + 8) + 'px';
+      halo.style.height = (r.height + 8) + 'px';
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    requestAnimationFrame(() => halo.classList.add('tour-fade-in'));
+    return {
+      destroy() {
+        window.removeEventListener('resize', update);
+        window.removeEventListener('scroll', update, true);
+        halo.remove();
+      },
+    };
+  }
+  function _clearHalos() {
+    _halos.forEach(h => h.destroy());
+    _halos = [];
+    document.querySelectorAll('.tour-halo').forEach(e => e.remove());
+  }
+
+  const _clear = () => {
+    document.querySelectorAll('.aegis-highlight').forEach(e => e.classList.remove('aegis-highlight'));
+    _clearHalos();
+    tooltip.remove();
+    document.body.classList.remove('tour-active');
+  };
+
+  function _positionTooltip(target) {
+    const r = target.getBoundingClientRect();
+    tooltip.style.visibility = 'hidden';
+    tooltip.style.display = '';
+    const tw = tooltip.offsetWidth || 260;
+    const th = tooltip.offsetHeight || 100;
+    const gap = 12;
+    let top, left;
+    if (r.bottom + gap + th < window.innerHeight - 10) {
+      top = r.bottom + gap;
+      left = r.left + r.width / 2 - tw / 2;
+    } else if (r.top - gap - th > 10) {
+      top = r.top - gap - th;
+      left = r.left + r.width / 2 - tw / 2;
+    } else {
+      top = r.top + r.height / 2 - th / 2;
+      left = r.right + gap;
+      if (left + tw > window.innerWidth - 10) left = r.left - tw - gap;
+    }
+    if (left + tw > window.innerWidth - 10) left = window.innerWidth - tw - 10;
+    if (left < 10) left = 10;
+    if (top < 10) top = 10;
+    tooltip.style.top = top + 'px';
+    tooltip.style.left = left + 'px';
+    tooltip.style.visibility = '';
+  }
+
+  function _showStep(sel, text, opts) {
+    opts = opts || {};
+    const isFirst = !!opts.isFirst;
+    const isLast = !!opts.isLast;
+    const advanceOnClick = !!opts.advanceOnClick;
+    return new Promise(resolve => {
+      _clearHalos();
+      const target = document.querySelector(sel);
+      if (!target) return resolve('skip');
+      _halos.push(_makeHalo(target));
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+      tooltip.classList.remove('tour-fade-in');
+      const hint = advanceOnClick
+        ? '<div style="font-size:0.72rem;opacity:0.45;margin-bottom:6px;">Click the highlighted element to continue.</div>'
+        : '';
+      tooltip.innerHTML =
+        '<div class="tour-text">' + text + '</div>' + hint +
+        '<div class="tour-nav">' +
+          '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+          '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+        '</div>';
+      requestAnimationFrame(() => {
+        _positionTooltip(target);
+        tooltip.classList.add('tour-fade-in');
+      });
+
+      let resolved = false;
+      const onClick = (e) => {
+        const hit = e.target.closest && e.target.closest('[data-act]');
+        const act = hit && hit.dataset.act;
+        if (!act) return;
+        if (resolved) return;
+        resolved = true;
+        tooltip.removeEventListener('click', onClick);
+        if (advanceOnClick) document.removeEventListener('click', onTargetClick, true);
+        resolve(act);
+      };
+      // Capture-phase listener so we hear the target click before any
+      // child handler that might stopPropagation.
+      const onTargetClick = (e) => {
+        if (resolved) return;
+        if (!target.contains(e.target) && e.target !== target) return;
+        resolved = true;
+        tooltip.removeEventListener('click', onClick);
+        document.removeEventListener('click', onTargetClick, true);
+        resolve('next');
+      };
+      tooltip.addEventListener('click', onClick);
+      if (advanceOnClick) {
+        document.addEventListener('click', onTargetClick, true);
+      }
+    });
+  }
+
+  // ── Phase 1: model-selector modal ──
+  // Scope every selector to #compare-model-overlay so we don't accidentally
+  // match the Group Chat panel's .compare-parallel-toggle (line 1053 of
+  // index.html), which has the same class name and is hidden — its zero
+  // bounding-rect was putting the tooltip in the top-left corner.
+  const phase1 = [
+    { sel: '#compare-model-overlay .modal-body',
+      text: 'Pick what type of test you want to run. <b>Chat</b>, <b>Agent</b>, <b>Search</b> or <b>Deep Research</b>.',
+      placement: 'center-above',
+      before: () => {
+        const modalBody = document.querySelector('#compare-model-overlay .modal-body');
+        if (modalBody) modalBody.scrollTop = 0;
+      } },
+    { sel: '#compare-model-overlay .compare-blind-toggle',
+      text: '<b>Blind Mode</b> hides model names so you don’t know which model gives what output.' },
+    { sel: '#compare-model-overlay .compare-parallel-toggle',
+      text: '<b>Parallel</b> runs side by side, toggle to <b>Sequential</b> as well.' },
+    { sel: '#compare-model-overlay .compare-dice-toggle',
+      text: '<b>Shuffle</b> picks the models in your entire list of endpoints. Combine with <b>Blind Mode</b> and you get the cleanest evaluation.' },
+  ];
+
+  for (let i = 0; i < phase1.length; i++) {
+    const step = phase1[i];
+    const res = await _showStep(step.sel, step.text, {
+      isFirst: i === 0,
+      isLast: false,
+    });
+    if (res === 'skip') { _clear(); return true; }
+    if (res === 'back') { if (i > 0) i -= 2; continue; }
+  }
+
+  // ── Wait for the modal to close and the compare panes to come up ──
+  _clearHalos();
+  tooltip.innerHTML =
+    '<div class="tour-text">Click <b>Start</b> when ready — it will probe the models before beginning.</div>' +
+    '<div class="tour-nav">' +
+      '<button class="tour-btn-skip" data-act="skip">skip</button>' +
+    '</div>';
+  // Anchor the tooltip next to the actual "Start" button so
+  // the user's eye is drawn to the next click. Halo on it too so it
+  // glows the same way as the previous steps.
+  const startBtn = document.querySelector('#compare-model-overlay .research-start-btn');
+  if (startBtn) {
+    _halos.push(_makeHalo(startBtn));
+    requestAnimationFrame(() => _positionTooltip(startBtn));
+  } else {
+    // Fallback: park near the top if the start button isn't around (yet).
+    tooltip.style.left = ((window.innerWidth / 2) - 140) + 'px';
+    tooltip.style.top  = '20px';
+  }
+
+  const skipDuringWait = new Promise(resolve => {
+    const onClick = (e) => {
+      const hit = e.target.closest && e.target.closest('[data-act="skip"]');
+      if (!hit) return;
+      tooltip.removeEventListener('click', onClick);
+      resolve('skip');
+    };
+    tooltip.addEventListener('click', onClick);
+  });
+  const modalClosed = new Promise(resolve => {
+    const tick = () => {
+      if (!document.getElementById('compare-model-overlay')
+          && (document.getElementById('compare-check-btn') || document.getElementById('cmp-eval-btn'))) {
+        resolve('ready');
+      } else {
+        setTimeout(tick, 200);
+      }
+    };
+    tick();
+  });
+  const waitRes = await Promise.race([skipDuringWait, modalClosed]);
+  if (waitRes === 'skip') { _clear(); return true; }
+
+  // Small breather so any entry animation finishes before we measure.
+  await new Promise(r => setTimeout(r, 300));
+
+  // ── Phase 2: compare panes (post-modal) ──
+  // Note: the Probe button (`#compare-check-btn`) is dynamic — only
+  // visible when there's at least one unverified model — so we don't
+  // tour it here; the user will discover it naturally when needed.
+  const phase2 = [
+    { sel: '#compare-add-btn',
+      text: 'Add more <b>Models</b> here, keep stacking, who’s stopping ya? (you can also remove btw).' },
+    { sel: '#compare-shuffle-btn',
+      text: 'After adding, <b>Shuffle</b> to randomize the order again.' },
+    { sel: '#cmp-eval-btn',
+      text: 'When you’re ready to test, feel free to use curated <b>evaluation prompts</b>.',
+      advanceOnClick: true },
+  ];
+
+  for (let i = 0; i < phase2.length; i++) {
+    const step = phase2[i];
+    const res = await _showStep(step.sel, step.text, {
+      isFirst: i === 0,
+      isLast: i === phase2.length - 1,
+      advanceOnClick: !!step.advanceOnClick,
+    });
+    if (res === 'skip') { _clear(); return true; }
+    if (res === 'back') { if (i > 0) i -= 2; continue; }
+  }
+
+  _clear();
+  await typewriterReply('That’s it, you’ll figure out the rest! Have fun!');
   return true;
 }
 
@@ -5714,33 +6342,12 @@ const COMMANDS = {
     handler: _cmdDemo,
     usage: '/demo'
   },
-  // Toolbox summons. The actual work happens in chat.js (it strips the word and
-  // sends the request with the toolbox's tools unlocked) — these entries exist
-  // for autocomplete discoverability and to show usage when typed with no query.
-  toolbox: {
-    category: 'Toolboxes',
-    help: 'Run a request with a toolbox (osint | market | troubleshoot)',
-    usage: '/toolbox osint find subdomains of example.com',
-    handler: () => slashReply('Usage: <code>/toolbox &lt;osint|market|troubleshoot&gt; &lt;your request&gt;</code>. Or use the shortcuts <code>/osint</code>, <code>/market</code>, <code>/troubleshoot</code>.'),
-  },
-  osint: {
-    category: 'Toolboxes',
-    help: 'OSINT / recon tools (whois, dns, ip, username, email, breach, phone)',
-    usage: '/osint investigate example.com',
-    handler: () => slashReply('Usage: <code>/osint &lt;what to investigate&gt;</code> — e.g. <code>/osint whois and subdomains of example.com</code>.'),
-  },
-  market: {
-    category: 'Toolboxes',
-    help: 'Market analysis tools (bull/base/bear on a stock, commodity, or crypto)',
-    usage: '/market bull/base/bear on gold',
-    handler: () => slashReply('Usage: <code>/market &lt;ticker or question&gt;</code> — e.g. <code>/market bull/base/bear on BTC-USD</code>.'),
-  },
-  troubleshoot: {
-    alias: ['net'],
-    category: 'Toolboxes',
-    help: 'Network & systems diagnostics (http, ports, dns, tls, decode, hash, cron)',
-    usage: '/troubleshoot is example.com up and is its cert expiring',
-    handler: () => slashReply('Usage: <code>/troubleshoot &lt;what to check&gt;</code> — e.g. <code>/troubleshoot check ports 22,443 on example.com</code>.'),
+  'tour-compare': {
+    alias: ['compare-tour'],
+    category: 'Tours',
+    help: 'Model comparison tour',
+    handler: _cmdTourCompare,
+    usage: '/tour-compare'
   },
   'tour-cookbook': {
     alias: ['cookbook-tour'],
@@ -5862,6 +6469,76 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('tasks', args, ctx),
     usage: '/tasks'
   },
+  doctor: {
+    alias: ['healthcheck', 'diagnose-app'],
+    category: 'Tools',
+    help: 'Check what\'s working and fix missing pieces (/doctor, /doctor fix <id>)',
+    handler: (args) => _cmdDoctor(args),
+    usage: '/doctor'
+  },
+  traces: {
+    alias: ['observability', 'trace'],
+    category: 'Tools',
+    help: 'Show recent model/agent calls: latency, tokens, tools',
+    handler: (args) => _cmdTraces(args),
+    usage: '/traces'
+  },
+  graph: {
+    alias: ['kg', 'knowledge'],
+    category: 'Tools',
+    help: 'Knowledge-graph memory: /graph <term>, /graph build, /graph stats',
+    handler: (args) => _cmdGraph(args),
+    usage: '/graph build'
+  },
+  code: {
+    alias: ['aider'],
+    category: 'Tools',
+    help: 'Local coding agent: /code ws <path>, /code <task>, /code status',
+    handler: (args) => _cmdCode(args),
+    usage: '/code <task>'
+  },
+  wiki: {
+    alias: ['deepwiki', 'repowiki'],
+    category: 'Tools',
+    help: 'Repo → wiki: /wiki <path>, /wiki list, /wiki show <name>',
+    handler: (args) => _cmdWiki(args),
+    usage: '/wiki <path>'
+  },
+  engine: {
+    alias: ['context', 'ctx', 'tune'],
+    category: 'Tools',
+    help: 'Auto-size model context to your GPU: /engine, /engine tune, /engine set <m> <n>',
+    handler: (args) => _cmdEngine(args),
+    usage: '/engine'
+  },
+  control: {
+    alias: ['hub', 'dashboard', 'capabilities'],
+    category: 'Tools',
+    help: 'Control Center — one dashboard of every capability + live status',
+    handler: () => { try { window.controlCenterModule?.open(); } catch (e) {} return true; },
+    usage: '/control'
+  },
+  canvas: {
+    alias: ['editor'],
+    category: 'Tools',
+    help: 'Code Canvas — write/edit code with AI: /canvas, /canvas <what to build>',
+    handler: (args) => {
+      try {
+        const desc = (args || []).join(' ').trim();
+        if (desc) window.canvasModule?.generate(desc);
+        else window.canvasModule?.open();
+      } catch (e) {}
+      return true;
+    },
+    usage: '/canvas <description>'
+  },
+  voice: {
+    alias: ['speak', 'talk'],
+    category: 'Tools',
+    help: 'Voice Mode — speak hands-free to drive the agent (tap the mic, it auto-sends)',
+    handler: () => { try { window.voiceModeModule?.show(); } catch (e) {} return true; },
+    usage: '/voice'
+  },
   brain: {
     alias: ['memories'],
     category: 'Tools',
@@ -5890,12 +6567,43 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('research', args, ctx),
     usage: '/research'
   },
+  compare: {
+    alias: [],
+    category: 'Tools',
+    help: 'Open Compare',
+    handler: (args, ctx) => _cmdToolPanel('compare', args, ctx),
+    usage: '/compare'
+  },
   recipes: {
     alias: ['recipe'],
     category: 'Tools',
     help: 'Open Recipes (visual tool + model workflows)',
     handler: (args, ctx) => _cmdToolPanel('recipes', args, ctx),
     usage: '/recipes'
+  },
+  // Toolbox opt-in: `/osint <query>` scopes ONE chat message to a toolbox's
+  // tools (handled in chat.js before dispatch — these entries are for
+  // autocomplete + a usage hint when typed bare). Toolboxes are also in Recipes.
+  osint: {
+    alias: ['recon', 'intel'],
+    category: 'Toolboxes',
+    help: 'Scope a message to the OSINT toolbox: /osint <query>',
+    handler: () => (slashReply('Type `/osint <query>` — e.g. `/osint whois example.com`. That one message runs with the OSINT tools.'), true),
+    usage: '/osint whois example.com'
+  },
+  market: {
+    alias: ['stocks', 'crypto'],
+    category: 'Toolboxes',
+    help: 'Scope a message to the Market toolbox: /market <query>',
+    handler: () => (slashReply('Type `/market <query>` — e.g. `/market how is gold doing`. That one message runs with the Market tools.'), true),
+    usage: '/market how is gold doing'
+  },
+  troubleshoot: {
+    alias: ['net', 'diagnose'],
+    category: 'Toolboxes',
+    help: 'Scope a message to the Troubleshoot toolbox: /troubleshoot <query>',
+    handler: () => (slashReply('Type `/troubleshoot <query>` — e.g. `/troubleshoot is example.com reachable`. That one message runs with the network tools.'), true),
+    usage: '/troubleshoot is example.com reachable'
   },
   mcp: {
     alias: [],

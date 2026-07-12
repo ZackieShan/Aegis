@@ -31,12 +31,133 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 server = Server("market")
 
 _UA = "Mozilla/5.0 (compatible; AegisMarket/1.0)"
+# Yahoo's quoteSummary (fundamentals) endpoint requires a browser-like UA plus a
+# cookie + crumb handshake; the chart endpoints are happy with the simple UA.
+_BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 _TIMEOUT = 15.0
 _YF = "https://query1.finance.yahoo.com"
+_YF2 = "https://query2.finance.yahoo.com"
 
 
 def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True, headers={"User-Agent": _UA})
+
+
+# ── fundamentals (needs Yahoo cookie + crumb) ────────────────────────────────
+_crumb_cache = {"crumb": None, "cookies": None}
+
+
+async def _ensure_crumb(c: httpx.AsyncClient) -> str:
+    """Return a Yahoo crumb, reusing a cached cookie+crumb when we have one."""
+    if _crumb_cache["crumb"] and _crumb_cache["cookies"]:
+        for k, v in _crumb_cache["cookies"].items():
+            c.cookies.set(k, v)
+        return _crumb_cache["crumb"]
+    await c.get("https://fc.yahoo.com")  # sets A1/A3 consent cookies
+    r = await c.get(f"{_YF2}/v1/test/getcrumb")
+    crumb = (r.text or "").strip()
+    _crumb_cache["crumb"] = crumb
+    _crumb_cache["cookies"] = dict(c.cookies)
+    return crumb
+
+
+def _raw(d: dict, *path):
+    """Walk nested Yahoo modules and return the leaf `.raw` value (or None)."""
+    cur = d
+    for k in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(k)
+    if isinstance(cur, dict):
+        return cur.get("raw")
+    return cur
+
+
+def _big(x):
+    if x is None:
+        return "n/a"
+    try:
+        x = float(x)
+    except Exception:
+        return str(x)
+    for unit, div in (("T", 1e12), ("B", 1e9), ("M", 1e6), ("K", 1e3)):
+        if abs(x) >= div:
+            return f"{x / div:.2f}{unit}"
+    return f"{x:,.0f}"
+
+
+def _p(x, nd=1):
+    return f"{x * 100:.{nd}f}%" if isinstance(x, (int, float)) else "n/a"
+
+
+def _n(x, nd=2):
+    return f"{x:.{nd}f}" if isinstance(x, (int, float)) else "n/a"
+
+
+async def _fundamentals(symbol: str) -> str:
+    sym = (symbol or "").strip()
+    if not sym:
+        return "Error: provide a ticker symbol (use market_search if unsure)."
+    modules = "financialData,defaultKeyStatistics,summaryDetail,price,summaryProfile"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True,
+                                     headers={"User-Agent": _BROWSER_UA}) as c:
+            crumb = await _ensure_crumb(c)
+            r = await c.get(f"{_YF2}/v10/finance/quoteSummary/{sym}",
+                            params={"modules": modules, "crumb": crumb})
+            if r.status_code == 401:  # crumb expired — refresh once
+                _crumb_cache["crumb"] = None
+                _crumb_cache["cookies"] = None
+                crumb = await _ensure_crumb(c)
+                r = await c.get(f"{_YF2}/v10/finance/quoteSummary/{sym}",
+                                params={"modules": modules, "crumb": crumb})
+        if r.status_code != 200:
+            return f"Fundamentals failed for `{sym}`: HTTP {r.status_code} (fundamentals may be unavailable for this symbol — indices/commodities/crypto have none)."
+        res = (r.json().get("quoteSummary", {}) or {}).get("result")
+        if not res:
+            return f"No fundamentals for `{sym}` (indices, commodities, FX, and crypto don't report company fundamentals)."
+    except Exception as e:
+        return f"Fundamentals failed for `{sym}`: {type(e).__name__}: {e}"
+
+    m = res[0]
+    price, sd, ks, fd, prof = (m.get("price", {}), m.get("summaryDetail", {}),
+                               m.get("defaultKeyStatistics", {}), m.get("financialData", {}),
+                               m.get("summaryProfile", {}))
+    name = _raw(price, "longName") or _raw(price, "shortName") or sym
+    cur = _raw(price, "currency") or ""
+    out = [f"**Fundamentals — {sym} ({name})**"]
+    sector, industry = prof.get("sector"), prof.get("industry")
+    if sector or industry:
+        out.append(f"- Sector / industry: {sector or '—'} / {industry or '—'}")
+    out.append(f"- Market cap: {_big(_raw(sd, 'marketCap'))} {cur}  |  Enterprise value: {_big(_raw(ks, 'enterpriseValue'))} {cur}")
+
+    out.append("\n**Valuation**")
+    out.append(f"- P/E (trailing / forward): {_n(_raw(sd, 'trailingPE'))} / {_n(_raw(sd, 'forwardPE'))}")
+    out.append(f"- Price/Sales: {_n(_raw(sd, 'priceToSalesTrailing12Months'))}  |  Price/Book: {_n(_raw(ks, 'priceToBook'))}")
+    out.append(f"- PEG: {_n(_raw(ks, 'pegRatio'))}  |  EV/EBITDA: {_n(_raw(ks, 'enterpriseToEbitda'))}")
+    dy = _raw(sd, "dividendYield")
+    out.append(f"- Dividend yield: {_p(dy) if dy else 'none'}")
+
+    out.append("\n**Profitability & growth**")
+    out.append(f"- Margins — gross/operating/net: {_p(_raw(fd, 'grossMargins'))} / {_p(_raw(fd, 'operatingMargins'))} / {_p(_raw(fd, 'profitMargins'))}")
+    out.append(f"- Return on equity: {_p(_raw(fd, 'returnOnEquity'))}  |  Return on assets: {_p(_raw(fd, 'returnOnAssets'))}")
+    out.append(f"- Revenue growth (yoy): {_p(_raw(fd, 'revenueGrowth'))}  |  Earnings growth (yoy): {_p(_raw(fd, 'earningsGrowth'))}")
+
+    out.append("\n**Financial health**")
+    out.append(f"- Total cash: {_big(_raw(fd, 'totalCash'))}  |  Total debt: {_big(_raw(fd, 'totalDebt'))}")
+    out.append(f"- Debt/equity: {_n(_raw(fd, 'debtToEquity'))}  |  Current ratio: {_n(_raw(fd, 'currentRatio'))}")
+    out.append(f"- Free cash flow: {_big(_raw(fd, 'freeCashflow'))}  |  Operating cash flow: {_big(_raw(fd, 'operatingCashflow'))}")
+
+    tgt, cp = _raw(fd, "targetMeanPrice"), _raw(fd, "currentPrice")
+    rec = fd.get("recommendationKey")
+    if tgt or rec:
+        upside = f" ({_pct(tgt, cp):+.0f}% vs {_n(cp)})" if (tgt and cp) else ""
+        out.append("\n**Analyst view**")
+        out.append(f"- Mean target: {_n(tgt)}{upside}  |  Consensus: {rec or 'n/a'}  |  Analysts: {_raw(fd, 'numberOfAnalystOpinions') or 'n/a'}")
+
+    out.append("\n_Company fundamentals via Yahoo Finance. Educational analysis, not investment advice._")
+    return "\n".join(out)
 
 
 def _fmt(x, nd=2):
@@ -256,6 +377,12 @@ async def list_tools() -> list[Tool]:
             "signal tally, concrete support/resistance levels, and recent headlines. Use this to "
             "analyze a market or commodity and lay out the three scenarios."),
             inputSchema=_obj({"symbol": {"type": "string", "description": "Ticker symbol (use market_search if unsure)"}}, ["symbol"])),
+        Tool(name="market_fundamentals", description=(
+            "Company fundamentals for a STOCK ticker: valuation (P/E, P/S, P/B, PEG, EV/EBITDA), "
+            "margins, ROE, revenue/earnings growth, cash vs debt, free cash flow, and the analyst "
+            "price target + consensus. Use this for the value/fundamentals view of a company. "
+            "Only works for individual stocks — not indices, commodities, FX, or crypto."),
+            inputSchema=_obj({"symbol": {"type": "string", "description": "Stock ticker (e.g. AAPL, NVDA)"}}, ["symbol"])),
         Tool(name="market_news", description=(
             "Recent news headlines for a ticker, company, market, or commodity (Google News)."),
             inputSchema=_obj({"query": {"type": "string", "description": "Ticker or topic"}}, ["query"])),
@@ -266,6 +393,7 @@ _DISPATCH = {
     "market_search": lambda a: _search(a.get("query", "")),
     "market_quote": lambda a: _quote(a.get("symbol", "")),
     "market_analyze": lambda a: _analyze(a.get("symbol", "")),
+    "market_fundamentals": lambda a: _fundamentals(a.get("symbol", "")),
     "market_news": lambda a: _news(a.get("query", "")),
 }
 

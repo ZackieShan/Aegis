@@ -69,9 +69,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if quality == "medium" and _settings.get("image_quality"):
             quality = _settings["image_quality"]
 
-        # Auto-detect best available image model
+        # Auto-detect best available image model. "qwen-image" is the local
+        # diffusion pipeline (stable-diffusion.cpp sd-server behind llama-swap,
+        # OpenAI-images-compatible) — preferred over hosted models when present.
         if not model_spec:
-            for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
+            for candidate in ("qwen-image", "gpt-image-1.5", "gpt-image-1", "dall-e-3"):
                 try:
                     await asyncio.to_thread(_resolve_model, candidate)
                     model_spec = candidate
@@ -84,12 +86,21 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         url, model_id, headers = await asyncio.to_thread(_resolve_model, model_spec)
 
         is_gpt_image = "gpt-image" in model_id.lower()
+        # Local diffusion (qwen-image et al. via sd-server): resolution drives
+        # VRAM + time hard. 768x768 is the sweet spot on a 24GB card (~60-90s,
+        # weights stay resident); 1024x1024 spills VRAM and blows past the proxy
+        # timeout, so it's capped out of the valid set on purpose.
+        is_local_diffusion = any(k in model_id.lower() for k in ("qwen-image", "sd-cpp", "flux", "stable-diffusion"))
         base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
         images_url = base_url + "/images/generations"
 
         valid_gpt_sizes = {"1024x1024", "1024x1536", "1536x1024", "auto"}
         valid_dalle3_sizes = {"1024x1024", "1024x1792", "1792x1024"}
-        if is_gpt_image and size not in valid_gpt_sizes:
+        valid_local_sizes = {"512x512", "768x768", "512x768", "768x512"}
+        if is_local_diffusion:
+            if size not in valid_local_sizes:
+                size = "768x768"
+        elif is_gpt_image and size not in valid_gpt_sizes:
             size = "1024x1024"
         elif not is_gpt_image and size not in valid_dalle3_sizes:
             size = "1024x1024"
@@ -98,7 +109,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if is_gpt_image:
             payload["quality"] = quality if quality in ("low", "medium", "high", "auto") else "medium"
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)) as client:
+        # read=600: local diffusion (qwen-image on a 24GB card) legitimately takes
+        # 2-5 min at 1024x1024; 300s cut generations off mid-render.
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0)) as client:
             resp = await client.post(images_url, json=payload, headers=headers)
 
             if resp.status_code != 200:
@@ -162,7 +175,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=result)]
 
     except httpx.TimeoutException:
-        return [TextContent(type="text", text="Error: Image generation timed out (300s)")]
+        return [TextContent(type="text", text="Error: Image generation timed out (600s)")]
     except ValueError as e:
         return [TextContent(type="text", text=f"Error: {e}")]
     except Exception as e:

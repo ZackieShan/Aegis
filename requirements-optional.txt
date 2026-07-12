@@ -12,11 +12,6 @@
 # GPU-accelerated transcription — it's auto-detected, CPU is used otherwise.
 faster-whisper
 
-# DuckDuckGo as a search provider option.
-# Install if you want DDG in the search-provider dropdown.
-# Alternatives: SearXNG, Brave, Tavily, Serper, Google PSE.
-ddgs
-
 # NOTE: PyMuPDF moved to core requirements.txt — it powers the PDF viewer and
 # form-filling, and since Aegis is AGPL-3.0 the AGPL license of PyMuPDF is a
 # non-issue for this project. Kept out of here to avoid a duplicate install.
@@ -31,3 +26,9 @@ ddgs
 # [all]/Azure/audio extras (cloud + heavy). Pinned to a release >30 days old per
 # the dependency-age discussion in issue #485.
 markitdown[docx,pptx,xlsx,xls]==0.1.6
+
+# Reads GGUF model metadata (layers / KV-heads / trained context) for the engine
+# context auto-tuner (/engine — right-sizes each local model's token window to
+# your GPU VRAM). Pure-Python, tiny. Without it the tuner still runs but can't
+# compute exact recommendations. Only relevant when serving local GGUFs.
+gguf

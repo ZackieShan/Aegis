@@ -718,10 +718,21 @@ class ResearchHandler:
 
     @staticmethod
     async def _probe_endpoint(endpoint: str, model: str, headers: dict = None):
-        """Quick probe to verify the LLM endpoint/model responds before research."""
+        """Quick probe to verify the LLM endpoint/model responds before research.
+
+        Local model servers (llama.cpp/llama-swap/Ollama) hot-load a model on the
+        first request — for a big or partial-offload GGUF that cold-load can take
+        30-90s while llama-swap holds the connection. A short client timeout aborts
+        mid-load and the whole research run fails a healthy model. So give local
+        endpoints a generous read window; a genuinely-dead port still refuses the
+        connection instantly regardless of this timeout.
+        """
         from src.llm_core import llm_call_async
+        _local = any(h in (endpoint or "").lower()
+                     for h in ("127.0.0.1", "localhost", "0.0.0.0", "::1"))
+        probe_timeout = 180 if _local else 20
         try:
-            logger.info(f"Probing {model} at {endpoint} (has_auth={bool(headers and 'Authorization' in (headers or {}))})")
+            logger.info(f"Probing {model} at {endpoint} (has_auth={bool(headers and 'Authorization' in (headers or {}))}, timeout={probe_timeout}s)")
             await llm_call_async(
                 url=endpoint,
                 model=model,
@@ -729,7 +740,7 @@ class ResearchHandler:
                 temperature=0,
                 max_tokens=5,
                 headers=headers,
-                timeout=15,
+                timeout=probe_timeout,
                 max_retries=1,
             )
             logger.info(f"Endpoint probe OK: {model}")

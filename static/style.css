@@ -823,6 +823,7 @@ body.bg-pattern-sparkles {
     #tool-notes-btn.rail-minimized::after,
     #tool-library-btn.rail-minimized::after,
     #tool-gallery-btn.rail-minimized::after,
+    #tool-compare-btn.rail-minimized::after,
     #tool-calendar-btn.rail-minimized::after { right: 12px; }
     /* Cookbook already shows its own running/served-status dot
        (#cookbook-notif-dot, toggled with .cookbook-notif-active on the
@@ -5267,6 +5268,7 @@ body.bg-pattern-sparkles {
       #tasks-modal,
       #memory-modal,
       #doclib-modal,
+      #compare-model-overlay,
       #research-overlay,
       #theme-modal,
       #settings-modal,
@@ -6036,6 +6038,26 @@ body.bg-pattern-sparkles {
     .vis-row input:checked ~ .vis-icon,
     .vis-row:has(input:checked) .vis-icon {
       color: var(--fg);
+    }
+    /* Compare model selector — match the calendar modal's clean header
+       (no border underline). */
+    #compare-model-overlay .modal-header h4 {
+      pointer-events: none;
+    }
+    /* Compare model selector: keep manually-resized/tiny windows contained.
+       Picker dropdowns are appended to document.body, so the card itself can
+       clip and scroll without cropping the dropdown list. */
+    #compare-model-overlay .modal-content {
+      display: flex;
+      flex-direction: column;
+      max-height: min(720px, calc(100dvh - 48px));
+      overflow: hidden;
+      min-height: 180px;
+    }
+    #compare-model-overlay .modal-body {
+      overflow: auto;
+      flex: 1 1 auto;
+      min-height: 0;
     }
     .vis-hint {
       font-size: 10px;

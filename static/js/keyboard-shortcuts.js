@@ -42,7 +42,7 @@ export function _matchesCombo(e, combo, isMac = IS_MAC) {
  * @param {Object} modules.adminModule
  * @param {Object} modules.settingsModule
  * @param {Object} modules.searchChatModule
- * @param {Function} modules._closeExclusiveOverlay
+ * @param {Function} modules._closeCompareIfActive
  * @param {Function} modules._deactivateIncognito
  * @param {string} modules.API_BASE
  */
@@ -50,7 +50,7 @@ export function initKeyboardShortcuts(modules) {
   const {
     el, Storage, sessionModule, uiModule, chatModule,
     adminModule, settingsModule, searchChatModule,
-    _closeExclusiveOverlay, _deactivateIncognito, API_BASE
+    _closeCompareIfActive, _deactivateIncognito, API_BASE
   } = modules;
 
   window._aegisKeybinds = { ..._defaultKeybinds };
@@ -105,6 +105,7 @@ export function initKeyboardShortcuts(modules) {
     'gallery-modal':          'tool-gallery-btn',
     'research-overlay':       'tool-research-btn',
     'cookbook-modal':         'tool-cookbook-btn',
+    'compare-model-overlay':  'tool-compare-btn',
     'calendar-modal':         'tool-calendar-btn',
     'email-lib-modal':        'email-section-title',
   };
@@ -220,7 +221,7 @@ export function initKeyboardShortcuts(modules) {
     }
     if (_matchesCombo(e, kb.new_session)) {
       e.preventDefault();
-      if (_closeExclusiveOverlay()) return;
+      if (_closeCompareIfActive()) return;
       _deactivateIncognito();
       const sid = sessionModule && sessionModule.getCurrentSessionId();
       const sessions = sessionModule ? sessionModule.getSessions() : [];
@@ -263,6 +264,7 @@ export function initKeyboardShortcuts(modules) {
     // own open/toggle logic runs. Unbound (empty) combos never match.
     const _toolBtns = {
       open_calendar: 'tool-calendar-btn',
+      open_compare:  'tool-compare-btn',
       open_cookbook: 'tool-cookbook-btn',
       open_research: 'tool-research-btn',
       open_gallery:  'tool-gallery-btn',

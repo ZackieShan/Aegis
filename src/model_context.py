@@ -431,6 +431,19 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
                         return n_ctx, True
         except Exception:
             pass
+        # llama-swap fronts llama.cpp but doesn't proxy /slots (404). It's the
+        # `-c` in its config that's the real served window — NOT the model's
+        # trained max in KNOWN_CONTEXT_WINDOWS. Trusting the trained max here
+        # would let a long chat overflow the smaller served -c and 400. Use the
+        # configured value so context trimming matches the server.
+        try:
+            from src import engine_tuner
+            cfg_ctx = engine_tuner.configured_context(model)
+            if cfg_ctx:
+                logger.info(f"llama-swap config reports served context -c={cfg_ctx} for {model}")
+                return cfg_ctx, True
+        except Exception:
+            pass
 
     # GitHub Copilot's /models requires auth + X-GitHub-Api-Version headers that
     # aren't available here; an unauthenticated probe just 400s. All Copilot

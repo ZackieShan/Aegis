@@ -612,9 +612,10 @@ def setup_chat_routes(
             logger.info("chat→agent auto-escalation: search enabled")
         active_doc_id = form_data.get("active_doc_id", "").strip()
         logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
-        # Opt-in toolbox tools for this turn (set by the /toolbox, /osint, /market,
-        # /troubleshoot slash commands). Comma-separated server ids; empty means no
-        # toolbox tools are offered to the model (ordinary chat stays clean).
+        # Toolboxes are OFF in ordinary chat. They only turn on when the user
+        # opts in per-message with a leading /osint | /market | /troubleshoot
+        # (the frontend sets active_toolboxes); otherwise this is empty and the
+        # agent loop offers no toolbox tools. Toolboxes are also Recipes blocks.
         _active_toolboxes = {
             t.strip().lower() for t in (form_data.get("active_toolboxes", "") or "").split(",") if t.strip()
         }
@@ -878,6 +879,13 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
+        # Deep Research is its own dedicated function (the Research sidebar/button,
+        # which hits /api/research/start directly). The chat agent must NOT be able
+        # to auto-start research jobs — that let a single ordinary question spawn
+        # multi-minute background jobs the user never asked for. Block only the
+        # START tool; manage_research (read/list/delete existing reports) stays so
+        # the agent can still open a report the user points at.
+        disabled_tools.add("trigger_research")
         # Only disable bash when the caller *explicitly* set it to a falsy
         # value. When unset (None), defer to per-user privilege checks below.
         # Web search is per-turn opt-in: either the chat pre-search setting

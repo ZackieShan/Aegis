@@ -1891,7 +1891,39 @@ async def llm_call_async_with_fallback(candidates, messages, **kwargs) -> str:
     raise last_err if last_err else HTTPException(503, "All fallback candidates failed")
 
 
-async def llm_call_async(
+async def llm_call_async(*args, **kwargs) -> str:
+    """Traced wrapper: records a local observability trace of the call, then
+    delegates to the real implementation. Fully guarded — tracing never affects
+    the call's result or raises. Covers recipe model nodes, deep-research
+    sub-calls, auto-title/memory extraction, etc. (chat/agent turns are traced
+    in agent_loop where precise token metrics exist)."""
+    _t0 = time.time()
+    _url = args[0] if len(args) > 0 else kwargs.get("url", "")
+    _model = args[1] if len(args) > 1 else kwargs.get("model", "")
+    _msgs = args[2] if len(args) > 2 else kwargs.get("messages")
+    _sid = kwargs.get("session_id", "") or ""
+    _wl = kwargs.get("workload", "foreground")
+    try:
+        resp = await _llm_call_async_impl(*args, **kwargs)
+    except Exception as e:
+        try:
+            from src import tracing
+            tracing.record(kind="call", model=_model, endpoint=_url, session_id=_sid,
+                           latency_ms=int((time.time() - _t0) * 1000), workload=_wl, error=str(e))
+        except Exception:
+            pass
+        raise
+    try:
+        from src import tracing
+        tracing.record(kind="call", model=_model, endpoint=_url, session_id=_sid,
+                       latency_ms=int((time.time() - _t0) * 1000), workload=_wl,
+                       prompt=(_msgs[-1].get("content") if _msgs else None), response=resp)
+    except Exception:
+        pass
+    return resp
+
+
+async def _llm_call_async_impl(
     url: str,
     model: str,
     messages: List[Dict],

@@ -590,6 +590,12 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     
     const submitBtn = document.querySelector('.send-btn');
 
+    // If compare is active, stop all compare streams
+    if (window.compareModule && window.compareModule.isActive()) {
+      window.compareModule.handleCompareSubmit();
+      return;
+    }
+
     // If currently streaming, keyboard Enter can queue a non-empty composer.
     // Clicking the stop icon should still stop normally, even if text exists.
     if (isStreaming) {
@@ -772,17 +778,16 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     // attachment ids — a photo-only message still has something to send.
     if (!msg.trim() && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
 
-    // Toolbox summon: a leading /toolbox|/osint|/market|/troubleshoot word opts
-    // THIS turn into that toolbox's tools (otherwise toolbox tools are hidden so
-    // ordinary chat isn't hijacked into investigation mode). Handled here —
-    // BEFORE the generic slash dispatcher below — because these aren't intercept
-    // commands; they're normal chat turns that just unlock a toolbox. The word
-    // is stripped from what's sent; tools are enabled via active_toolboxes.
+    // Opt-in toolbox summon: a leading /osint | /market | /troubleshoot (or
+    // /toolbox <name>) scopes THIS one message to that toolbox's tools. Purely
+    // per-message and explicit — ordinary chat never sees toolbox tools, so it
+    // can't drift into an investigation. The prefix is stripped before sending.
     let _activeToolboxes = '';
     {
-      const _TB = { osint:'osint', recon:'osint', intel:'osint',
-                    troubleshoot:'troubleshoot', net:'troubleshoot', diagnose:'troubleshoot',
-                    market:'market', stocks:'market', crypto:'market' };
+      const _TB = { osint: 'osint', recon: 'osint', intel: 'osint',
+                    troubleshoot: 'troubleshoot', net: 'troubleshoot', diagnose: 'troubleshoot',
+                    market: 'market', stocks: 'market', crypto: 'market',
+                    web: 'web', crawl: 'web', scrape: 'web' };
       const _m = msg.match(/^\/(\w+)\s+([\s\S]+)$/);
       if (_m) {
         const _w = _m[1].toLowerCase();

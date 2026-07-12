@@ -178,6 +178,7 @@ function _build() {
       <div class="recipe-toolbar">
         <input class="recipe-name-input" id="recipe-name" value="${_esc(_recipeName)}" spellcheck="false" />
         <button class="recipe-btn" id="recipe-new">New</button>
+        <button class="recipe-btn" id="recipe-example" title="Load a ready-made example graph">✨ Example</button>
         <button class="recipe-btn" id="recipe-open">Open…</button>
         <button class="recipe-btn" id="recipe-save">Save</button>
         <span style="flex:1"></span>
@@ -188,7 +189,15 @@ function _build() {
         <div class="recipe-canvas-wrap">
           <div id="recipe-canvas">
             <svg id="recipe-edges"></svg>
-            <div class="recipe-empty-hint" id="recipe-empty-hint">Add nodes from the palette, then drag between ports to wire them.</div>
+            <div class="recipe-empty-hint" id="recipe-empty-hint">
+              <div style="font-weight:600;margin-bottom:8px">Build a tool + model workflow</div>
+              <div style="text-align:left;display:inline-block;line-height:1.9;opacity:0.85">
+                1. Click a block in the left palette to drop a node.<br>
+                2. Drag from a node's right dot ● to another's left dot to wire them.<br>
+                3. Type a run input below and hit ▶ Run.
+              </div>
+              <div style="margin-top:12px;opacity:0.7">New here? Click <b>✨ Example</b> up top to load a working graph.</div>
+            </div>
           </div>
         </div>
       </div>
@@ -207,6 +216,7 @@ function _build() {
   modal.addEventListener('mousedown', (e) => { if (e.target === modal) return; });
   modal.querySelector('#recipe-name').addEventListener('input', (e) => { _recipeName = e.target.value; });
   modal.querySelector('#recipe-new').addEventListener('click', _newRecipe);
+  modal.querySelector('#recipe-example').addEventListener('click', _exampleMenu);
   modal.querySelector('#recipe-open').addEventListener('click', _openMenu);
   modal.querySelector('#recipe-save').addEventListener('click', _save);
   modal.querySelector('#recipe-delete').addEventListener('click', _deleteCurrent);
@@ -226,7 +236,7 @@ function _build() {
 }
 
 // ── Palette ──────────────────────────────────────────────────────────────────
-const TYPE_COLORS = { input: '#5be6b0', output: '#ffd166', model: '#9d7cff', tool: '#7cc4ff' };
+const TYPE_COLORS = { input: '#5be6b0', output: '#ffd166', model: '#9d7cff', tool: '#7cc4ff', branch: '#ff9d5b', loop: '#4dd0e1' };
 
 function _renderPalette() {
   const p = document.getElementById('recipe-palette');
@@ -244,6 +254,8 @@ function _renderPalette() {
   h('Flow');
   add('Input', TYPE_COLORS.input, () => _addNode('input'));
   add('Output', TYPE_COLORS.output, () => _addNode('output'));
+  add('Branch (if)', TYPE_COLORS.branch, () => _addNode('branch', { condition: { kind: 'contains', value: '' } }));
+  add('Loop (refine)', TYPE_COLORS.loop, () => _addNode('loop', { max_iters: 3, until: { kind: '', value: '' } }));
 
   h('Models');
   if (_blocks.models.length) {
@@ -258,6 +270,26 @@ function _renderPalette() {
   } else {
     p.appendChild(_el('div', 'palette-empty', 'No toolbox tools connected.'));
   }
+}
+
+// Rough ranking of how reliably a LOCAL model calls tools (newer instruct
+// models call tools; older ones like llama-pro hallucinate). Used to pick a
+// sensible default model so a recipe doesn't silently fake tool output.
+function _rankModel(m) {
+  const s = String(m || '').toLowerCase();
+  if (/qwen|firefunction|command-?r|hermes/.test(s)) return 5;
+  if (/gemma-?([3-9]|1[0-9])|gemma4/.test(s)) return 5;
+  if (/llama-?[34]|mistral|mixtral/.test(s)) return 4;
+  if (/phi-?[3-9]|granite|nemotron/.test(s)) return 3;
+  if (/llama-?pro|llama-?2|vicuna|alpaca|orca/.test(s)) return 1;
+  return 2;
+}
+function _bestModel() {
+  const list = _blocks.models || [];
+  if (!list.length) return '';
+  let best = list[0];
+  for (const m of list) if (_rankModel(m) > _rankModel(best)) best = m;
+  return best;
 }
 
 // ── Nodes ────────────────────────────────────────────────────────────────────
@@ -339,6 +371,49 @@ function _renderNodeBody(node, body) {
     body.appendChild(lbl);
   } else if (node.type === 'output') {
     body.appendChild(_el('div', 'node-hint', 'Collects everything wired into it as the final result.'));
+  } else if (node.type === 'branch') {
+    node.config.condition = node.config.condition || { kind: 'contains', value: '' };
+    const c = node.config.condition;
+    body.appendChild(_el('div', 'node-hint', 'If the incoming text matches, data passes through; otherwise everything downstream is skipped.'));
+    const sel = _el('select');
+    [['contains', 'contains'], ['not_contains', 'does NOT contain'], ['regex', 'matches regex'],
+     ['nonempty', 'is not empty'], ['empty', 'is empty']].forEach(([v, lab]) => {
+      const o = _el('option', null, lab); o.value = v; if (v === c.kind) o.selected = true; sel.appendChild(o);
+    });
+    const val = _el('input'); val.placeholder = 'text to match'; val.value = c.value || '';
+    val.addEventListener('input', (e) => { c.value = e.target.value; });
+    const _syncVal = () => { val.style.display = (c.kind === 'nonempty' || c.kind === 'empty') ? 'none' : ''; };
+    sel.addEventListener('change', (e) => { c.kind = e.target.value; _syncVal(); });
+    _syncVal();
+    body.appendChild(sel); body.appendChild(val);
+  } else if (node.type === 'loop') {
+    node.config.until = node.config.until || { kind: '', value: '' };
+    body.appendChild(_el('div', 'node-hint', 'Runs the model repeatedly, feeding each result back as {{prev}} to refine it.'));
+    const sel = _el('select');
+    _blocks.models.forEach(m => { const o = _el('option', null, m); o.value = m; if (m === node.config.model) o.selected = true; sel.appendChild(o); });
+    if (!node.config.model) node.config.model = _bestModel();
+    sel.addEventListener('change', (e) => { node.config.model = e.target.value; });
+    body.appendChild(sel);
+    const ta = _el('textarea');
+    ta.placeholder = 'Instruction. Use {{prev}} for the previous result, {{input}} for the run input.';
+    ta.value = node.config.prompt || '';
+    ta.addEventListener('input', (e) => { node.config.prompt = e.target.value; });
+    body.appendChild(ta);
+    const row = _el('div', 'arg-row'); row.appendChild(_el('label', null, 'max iterations (1–8)'));
+    const mi = _el('input'); mi.type = 'number'; mi.min = '1'; mi.max = '8'; mi.value = node.config.max_iters || 3;
+    mi.addEventListener('input', (e) => { node.config.max_iters = parseInt(e.target.value) || 3; });
+    row.appendChild(mi); body.appendChild(row);
+    const u = node.config.until;
+    const stopRow = _el('div', 'arg-row'); stopRow.appendChild(_el('label', null, 'stop early when output…'));
+    const usel = _el('select');
+    [['', '(never — run all iterations)'], ['contains', 'contains'], ['regex', 'matches regex'], ['nonempty', 'is not empty']]
+      .forEach(([v, lab]) => { const o = _el('option', null, lab); o.value = v; if (v === u.kind) o.selected = true; usel.appendChild(o); });
+    const uval = _el('input'); uval.placeholder = 'text / regex'; uval.value = u.value || '';
+    uval.addEventListener('input', (e) => { u.value = e.target.value; });
+    const _syncU = () => { uval.style.display = (!u.kind || u.kind === 'nonempty') ? 'none' : ''; };
+    usel.addEventListener('change', (e) => { u.kind = e.target.value; _syncU(); });
+    _syncU();
+    stopRow.appendChild(usel); stopRow.appendChild(uval); body.appendChild(stopRow);
   } else if (node.type === 'model') {
     const sel = _el('select');
     _blocks.models.forEach(m => {
@@ -346,7 +421,7 @@ function _renderNodeBody(node, body) {
       if (m === node.config.model) o.selected = true;
       sel.appendChild(o);
     });
-    if (!node.config.model && _blocks.models[0]) node.config.model = _blocks.models[0];
+    if (!node.config.model) node.config.model = _bestModel();
     sel.addEventListener('change', (e) => { node.config.model = e.target.value; });
     body.appendChild(sel);
     const ta = _el('textarea');
@@ -567,6 +642,121 @@ function _newRecipe() {
   document.getElementById('recipe-run-output').innerHTML = '';
   _drawEdges();
   _syncEmptyHint();
+}
+
+// Small menu of ready-made starter graphs so a first-time user sees a working
+// recipe instead of a blank canvas.
+function _exampleMenu(e) {
+  document.querySelectorAll('.recipe-menu').forEach(m => m.remove());
+  const menu = _el('div', 'recipe-menu');
+  const btn = e.currentTarget.getBoundingClientRect();
+  menu.style.left = btn.left + 'px';
+  menu.style.top = (btn.bottom + 4) + 'px';
+  const items = [
+    ['🕵  Domain dossier', 'OSINT: whois + DNS → risk brief', _tmplDomainDossier],
+    ['📈  Analyst debate', 'Market: data → value/growth/contrarian → portfolio manager', _tmplAnalystDebate],
+  ];
+  items.forEach(([label, sub, fn]) => {
+    const b = _el('button');
+    b.innerHTML = `<div>${label}</div><div style="font-size:10.5px;opacity:0.55">${sub}</div>`;
+    b.addEventListener('click', () => { menu.remove(); fn(); });
+    menu.appendChild(b);
+  });
+  document.body.appendChild(menu);
+  const off = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', off); } };
+  setTimeout(() => document.addEventListener('mousedown', off), 0);
+}
+
+function _mk(type, x, y, config) {
+  const n = { id: _newId(), type, x, y, config: config || {} };
+  _nodes.push(n);
+  return n;
+}
+function _finishTemplate(name, runValue) {
+  _recipeName = name;
+  const nameInput = document.getElementById('recipe-name');
+  if (nameInput) nameInput.value = _recipeName;
+  const runInput = document.getElementById('recipe-run-input');
+  if (runInput && runValue) runInput.value = runValue;
+  _nodes.forEach(_renderNode);
+  _drawEdges();
+  _syncEmptyHint();
+}
+
+// OSINT: run input → whois + DNS → model risk brief → output.
+function _tmplDomainDossier() {
+  _newRecipe();
+  const toolNames = _blocks.tools.map(t => t.name);
+  const model = _bestModel();
+  const inNode = _mk('input', 60, 150, { label: 'Domain' });
+  const outNode = _mk('output', 880, 150, {});
+  const parents = [];
+  if (toolNames.includes('osint_whois') || toolNames.includes('osint_dns')) {
+    if (toolNames.includes('osint_whois')) {
+      const w = _mk('tool', 330, 60, { tool: 'osint_whois', args: { target: '{{input}}' } });
+      _edges.push({ from: inNode.id, to: w.id }); parents.push(w.id);
+    }
+    if (toolNames.includes('osint_dns')) {
+      const d = _mk('tool', 330, 240, { tool: 'osint_dns', args: { domain: '{{input}}', record_type: 'A' } });
+      _edges.push({ from: inNode.id, to: d.id }); parents.push(d.id);
+    }
+    const m = _mk('model', 610, 150, { model, prompt: 'Write a short risk brief on this domain from the recon above.' });
+    parents.forEach(p => _edges.push({ from: p, to: m.id }));
+    _edges.push({ from: m.id, to: outNode.id });
+  } else {
+    const m = _mk('model', 400, 150, { model, prompt: 'Summarize the following in 3 bullet points:\n\n{{input}}' });
+    _edges.push({ from: inNode.id, to: m.id });
+    _edges.push({ from: m.id, to: outNode.id });
+  }
+  _finishTemplate('Domain dossier (example)', 'example.com');
+}
+
+// Market "hedge fund" pattern (inspired by ai-hedge-fund, but fully local):
+// ticker → market data tools → three investor-persona model nodes → a
+// portfolio-manager node that weighs them → output. Persona prompts carry no
+// {{refs}}, so the engine auto-prepends each node's upstream data as context.
+function _tmplAnalystDebate() {
+  _newRecipe();
+  const toolNames = _blocks.tools.map(t => t.name);
+  const model = _bestModel();
+  const inNode = _mk('input', 40, 230, { label: 'Ticker' });
+  const dataNodes = [];
+  if (toolNames.includes('market_analyze')) {
+    const a = _mk('tool', 280, 110, { tool: 'market_analyze', args: { symbol: '{{input}}' } });
+    _edges.push({ from: inNode.id, to: a.id }); dataNodes.push(a.id);
+  }
+  if (toolNames.includes('market_fundamentals')) {
+    const f = _mk('tool', 280, 350, { tool: 'market_fundamentals', args: { symbol: '{{input}}' } });
+    _edges.push({ from: inNode.id, to: f.id }); dataNodes.push(f.id);
+  }
+  if (!dataNodes.length) {
+    // Market toolbox not connected — degrade to a single analyst on raw input.
+    const a = _mk('model', 320, 230, { model, prompt: 'Give a bull and bear case for this ticker:\n\n{{input}}' });
+    const out = _mk('output', 620, 230, {});
+    _edges.push({ from: inNode.id, to: a.id });
+    _edges.push({ from: a.id, to: out.id });
+    _finishTemplate('Analyst debate (needs Market toolbox)', 'NVDA');
+    return;
+  }
+  const personas = [
+    ['Value investor', 110, 'You are a disciplined value investor in the Buffett/Graham tradition. Using the market data above, judge whether this is a quality business at a fair price. Cite valuation (P/E, P/B, FCF), margins, and balance-sheet health. End with your call: BULLISH, BEARISH, or NEUTRAL, and a one-line reason.'],
+    ['Growth investor', 230, 'You are a growth investor in the Cathie Wood/Peter Lynch tradition. Using the market data above, judge the growth story: revenue/earnings growth, momentum, and narrative. Weigh upside against the price paid. End with your call: BULLISH, BEARISH, or NEUTRAL, and a one-line reason.'],
+    ['Contrarian / risk', 350, 'You are a contrarian risk manager in the Burry/Taleb tradition. Using the market data above, stress-test the bull case: overvaluation, debt, volatility, crowding, and tail risks. End with your call: BULLISH, BEARISH, or NEUTRAL, and a one-line reason.'],
+  ];
+  const personaIds = [];
+  personas.forEach(([label, y, prompt]) => {
+    const p = _mk('model', 560, y, { model, prompt, label });
+    dataNodes.forEach(d => _edges.push({ from: d, to: p.id }));
+    personaIds.push(p.id);
+  });
+  const pm = _mk('model', 860, 230, {
+    model, label: 'Portfolio manager',
+    prompt: 'You are the portfolio manager. Three analysts gave their views above. Weigh them, note where they agree and disagree, and give a final call — BUY, HOLD, or SELL — with a confidence (low/medium/high) and a 2-sentence rationale. This is educational analysis, not investment advice.',
+  });
+  personaIds.forEach(id => _edges.push({ from: id, to: pm.id }));
+  const outNode = _mk('output', 1140, 230, {});
+  _edges.push({ from: pm.id, to: outNode.id });
+  _finishTemplate('Analyst debate (example)', 'NVDA');
 }
 
 async function _openMenu(e) {

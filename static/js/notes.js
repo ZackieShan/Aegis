@@ -4,7 +4,7 @@
  */
 
 import uiModule from './ui.js';
-import { spawnConfetti } from './confetti.js';
+import { spawnConfetti } from './compare/vote.js';
 import * as Modals from './modalManager.js';
 import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';

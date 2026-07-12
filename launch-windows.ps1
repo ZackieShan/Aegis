@@ -252,6 +252,45 @@ if ($ollamaProc) {
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopOllama | Out-Null
 }
 
+# 6d. llama-swap fronts a CUDA llama.cpp server: it serves the raw GGUFs in
+#     models/ over an OpenAI API with on-demand model swap and grammar-locked
+#     native tool calls (far more reliable than Ollama for tool use). It's
+#     optional — if the engine binaries aren't present we skip cleanly and
+#     Ollama still works. Set AEGIS_ENGINE_DIR to override the location.
+$swapProc = $null
+$engineDir = if ($env:AEGIS_ENGINE_DIR) { $env:AEGIS_ENGINE_DIR } else { Join-Path $PSScriptRoot "..\engine" }
+$swapExe   = Join-Path $engineDir "llama-swap\llama-swap.exe"
+$swapCfg   = Join-Path $engineDir "llama-swap.yaml"
+$swapPort  = if ($env:LLAMA_SWAP_PORT) { $env:LLAMA_SWAP_PORT } else { "9090" }
+if (Test-PortOpen "127.0.0.1" $swapPort) {
+    Write-Host ("llama-swap already running on 127.0.0.1:{0} - using it." -f $swapPort) -ForegroundColor Cyan
+} elseif ((Test-Path $swapExe) -and (Test-Path $swapCfg)) {
+    $swapLog = Join-Path $env:TEMP "aegis-llama-swap.log"
+    Write-Step ("Starting llama-swap in the background on 127.0.0.1:{0}" -f $swapPort)
+    # -watch-config: llama-swap hot-reloads the YAML on change, so Aegis's
+    # context auto-tuner (/engine) can resize model windows without a restart.
+    $swapProc = Start-Process -FilePath $swapExe `
+        -ArgumentList @("-config", $swapCfg, "-watch-config", "-listen", ("127.0.0.1:{0}" -f $swapPort)) `
+        -WindowStyle Hidden -RedirectStandardOutput $swapLog -RedirectStandardError "$swapLog.err" -PassThru
+} else {
+    Write-Host ("llama-swap engine not found at {0} - skipping (Ollama still available)." -f $engineDir) -ForegroundColor DarkGray
+}
+if ($swapProc) {
+    $stopSwap = { if ($swapProc -and -not $swapProc.HasExited) { try { $swapProc.Kill() } catch {} } }.GetNewClosure()
+    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopSwap | Out-Null
+}
+
+# 6e. Put Aegis's portable Node (engine/node) on PATH so npx-based MCP servers
+#     (the built-in Browser / Playwright) and the doctor's npx check find it,
+#     without requiring a system-wide Node install. Skipped cleanly if absent.
+$nodeDir = Join-Path $engineDir "node"
+if (Test-Path (Join-Path $nodeDir "node.exe")) {
+    if (($env:PATH -split ';') -notcontains $nodeDir) {
+        $env:PATH = "$nodeDir;$env:PATH"
+    }
+    Write-Host ("Using portable Node at {0}" -f $nodeDir) -ForegroundColor DarkGray
+}
+
 # 7. Start the server (use `python -m uvicorn` - bare `uvicorn` may not be on PATH)
 Write-Step ("Starting Aegis at http://{0}:{1}" -f $BindHost, $Port)
 Write-Host "Press Ctrl+C to stop."

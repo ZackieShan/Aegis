@@ -13,6 +13,61 @@
 
 ---
 
+## What Aegis adds over Odysseus
+
+Aegis is a heavily extended fork of [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus),
+rebuilt around a **local-first, closed-loop** philosophy — everything runs on your own
+hardware, no cloud API keys required. The differentiated engine binaries (llama.cpp,
+llama-swap, Node/Playwright, Aider, stable-diffusion.cpp) live *outside* the repo and are
+set up separately; this repo is the application. What's new:
+
+### Local model engine
+- **llama.cpp + llama-swap** — hot-swap GGUF models through one OpenAI-compatible endpoint,
+  with grammar-locked **native tool calls** (far more reliable than text-parsed tools).
+- **Zero-config model drop folder** — drop a `.gguf` (or a folder with a GGUF + `mmproj`) into
+  `models/` and it's auto-discovered; serve it with one click.
+- **Context auto-tuner** (`/engine`) — reads each model's GGUF metadata + your GPU VRAM and
+  **right-sizes the context window automatically** — no hand-editing configs, no "context
+  exceeded" errors.
+
+### Agentic capabilities
+- **Toolboxes** — themed MCP tool collections the agent can summon (opt-in per message):
+  **OSINT** (recon), **Market** (analysis), **Troubleshoot** (network/systems), **Web**
+  (crawl & extract).
+- **Recipes** — a visual node editor to chain tools + models into workflows, with **branch**
+  (conditional) and **loop** (refine) nodes.
+- **Coding agent** (`/code`) — Aider wrapped as a workspace-scoped, git-aware coding agent.
+- **Code Canvas** (`/canvas`) — an artifact-style editor: generate code, edit it inline, tell
+  the AI what to change, and **run it** (Python in-browser, HTML live preview, or server-side).
+- **Repo → Wiki** (`/wiki`) — point at any local repo and get a structured Overview /
+  Architecture / Module-guide wiki, generated locally.
+- **Browser automation** — a built-in Playwright MCP lets the agent navigate, read, and click
+  real web pages via accessibility snapshots.
+
+### Local media
+- **Image generation** — Qwen-Image (or any diffusion GGUF) via stable-diffusion.cpp, fully
+  local and OpenAI-images-compatible.
+- **Voice** — local Whisper speech-to-text + text-to-speech, plus a hands-free **Voice Mode**:
+  speak → the agent acts → it reads the reply back.
+- **Vision** — a vision model (Qwen2.5-VL) for screenshot / image understanding.
+
+### Knowledge, memory & observability
+- **Knowledge-graph memory** (`/graph`) — a local *(subject, relation, object)* graph extracted
+  from your notes and chats.
+- **Local tracing** (`/traces`) — every model/agent call recorded to a local SQLite store
+  (with optional opik export). No data leaves the machine.
+
+### Operability
+- **Control Center** — one dashboard showing every capability's **live status** with a one-click
+  "try it," so nothing is hidden behind commands.
+- **Doctor** (`/doctor`) — capability self-check with guarded, one-click fixes for missing
+  dependencies.
+- **Windows-native** — runs natively on Windows with no Docker, plus many Windows-specific fixes
+  (paths, shell, GPU serving).
+- **Aurora theme** — a purple/black aurora-borealis theme, JetBrains Mono, and a trident mark.
+
+Everything above is opt-in and local. See [ROADMAP.md](ROADMAP.md) for what's next.
+
 ## Quick Start
 
 New here? The **[Quickstart guide](QUICKSTART.md)** covers everything from

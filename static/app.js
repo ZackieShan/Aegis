@@ -11,6 +11,7 @@ import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
 import chatModule from './js/chat.js';
+import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
@@ -161,6 +162,7 @@ function initRailHoverLabels() {
     'rail-chats': 'Chat',
     'rail-documents': 'Docs',
     'rail-calendar': 'Calendar',
+    'rail-compare': 'Compare',
     'rail-recipes': 'Recipes',
     'rail-cookbook': 'Cookbook',
     'rail-research': 'Research',
@@ -674,9 +676,26 @@ function initializeEventListeners() {
         return;
       }
 
-      // Priority order: topmost overlay first. Close exactly one per press.
+      // Priority order: topmost overlay first. Close exactly one per press
+      // so a window stacked on another (e.g. scoreboard over compare) only
+      // dismisses the top one, not both.
+
+      // Scoreboard sits on top of the compare window — close it first.
+      const scoreboardOverlay = document.getElementById('scoreboard-overlay');
+      if (scoreboardOverlay) {
+        scoreboardOverlay.remove();
+        return;
+      }
+
       if (searchChatModule && searchChatModule.isOpen()) {
         searchChatModule.closeSearch();
+        return;
+      }
+
+      // Compare model selector
+      const cmpOverlay = document.getElementById('compare-model-overlay');
+      if (cmpOverlay) {
+        cmpOverlay.remove();
         return;
       }
 
@@ -956,16 +975,37 @@ function initializeEventListeners() {
     if (ws) { ws.style.animation = 'none'; ws.offsetHeight; ws.style.animation = 'welcome-enter 0.3s ease-out both'; }
   }
 
-  // ── Close any exclusive full-screen chat overlay before a tool activation ──
-  // Retained hook for "close any exclusive full-screen chat overlay before X".
-  // Compare was the only such overlay; with it removed there is nothing to
-  // close, so this is a stable no-op that keeps its call sites (and the two
-  // extracted modules that receive it) working unchanged.
-  function _closeExclusiveOverlay() {
+  // ── Close compare if active (used by all tool/sidebar activations) ──
+  // Returns true if compare was active (page will reload), caller should return early
+  function _closeCompareIfActive() {
+    if (compareModule && compareModule.isActive()) {
+      compareModule.deactivate(true);
+      return true;
+    }
     return false;
   }
 
   // ── Tools section click handlers ──
+  const toolCompareBtn = el('tool-compare-btn');
+  if (toolCompareBtn) {
+    toolCompareBtn.addEventListener('click', () => {
+      if (compareModule) {
+        if (compareModule.isActive()) {
+          // Already active — toggle off
+          compareModule.toggleMode();
+          return;
+        }
+        // Close other exclusive tools before opening compare
+        const resChk = el('research-toggle');
+        if (resChk && resChk.checked) {
+          _syncResearchIndicator(false);
+        }
+        _startFreshChat();
+        compareModule.toggleMode();
+      }
+    });
+  }
+
   const toolResearchBtn = el('tool-research-btn');
   if (toolResearchBtn) {
     toolResearchBtn.addEventListener('click', () => {
@@ -991,7 +1031,7 @@ function initializeEventListeners() {
   const toolDoclibBtn = el('tool-doclib-btn');
   if (toolDoclibBtn) {
     toolDoclibBtn.addEventListener('click', () => {
-      if (_closeExclusiveOverlay()) return;
+      if (_closeCompareIfActive()) return;
       if (documentModule) {
         if (documentModule.isLibraryOpen()) {
           documentModule.closeLibrary();
@@ -1922,7 +1962,7 @@ function initializeEventListeners() {
     const anyActive = menu ? Array.from(menu.querySelectorAll('.overflow-menu-item.active')).some(item => item.style.display !== 'none') : false;
     plusBtn.classList.toggle('has-active', anyActive);
   }
-  // Modules dispatch this when their overflow state changes
+  // External modules (compare) dispatch this when their overflow state changes
   document.addEventListener('overflow-state-change', () => updatePlusDot());
 
   // ── Prevent toolbar buttons from stealing focus (avoids mobile keyboard bounce) ──
@@ -2311,6 +2351,16 @@ function initializeEventListeners() {
   })();
 
 
+  // ── Compare indicator (sidebar only, no overflow) ──
+  const compareIndicatorBtn = el('compare-indicator-btn');
+  if (compareIndicatorBtn) {
+    compareIndicatorBtn.addEventListener('click', () => {
+      if (compareModule && compareModule.isActive()) {
+        compareModule.closeCompare();
+      }
+    });
+  }
+
   // ── Overflow RAG toggle ──
   const overflowRagBtn = el('overflow-rag-btn');
   const ragIndicatorBtn = el('rag-indicator-btn');
@@ -2563,6 +2613,7 @@ function initializeEventListeners() {
     // Per-tool visibility — fine-grained control over which entries show
     // inside the Tools section in the sidebar.
     'tool-calendar':       '#tool-calendar-btn',
+    'tool-compare':        '#tool-compare-btn',
     'tool-recipes':        '#tool-recipes-btn',
     'tool-cookbook':       '#tool-cookbook-btn',
     'tool-research':       '#tool-research-btn',
@@ -3093,7 +3144,7 @@ function initializeEventListeners() {
 
   // Sidebar layout (extracted to js/sidebar-layout.js)
   initSidebarLayout(Storage, {
-    documentModule, _closeExclusiveOverlay, _deactivateIncognito,
+    documentModule, _closeCompareIfActive, _deactivateIncognito,
     presetsModule, sessionModule, el, _defaultChat, _syncResearchIndicator
   });
 
@@ -3179,7 +3230,7 @@ function initializeEventListeners() {
 
   async function _handleNewChatAction({ preferModel = true, focus = true } = {}) {
       if (!sessionModule) return;
-      if (_closeExclusiveOverlay()) return;
+      if (_closeCompareIfActive()) return;
       _deactivateIncognito();
       // Clear character on new chat
       if (presetsModule && presetsModule.deactivateCharacter) presetsModule.deactivateCharacter();
@@ -3215,7 +3266,7 @@ function initializeEventListeners() {
   if (mobileNewChat) {
     mobileNewChat.addEventListener('click', () => {
       if (!sessionModule) return;
-      if (_closeExclusiveOverlay()) return;
+      if (_closeCompareIfActive()) return;
       _deactivateIncognito();
       _startFreshChat();
       document.querySelectorAll('.session-item.active').forEach(s => s.classList.remove('active'));
@@ -3518,7 +3569,7 @@ function initializeEventListeners() {
   initKeyboardShortcuts({
     el, Storage, sessionModule, uiModule, chatModule,
     adminModule, settingsModule, searchChatModule,
-    _closeExclusiveOverlay, _deactivateIncognito, API_BASE
+    _closeCompareIfActive, _deactivateIncognito, API_BASE
   });
   
 }
@@ -3574,6 +3625,10 @@ function startAegisApp() {
   chatModule.init(API_BASE);
   chatModule.initListeners();
   groupModule.init(API_BASE);
+  // Initialize compare module
+  if (compareModule) {
+    compareModule.init(API_BASE);
+  }
   researchPanelModule.init(API_BASE, markdownModule, sessionModule);
   // Initialize document editor module
   if (documentModule) {
@@ -3599,6 +3654,7 @@ function startAegisApp() {
 
   // Rail tool buttons — delegate to sidebar tool buttons
   const _railToolMap = {
+    'rail-compare':   'tool-compare-btn',
     'rail-recipes':   'tool-recipes-btn',
     'rail-research':  'tool-research-btn',
     'rail-cookbook':   'tool-cookbook-btn',
@@ -3668,7 +3724,7 @@ function startAegisApp() {
     });
   }
 
-  // Sync the contextual rail icons. Tool launchers (calendar/recipes/cookbook/
+  // Sync the contextual rail icons. Tool launchers (calendar/compare/cookbook/
   // research/gallery/tasks/archive/memory/notes/theme/email) are now
   // always-visible launchers, so only the doc + background-chat indicators
   // are shown/hidden dynamically here.
@@ -3714,6 +3770,11 @@ function startAegisApp() {
     _submitting = true;
     // Release after a short delay (stream start sets its own isStreaming guard)
     setTimeout(() => { _submitting = false; }, 300);
+
+    // Compare mode: route submit to compare handler (same message to all panes)
+    if (compareModule && compareModule.isActive()) {
+      return compareModule.handleCompareSubmit(e);
+    }
 
     // Group chat: route to group module
     if (groupModule && groupModule.isActive()) {
@@ -4057,6 +4118,73 @@ function startAegisApp() {
     e.preventDefault();
     attachStrip.style.backgroundColor = '';
   });
+
+  // ── Compare-mode file drop shield ──────────────────────────────────────────
+  // Compare reuses #chat-container, but each pane renders into a sandboxed
+  // <iframe>. Iframes swallow drag-and-drop events: a file dropped on a pane is
+  // handled by the iframe, not the parent, so the browser loads the file *inside
+  // the pane* ("behind" the app) instead of attaching it. The chatContainer drop
+  // handler above never sees it because the event doesn't bubble out of the frame.
+  //
+  // Fix: while a file drag is active in Compare, raise a single full-window shield
+  // that sits above every pane/iframe and becomes the drop target. The drop then
+  // lands on the parent document and we route the files into the shared composer
+  // (the same pending-files pipeline the picker and paste use). Scoped to Compare
+  // via the .compare-active class, so normal chat and the tool dropzones (gallery,
+  // RAG, document editor, …) are unaffected.
+  let _cmpDropShield = null;
+  const _isFileDrag = (e) => {
+    const types = e.dataTransfer && e.dataTransfer.types;
+    return !!types && Array.prototype.indexOf.call(types, 'Files') !== -1;
+  };
+  const _compareActive = () => {
+    const c = el('chat-container');
+    return !!c && c.classList.contains('compare-active');
+  };
+  const _showCmpShield = () => {
+    if (!_cmpDropShield) {
+      _cmpDropShield = document.createElement('div');
+      _cmpDropShield.id = 'compare-drop-shield';
+      _cmpDropShield.setAttribute('aria-hidden', 'true');
+      _cmpDropShield.style.cssText = 'position:fixed;inset:0;z-index:2147483646;' +
+        'display:none;align-items:center;justify-content:center;' +
+        'background:color-mix(in srgb, var(--accent, #0af) 16%, rgba(0,0,0,0.5));' +
+        'backdrop-filter:blur(2px);';
+      const _box = document.createElement('div');
+      _box.style.cssText = 'pointer-events:none;border:2px dashed rgba(255,255,255,0.9);' +
+        'border-radius:14px;padding:20px 28px;background:rgba(0,0,0,0.4);' +
+        'font:600 16px/1.4 system-ui,sans-serif;color:#fff;';
+      _box.textContent = 'Drop files to attach';
+      _cmpDropShield.appendChild(_box);
+      document.body.appendChild(_cmpDropShield);
+    }
+    _cmpDropShield.style.display = 'flex';
+  };
+  const _hideCmpShield = () => { if (_cmpDropShield) _cmpDropShield.style.display = 'none'; };
+  // Capture phase so we raise the shield before the pointer reaches an iframe.
+  window.addEventListener('dragenter', (e) => {
+    if (_isFileDrag(e) && _compareActive()) _showCmpShield();
+  }, true);
+  window.addEventListener('dragover', (e) => {
+    if (!_isFileDrag(e) || !_compareActive()) return;
+    e.preventDefault();                       // mark as a valid drop target
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    _showCmpShield();
+  }, true);
+  window.addEventListener('dragleave', (e) => {
+    // Hide only when the drag actually leaves the window (no relatedTarget).
+    if (_compareActive() && !e.relatedTarget) _hideCmpShield();
+  }, true);
+  window.addEventListener('dragend', _hideCmpShield, true);
+  window.addEventListener('drop', async (e) => {
+    if (!_isFileDrag(e) || !_compareActive()) return;
+    e.preventDefault();
+    _hideCmpShield();
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+    await fileHandlerModule.addFiles(files);
+    uiModule.showToast(`Added ${files.length} file${files.length > 1 ? 's' : ''} to attach`);
+  }, true);
 
   // Load initial data
   presetsModule.loadPresets(uiModule.showError);

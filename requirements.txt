@@ -56,3 +56,10 @@ pytest-asyncio
 # TestClient import when only classic httpx is present. Runtime code keeps
 # using `httpx` above; this is test-client only.
 httpx2
+
+# DuckDuckGo search backend for the keyless default web-search provider. Without
+# this the code falls back to scraping html.duckduckgo.com, which DuckDuckGo now
+# rate-limits (HTTP 202 / 0 results) — so Deep Research and agent web search go
+# dark. `ddgs` uses DDG's proper API endpoints and is far more reliable.
+# Alternatives (keyed) still work via Settings → Search: Brave, Tavily, Serper.
+ddgs

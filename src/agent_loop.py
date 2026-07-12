@@ -114,6 +114,7 @@ _AGENT_RULES = """\
 - If `web_search` is listed in this prompt, web search is available. Do NOT tell the user search/web tools are unavailable.
 - These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead.
 - Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
+- LOCAL ADMIN IS FINE. Aegis is self-hosted and you run on the user's OWN machine; when `bash` is enabled it has full local shell access. If the user directly asks for a routine local operation — open a system console (e.g. `services.msc`), check/start/stop a named service, show system info, install a package they approved — just do it. Don't refuse or lecture about "system settings" on their own machine. (Windows: a GUI console won't open from the Git-Bash shell with a bare `services.msc`; use `cmd //c start services.msc` or `powershell -c "Start-Process services.msc"`.) Do still confirm BEFORE genuinely destructive/irreversible actions — deleting the user's data, formatting a disk, or wiping files en masse.
 - Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
 - Long-form or structured writing is a document by default when the user asks to write/create/make/generate it and the answer would be more than a short paragraph. Use create_document instead of dumping the full content in chat.
 - Editing an existing document: ALWAYS use ```edit_document with FIND/REPLACE blocks. Do NOT rewrite the whole document with ```update_document unless genuinely changing more than half of it.
@@ -2643,6 +2644,9 @@ async def stream_agent_loop(
         and (_casual_low_signal_turn or not workspace)
         and not forced_tools
         and not relevant_tools
+        # A dedicated toolbox run explicitly summoned a toolbox — never take
+        # the tool-less "low-signal" shortcut, or the tools are never offered.
+        and not active_toolboxes
     )
     # Tool retrieval uses the latest message by default. It may inherit recent
     # user turns only for explicit continuations ("yes", "do it", "1").
@@ -3343,6 +3347,13 @@ async def stream_agent_loop(
                     s for s in mcp_schemas
                     if s.get("function", {}).get("name") in _relevant_tools
                 ]
+                # A dedicated toolbox run explicitly summoned a toolbox. Its tools
+                # are rarely what tool-RAG retrieves, so the relevant_tools filter
+                # above drops them and the model gets NO tools (it then emits bare
+                # JSON that never executes). mcp_schemas is already scoped to just
+                # the active toolbox (the loop disabled the others), so send it all.
+                if active_toolboxes:
+                    _mcp_filtered = mcp_schemas
                 all_tool_schemas = base_schemas + _mcp_filtered
             else:
                 base_schemas = FUNCTION_TOOL_SCHEMAS if _needs_admin else [
@@ -3359,10 +3370,16 @@ async def stream_agent_loop(
                     and t.get("name") not in disabled_tools
                 ]
         else:
-            # Local: only MCP schemas when message suggests MCP tool usage
+            # Local: only MCP schemas when message suggests MCP tool usage.
+            # Exception: a dedicated toolbox run (active_toolboxes) explicitly
+            # summoned a toolbox, so always offer its (already-scoped) tools —
+            # don't gate on keyword heuristics the way ordinary chat does.
             _last_content = _last_user.lower()
             _wants_mcp = any(kw in _last_content for kw in _MCP_KEYWORDS)
-            all_tool_schemas = mcp_schemas if (_wants_mcp and mcp_schemas) else []
+            if active_toolboxes and mcp_schemas:
+                all_tool_schemas = mcp_schemas
+            else:
+                all_tool_schemas = mcp_schemas if (_wants_mcp and mcp_schemas) else []
         agent_stream_timeout = int(get_setting("agent_stream_timeout_seconds", 300) or 300)
 
         _tool_names_sent = [t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")]
@@ -4478,6 +4495,26 @@ async def stream_agent_loop(
     )
     metrics["requested_model"] = requested_model
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
+
+    # Local observability: record this whole turn (guarded; never breaks chat).
+    try:
+        from src import tracing
+        _tc = []
+        for _ev in (tool_events or []):
+            _n = _ev.get("tool") or _ev.get("name") or _ev.get("type")
+            if _n:
+                _tc.append(str(_n))
+        tracing.record(
+            kind=("toolbox" if active_toolboxes else "agent"),
+            model=(requested_model or actual_model), endpoint=endpoint_url, session_id=session_id or "",
+            latency_ms=int(total_duration * 1000),
+            first_token_ms=int((time_to_first_token or 0) * 1000) or None,
+            input_tokens=real_input_tokens or None, output_tokens=real_output_tokens or None,
+            tool_calls=_tc, gen_tps=metrics.get("gen_tps") or metrics.get("tokens_per_second"),
+            workload=workload, prompt=_last_user, response=full_response,
+        )
+    except Exception:
+        pass
 
     # Teacher-escalation: inline takeover visible in the chat stream.
     # The student just finished; if Tier 1 flags failure, the teacher

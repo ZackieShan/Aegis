@@ -27,6 +27,15 @@ def _find_npx() -> str:
     npx = which_tool("npx")
     if npx:
         return npx
+    # Aegis's portable Node, kept outside the repo like the llama.cpp / llama-swap
+    # binaries (engine/node). Honors AEGIS_ENGINE_DIR. Checked before the OS
+    # fallbacks so a self-contained install works without touching system PATH.
+    engine = os.environ.get("AEGIS_ENGINE_DIR") or os.path.abspath(
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), os.pardir, "engine"))
+    engine_npx = (os.path.join(engine, "node", "npx.cmd") if IS_WINDOWS
+                  else os.path.join(engine, "node", "bin", "npx"))
+    if os.path.isfile(engine_npx):
+        return engine_npx
     if IS_WINDOWS:
         # Minimal-PATH fallbacks: npm's global bin lives under %APPDATA%\npm,
         # and node's installer dir carries npx.cmd alongside node.exe.
@@ -78,14 +87,62 @@ _BUILTIN_SERVERS = {
     "osint":       ("mcp_servers/osint_server.py",       "Toolbox: OSINT — Intel & Recon"),
     "troubleshoot":("mcp_servers/troubleshoot_server.py","Toolbox: Network & Systems Troubleshooting"),
     "market":      ("mcp_servers/market_server.py",      "Toolbox: Market Analysis (Bull/Base/Bear)"),
+    "web":         ("mcp_servers/web_server.py",         "Toolbox: Web Research — Crawl & Extract"),
 }
+
+def _find_playwright_headless_shell() -> "str | None":
+    """Locate an installed Playwright chromium *headless shell*, newest first.
+
+    The headless shell is the purpose-built, lightweight chromium for headless
+    automation. Preferring it (over the full chromium) is both lighter and more
+    robust: on some Windows boxes the full chromium fails a side-by-side runtime
+    check that the headless shell passes. Returns None if none is installed, in
+    which case @playwright/mcp falls back to its own default browser.
+    """
+    import glob
+    import re
+
+    patterns = []
+    if IS_WINDOWS:
+        local = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
+        patterns.append(os.path.join(local, "ms-playwright", "chromium_headless_shell-*",
+                                     "chrome-headless-shell-win64", "chrome-headless-shell.exe"))
+    else:
+        home = os.path.expanduser("~")
+        patterns += [
+            os.path.join(home, ".cache", "ms-playwright", "chromium_headless_shell-*",
+                         "chrome-headless-shell-linux", "chrome-headless-shell"),
+            os.path.join(home, "Library", "Caches", "ms-playwright", "chromium_headless_shell-*",
+                         "chrome-headless-shell-mac*", "chrome-headless-shell"),
+        ]
+    matches: "list[str]" = []
+    for p in patterns:
+        matches += glob.glob(p)
+    if not matches:
+        return None
+
+    def _ver(path: str) -> int:
+        m = re.search(r"chromium_headless_shell-(\d+)", path)
+        return int(m.group(1)) if m else 0
+
+    return sorted(matches, key=_ver)[-1]
+
+
+def _browser_server_args() -> "list[str]":
+    """Args for the built-in Browser MCP; pins the headless shell when present."""
+    args = ["-y", "@playwright/mcp@latest", "--headless", "--caps", "vision"]
+    shell = _find_playwright_headless_shell()
+    if shell:
+        args += ["--executable-path", shell]
+    return args
+
 
 # NPX-based built-in servers (run via npx, not Python)
 _BUILTIN_NPX_SERVERS = {
     "builtin_browser": {
         "name": "Built-in: Browser",
         "command": "npx",
-        "args": ["-y", "@playwright/mcp@latest", "--headless", "--caps", "vision"],
+        "args": _browser_server_args(),
     }
 }
 
@@ -117,11 +174,12 @@ BUILTIN_MCP_IDS = set(_BUILTIN_SERVERS) | set(_BUILTIN_NPX_SERVERS)
 # command (/toolbox, /osint, /market, /troubleshoot). This keeps ordinary chat
 # from being hijacked into "investigate everything" mode. Keyed by server id →
 # the slash word(s) that activate it.
-TOOLBOX_MCP_IDS = {"osint", "troubleshoot", "market"}
+TOOLBOX_MCP_IDS = {"osint", "troubleshoot", "market", "web"}
 TOOLBOX_SLASH_ALIASES = {
     "osint": "osint", "recon": "osint", "intel": "osint",
     "troubleshoot": "troubleshoot", "net": "troubleshoot", "diagnose": "troubleshoot",
     "market": "market", "stocks": "market", "crypto": "market",
+    "web": "web", "crawl": "web", "scrape": "web",
 }
 
 
@@ -213,7 +271,16 @@ async def register_builtin_servers(mcp_manager):
     async def _start_npx_servers():
         await asyncio.sleep(3)  # let Python servers finish first
         for server_id, cfg in _BUILTIN_NPX_SERVERS.items():
-            # Skip the server if its npx package isn't cached. Without this
+            args = cfg["args"]
+            # Always upsert the panel row FIRST — even if npx/the package isn't
+            # ready — so the server (e.g. the built-in Browser) is DISCOVERABLE
+            # and fixable in the admin MCP panel instead of silently vanishing.
+            # This honors an existing admin enable/disable.
+            enabled = _upsert_builtin_server_row(server_id, cfg["name"], npx_path, args, None)
+            if not enabled:
+                logger.info(f"Built-in NPX server '{cfg['name']}' disabled by admin — skipping connect.")
+                continue
+            # Skip CONNECTING if its npx package isn't cached. Without this
             # check, npx would try to download/install the package on first
             # use, which can take minutes (or hang) on fresh installs without
             # Playwright system deps. Wrapping that in asyncio.wait_for to
@@ -224,7 +291,6 @@ async def register_builtin_servers(mcp_manager):
             # task, which cascades cancellations into the rest of the event
             # loop and downs the app. Detecting installed-state up-front lets
             # us bail with a useful warning before we ever touch stdio_client.
-            args = cfg["args"]
             pkg_spec = _npx_package_from_args(args)
             if pkg_spec and not await _is_npx_package_cached(npx_path, pkg_spec):
                 logger.warning(

@@ -781,6 +781,55 @@ app.include_router(setup_workspace_routes())
 from routes.hwfit_routes import setup_hwfit_routes
 app.include_router(setup_hwfit_routes())
 
+# Model A/B Comparison
+from routes.compare_routes import setup_compare_routes
+app.include_router(setup_compare_routes(session_manager))
+
+# Recipes — visual tool + model orchestration workflows
+from routes.recipes_routes import setup_recipes_routes
+app.include_router(setup_recipes_routes())
+logger.info("Recipes routes initialized")
+
+# Doctor — capability self-check + guarded (permission-gated) self-heal
+from routes.doctor_routes import setup_doctor_routes
+app.include_router(setup_doctor_routes())
+logger.info("Doctor routes initialized")
+
+# Observability — local LLM/agent trace store (opik export optional)
+from routes.observability_routes import setup_observability_routes
+app.include_router(setup_observability_routes())
+logger.info("Observability routes initialized")
+
+# Knowledge graph memory — local (subject, relation, object) store
+from routes.graph_routes import setup_graph_routes
+app.include_router(setup_graph_routes())
+logger.info("Graph memory routes initialized")
+
+# Coding agent — local Aider driver (workspace-scoped, git-aware, traced)
+from routes.code_routes import setup_code_routes
+app.include_router(setup_code_routes())
+logger.info("Coding agent routes initialized")
+
+# Repo wiki — local repo → structured markdown wiki (deepwiki-open pattern)
+from routes.wiki_routes import setup_wiki_routes
+app.include_router(setup_wiki_routes())
+logger.info("Repo wiki routes initialized")
+
+# Engine tuner — auto-size llama.cpp context from model metadata + GPU VRAM
+from routes.engine_routes import setup_engine_routes
+app.include_router(setup_engine_routes())
+logger.info("Engine tuner routes initialized")
+
+# Control Center — one aggregated capability dashboard (status + try-it)
+from routes.control_center_routes import setup_control_center_routes
+app.include_router(setup_control_center_routes())
+logger.info("Control Center routes initialized")
+
+# Code canvas — generate + inline AI-edit a code buffer (local coder)
+from routes.canvas_routes import setup_canvas_routes
+app.include_router(setup_canvas_routes())
+logger.info("Code canvas routes initialized")
+
 # User Preferences
 from routes.prefs_routes import setup_prefs_routes
 app.include_router(setup_prefs_routes())
@@ -802,10 +851,6 @@ mcp_manager = McpManager()
 set_mcp_manager(mcp_manager)
 app.include_router(setup_mcp_routes(mcp_manager))
 logger.info("MCP routes initialized")
-
-from routes.recipes_routes import setup_recipes_routes
-app.include_router(setup_recipes_routes())
-logger.info("Recipes routes initialized")
 
 # AI Interaction tools (debates, pipelines, self-managing AI, UI control)
 from src.ai_interaction import set_session_manager as set_ai_session_manager, set_memory_manager as set_ai_memory_manager, set_rag_manager as set_ai_rag_manager
