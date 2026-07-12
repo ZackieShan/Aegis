@@ -237,7 +237,7 @@ async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
                     job["status"] = "error"
                     return
                 if not job.get("cancel_requested"):
-                    job["status"] = "running" if status in ("running", "processing", "in_progress") else (job["status"] if job["status"] == "running" else "queued")
+                    job["status"] = "running" if status in ("running", "processing", "in_progress", "generating") else (job["status"] if job["status"] == "running" else "queued")
                 await asyncio.sleep(_POLL_INTERVAL_S)
         job["error"] = f"Video generation exceeded the {_JOB_DEADLINE_S // 60}-minute cap"
         job["status"] = "error"
