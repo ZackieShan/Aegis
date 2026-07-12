@@ -1,80 +1,70 @@
-# Roadmap / Help Wanted
+# Roadmap
 
-Aegis is on a voyage, but not home yet. It works great for me (lol), but this ship is moving fast and feedback/help would be appreciated! (I don't know what I'm doing, help).
+Aegis's direction is a single idea taken seriously: **a complete, private AI environment
+you fully own** — every model, agent, and tool running on your hardware, integrated into
+one loop, extensible, and honest about what it does. Below is where that's headed.
+Feedback and contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-If you see weird CSS, strange layout behavior, or a suspiciously murky corner of
-the codebase, you are probably right to stay away.
+## Recently shipped
 
-## High Priority
+The local-first foundation is in place:
 
-- SQUASH BUGS
-- Fresh install smoke tests on Linux, macOS, and Windows. Docker, native Python,
-  and WSL all need coverage.
+- **Local model engine** — llama.cpp + llama-swap hot-swapping GGUFs with reliable native
+  tool calls, a zero-config `models/` drop folder, and a GPU-aware context auto-tuner.
+- **Agents** — Toolboxes (OSINT / market / troubleshoot / web), visual Recipes with
+  branch/loop logic, Deep Research, and Playwright browser automation.
+- **Software** — a git-aware coding agent (Aider), a Code Canvas (generate / edit / run),
+  and repo → wiki.
+- **Media & voice** — local image generation (stable-diffusion.cpp), on-device Whisper
+  speech-to-text + text-to-speech with a hands-free Voice Mode, and a local vision model.
+- **Knowledge & operability** — knowledge-graph memory, local call tracing, a Control
+  Center dashboard, and a Doctor self-check with guarded one-click fixes.
 
-- Integration audit: do integrations even work? Confirm what works, what needs setup docs, and what should be removed or hidden. 
-- Self-host troubleshooting cookbook. Document the weird 30-second fixes that otherwise become 30-minute searches: Dovecot cleartext auth for local stacks, ntfy Android Instant Delivery for non-ntfy.sh servers, clipboard limits on plain-HTTP Tailscale URLs, Radicale collection URLs, and similar traps.
-- Cookbook reliability on other computers. This is probably the area most likely to need work across different machines, GPUs, drivers, shells, and Python environments.
-- Cookbook SGLang support across platforms. Make sure SGLang setup/serve works
-  predictably on Linux, Windows/WSL, macOS where possible, Docker, and common
-  NVIDIA/AMD hardware paths.
-- Deep Research model presets by hardware. Recommend approved model/parameter
-  profiles for small, medium, and large local setups so people with different
-  hardware can use Deep Research without guessing. Surface this either in Deep
-  Research settings or as a Cookbook scan/dropdown suggestion.
-- Cookbook model scan/download ranking. Prioritize newer architectures and
-  better hardware-fit models instead of scoring everything almost the same.
-  Ranking should account for architecture age, quant format, VRAM/RAM fit,
-  backend support, vision/mmproj requirements, and likely serve reliability.
-- Cookbook error feedback and logging. Failed downloads, dependency installs,
-  preflights, and serve jobs should show the actual command/output/error in the
-  UI, with copyable logs and clear next steps instead of just "crashed".
-- Agent prompt/context bloat. Agent mode is too heavy for smaller local models:
-  tool schemas, skills, memory, documents, and instructions can eat the context
-  before the user request really starts. We need slimmer prompts, better tool
-  selection, smaller default tool sets, and clearer guidance for models with
-  4k/8k/16k context windows.
-- Skill/tool prompt-injection audit. User-editable skills, notes, documents,
-  fetched pages, and memories should be treated as untrusted data. Keep testing
-  whether models follow malicious instructions from those surfaces.
-- Better degraded-state reporting for ChromaDB, SearXNG, email, ntfy, and provider probes.
-- Email performance audit. Fetching, searching, opening, deleting, and sending
-  email can feel slow, especially over IMAP/SMTP providers with high latency.
-  Need someone who knows mail performance to profile the current flow, identify
-  whether the bottleneck is IMAP folder select/fetch, cache invalidation,
-  attachment/body loading, SMTP handshakes, or frontend refresh behavior, then
-  propose safer caching/prefetch/batching without breaking multi-account state.
-- Provider setup/probing audit for Anthropic, Gemini, Groq, xAI, OpenRouter, OpenAI, and DeepSeek.
+## Where it's going
 
-## Refactor Targets
-- CSS cleanup. `static/style.css` basically Calypso's island atm.
-- Tour core helper. The onboarding tours have too much copy-pasted scaffolding; promote a shared `tour-core.js` helper before adding more tours.
-- Modal/window positioning cleanup. Some window controls have improved, but the
-  underlying popup/dropdown/fixed-position behavior is still too fragile.
-- Mobile media override discoverability. A lot of "CSS did not move" bugs are mobile `@media` overrides of the same selector; comments or linting around desktop/mobile paired rules would help.
-- Dead code pass for old routes, stale feature flags, and unused UI states.
+### Make it reproducible everywhere
+- **Cross-platform engine setup** — the one-command engine installer and guide are
+  Windows-first today; bring the same to Linux and macOS (matching release binaries + layout).
+- **Fresh-install smoke tests** across Linux, macOS, and Windows — native, Docker, and WSL.
+- **Offline mode** — vendor the remaining CDN assets so a fully air-gapped install works
+  end to end.
 
-## Frontend
+### Local models for every machine
+- **Hardware-tiered model presets** — recommended model / quant / parameter profiles for
+  small, medium, and large setups, surfaced in Cookbook and Deep Research so nobody guesses.
+- **Smarter model ranking** — score by architecture age, quant format, VRAM/RAM fit, backend
+  support, and vision/mmproj needs instead of scoring everything the same.
+- **Slimmer agent prompts** — tool schemas, skills, memory, and instructions can eat a small
+  model's context before the request even starts; tighter prompts and smaller default tool
+  sets for 4k/8k/16k windows.
 
-- Expand the Editor for quicker, more robust everyday use. Better file/document
-  handling, smoother window behavior, clearer save/export flows, stronger image
-  editing affordances, and fewer brittle edge cases.
-- Better AI integration for Notes and Todos. Notes should be easier for the
-  agent to read, update, summarize, and turn into actions. Todos should be
-  assignable to an agent from the UI, possibly through a button, task action,
-  or dedicated skill/tool flow.
-- Mobile gallery/editor polish. Easier to launch/download inpaint model or any missing pieces.
-- Accessibility pass: keyboard navigation, focus states, contrast, reduced motion.
-- Improve empty states and error messages on fresh installs.
-- Tighten first-run setup, hints, and tours so they do not repeat or fight each other.
-- Vendor CDN assets eventually for a more fully self-hosted/offline mode.
+### Deepen the loop
+- **Code Canvas everywhere** — "open in canvas" on chat code blocks, and auto-open when the
+  model writes a substantial file.
+- **Richer voice** — continuous / push-to-talk conversation mode.
+- **Computer use** — extend browser control toward safe, opt-in desktop control (screen
+  capture + a vision-guided action loop) with clear guardrails.
 
-## Backend
+### Trust & safety
+- **Prompt-injection hardening** — treat skills, notes, documents, fetched pages, and
+  memories as untrusted input; keep testing whether models obey malicious instructions from
+  those surfaces.
+- **Admin-tool risk docs** — clear documentation of what the powerful local tools can do and
+  how to lock them down.
+- **Degraded-state reporting** — honest status for ChromaDB, search, email, notifications,
+  and provider probes (the Control Center is the natural home for this).
 
-- More tests around endpoint probing and provider setup.
-- Better task scheduler defaults and visibility.
-- Backup/restore guide and helper flow for `data/`.
-- Security hardening around admin-only tools and clear docs for their risk.
+### Reliability & polish
+- Bug squashing and better error surfacing — show the real command / output, copyable logs,
+  and next steps instead of just "crashed".
+- Backup / restore for `data/`.
+- Accessibility pass (keyboard nav, focus states, contrast, reduced motion) and cleaner
+  empty/error states on fresh installs.
+- Refactors: CSS cleanup, a shared onboarding-tour core, modal/positioning robustness, and
+  dead-code passes for stale routes and feature flags.
 
-## Not The Focus Right Now
+## Contributing
 
-I prob shouldnt add more themes.
+If you hit a rough edge, a broken integration, or a murky corner of the codebase, that's
+exactly the feedback that helps most. Open an issue or a PR — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
