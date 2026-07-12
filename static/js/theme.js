@@ -344,7 +344,7 @@ function _updateFavicon(accent, body) {
   if (routeShape) {
     svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(accent)}</svg>`;
   } else {
-    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 70'><polygon points='15,11 18,3 21,11 21,21 15,21' fill='#ff9130'/><polygon points='29,9 32,1 35,9 35,21 29,21' fill='#ff9130'/><polygon points='43,11 46,3 49,11 49,21 43,21' fill='#ff9130'/><rect x='15' y='21' width='34' height='5' fill='#ff9130'/><rect x='29.5' y='26' width='5' height='26' fill='#ff9130'/><polygon points='8,52 32,62 56,52 56,60 32,70 8,60' fill='#7a2fbf'/></svg>`;
+    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 120'><polygon points='12,68 50,88 88,68 88,82 50,102 12,82' fill='#7a2fbf'/><path d='M25,32 L25,48 Q25,57 34,57 L45.5,57 L45.5,49 L37.5,49 Q34,49 34,45 L34,32 Z' fill='#ff9130'/><path d='M75,32 L75,48 Q75,57 66,57 L54.5,57 L54.5,49 L62.5,49 Q66,49 66,45 L66,32 Z' fill='#ff9130'/><rect x='45.5' y='30' width='9' height='76' fill='#ff9130'/><polygon points='45.5,106 54.5,106 50,116' fill='#ff9130'/><polygon points='29.5,8 36.5,23 34,21 34,34 25,34 25,21 22.5,23' fill='#ff9130'/><polygon points='50,8 57,23 54.5,21 54.5,34 45.5,34 45.5,21 43,23' fill='#ff9130'/><polygon points='70.5,8 77.5,23 75,21 75,34 66,34 66,21 63.5,23' fill='#ff9130'/></svg>`;
   }
   const href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   let link = document.querySelector("link[rel='icon']");
