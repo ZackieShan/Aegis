@@ -1376,6 +1376,17 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type == "edit_document":
         blocks = []
         edits = args.get("edits", [])
+        # Native tool_calls deliver a real list; the XML/<invoke> path (and the
+        # <function=> normalization) delivers the param as a JSON string. Parse
+        # it so text-emitted edits aren't silently dropped (the call would run
+        # with zero edits and look like a stall).
+        if isinstance(edits, str):
+            try:
+                edits = json.loads(edits)
+            except Exception:
+                edits = []
+        if isinstance(edits, dict):
+            edits = [edits]
         if not isinstance(edits, list):
             edits = []
         for edit in edits:
@@ -1388,6 +1399,13 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type == "suggest_document":
         blocks = []
         suggestions = args.get("suggestions", [])
+        if isinstance(suggestions, str):
+            try:
+                suggestions = json.loads(suggestions)
+            except Exception:
+                suggestions = []
+        if isinstance(suggestions, dict):
+            suggestions = [suggestions]
         if not isinstance(suggestions, list):
             suggestions = []
         for s in suggestions:

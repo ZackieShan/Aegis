@@ -224,6 +224,30 @@ def _normalize_dsml(text: str) -> str:
     t = re.sub(rf"<\s*/\s*{_DSML_PIPES}\s*DSML\s*{_DSML_PIPES}\s*parameter\s*>", "</parameter>", t, flags=re.IGNORECASE)
     return t
 
+# Qwen2.5/Qwen3-Coder and some Hermes variants emit tool calls as
+# <function=NAME> ... </function> with <parameter=NAME>value</parameter> (the
+# "equals" form) instead of the <invoke name="NAME"> / <parameter name="NAME">
+# the XML parser expects. When such a model *doesn't* emit a native tool_call
+# and writes this into content, it's a real attempted call — but without this
+# it's parsed as plain text (0 tool blocks) and the turn dead-ends with nothing
+# run. Normalize to the <invoke> form so the existing parser catches it.
+_FN_OPEN_RE = re.compile(r'<\s*function\s*=\s*["\']?([\w.:-]+)["\']?\s*>', re.IGNORECASE)
+_FN_CLOSE_RE = re.compile(r'<\s*/\s*function\s*>', re.IGNORECASE)
+_FN_PARAM_OPEN_RE = re.compile(r'<\s*parameter\s*=\s*["\']?([\w.:-]+)["\']?\s*>', re.IGNORECASE)
+
+
+def _normalize_function_xml(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    low = text.lower()
+    if "<function=" not in low and "<parameter=" not in low:
+        return text
+    t = _FN_OPEN_RE.sub(r'<invoke name="\1">', text)
+    t = _FN_CLOSE_RE.sub("</invoke>", t)
+    t = _FN_PARAM_OPEN_RE.sub(r'<parameter name="\1">', t)
+    return t
+
+
 # Map model tool names to our tool types
 _TOOL_NAME_MAP = {
     "shell": "bash",
@@ -667,7 +691,18 @@ def _raw_openai_tool_call_to_block(value) -> Optional[ToolBlock]:
     elif tool_type in ("edit_document", "suggest_document"):
         marker = "SUGGEST" if tool_type == "suggest_document" else "REPLACE"
         blocks = []
-        for edit in args.get("suggestions" if tool_type == "suggest_document" else "edits", []) or []:
+        edits = args.get("suggestions" if tool_type == "suggest_document" else "edits", []) or []
+        # Native tool_calls deliver this as a real list; the XML/<invoke> path
+        # (and the <function=> normalization) delivers the whole param as a JSON
+        # string. Parse it so text-emitted edits aren't silently dropped.
+        if isinstance(edits, str):
+            try:
+                edits = json.loads(edits)
+            except Exception:
+                edits = []
+        if isinstance(edits, dict):
+            edits = [edits]
+        for edit in edits if isinstance(edits, list) else []:
             if not isinstance(edit, dict):
                 continue
             block = f'<<<FIND>>>\n{edit.get("find", "")}\n<<<{marker}>>>\n{edit.get("replace", "")}'
@@ -1261,6 +1296,8 @@ def parse_tool_blocks(text: str, skip_fenced: bool = False) -> List[ToolBlock]:
     # Normalize DeepSeek DSML markup into standard <invoke> form so the
     # XML patterns below catch it.
     text = _normalize_dsml(text)
+    # Normalize Qwen/Hermes <function=NAME>/<parameter=NAME> markup likewise.
+    text = _normalize_function_xml(text)
 
     # Pattern 1: fenced code blocks (skipped when `skip_fenced` — see docstring).
     if not skip_fenced:
