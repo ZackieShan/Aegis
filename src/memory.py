@@ -2,6 +2,8 @@
 import json
 import logging
 import os
+import tempfile
+import threading
 import time
 import uuid
 import re
@@ -35,6 +37,11 @@ def get_text_similarity(text1: str, text2: str) -> float:
 class MemoryManager:
     def __init__(self, data_dir: str):
         self.memory_file = os.path.join(data_dir, "memory.json")
+        # Serializes writers within this process. Sync routes run in the
+        # threadpool while async routes run on the event loop, so two saves
+        # can genuinely overlap — on Windows a contested temp file makes
+        # os.replace raise PermissionError.
+        self._lock = threading.RLock()
         self.ensure_file_exists()
         
     def extract_memory_from_chat(self, chat_history: List[Dict], session_id: str = None) -> List[Dict]:
@@ -153,6 +160,11 @@ class MemoryManager:
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
+            # A textless entry poisons every reader that dereferences
+            # entry["text"] (find_duplicates would 500 every add) — drop it.
+            if not isinstance(entry.get("text"), str) or not entry["text"].strip():
+                logger.warning("Dropping memory entry without text: %s", entry.get("id", "<no id>"))
+                continue
             if "id" not in entry:
                 entry["id"] = str(uuid.uuid4())
             if "timestamp" not in entry:
@@ -206,11 +218,33 @@ class MemoryManager:
             if "category" not in entry:
                 entry["category"] = "fact"
         
-        # Use atomic write
-        tmp_file = self.memory_file + ".tmp"
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_file, self.memory_file)
+        # Atomic write: unique temp file per save (a shared fixed .tmp path
+        # collides across the threadpool/event-loop writers and raises
+        # PermissionError on Windows), serialized by the process-wide lock,
+        # with a short retry for transient Windows locks (AV scans, indexers).
+        with self._lock:
+            fd, tmp_file = tempfile.mkstemp(
+                dir=os.path.dirname(self.memory_file) or ".",
+                prefix=".memory-", suffix=".tmp",
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(entries, f, ensure_ascii=False, indent=2)
+                last_err = None
+                for attempt in range(3):
+                    try:
+                        os.replace(tmp_file, self.memory_file)
+                        return
+                    except PermissionError as e:
+                        last_err = e
+                        time.sleep(0.05 * (attempt + 1))
+                raise last_err
+            finally:
+                if os.path.exists(tmp_file):
+                    try:
+                        os.unlink(tmp_file)
+                    except OSError:
+                        pass
     
     def add_entry(self, text: str, source: str = "user", category: str = "fact", owner: str = None) -> Dict:
         """Add a new memory entry."""
@@ -250,7 +284,7 @@ class MemoryManager:
             entries = self.load()
             
         text_lower = text.strip().lower()
-        return [entry for entry in entries if entry["text"].lower() == text_lower]
+        return [entry for entry in entries if entry.get("text", "").lower() == text_lower]
             
     def categorize_memory_by_relevance(self, message: str, memories: list):
         """Categorize memories by type and relevance"""
@@ -264,7 +298,7 @@ class MemoryManager:
         msg_lower = message.lower()
         
         for mem in memories:
-            text_lower = mem["text"].lower()
+            text_lower = mem.get("text", "").lower()
             
             # Contact info
             if any(word in text_lower for word in ["phone", "email", "address", "lives", "works"]):
@@ -283,7 +317,7 @@ class MemoryManager:
             
             # General facts - only if very relevant
             else:
-                if get_text_similarity(message, mem["text"]) > 0.4:
+                if get_text_similarity(message, mem.get("text", "")) > 0.4:
                     categories["facts"].append(mem)
         
         return categories
@@ -321,10 +355,10 @@ class MemoryManager:
         
         # Separate identity memories from others
         for memory in memories:
-            memory_text = memory["text"].lower()
+            memory_text = memory.get("text", "").lower()
             # Check if this is an identity memory (contains name patterns or identity indicators)
             is_identity = any([
-                re.search(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', memory["text"]),
+                re.search(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', memory.get("text", "")),
                 any(word in memory_text for word in ["name is", "i'm", "i am", "called", "my name", "named", "call me"])
             ])
             if is_identity:
@@ -340,7 +374,7 @@ class MemoryManager:
         
         # Process other memories with similarity scoring
         for memory in other_memories:
-            memory_text = memory["text"].lower()
+            memory_text = memory.get("text", "").lower()
             memory_tokens = set(tokenize(memory_text))
             query_tokens = set(tokenize(query_lower))
             
@@ -375,7 +409,7 @@ class MemoryManager:
                     final_score *= 1.3  # 30% boost for task-related memories
             
             # Always consider exact phrase matches as highly relevant
-            if query.lower() in memory["text"].lower():
+            if query.lower() in memory.get("text", "").lower():
                 final_score = max(final_score, 0.8)  # Ensure high relevance for exact matches
             
             # Include memory if it meets threshold after boosts

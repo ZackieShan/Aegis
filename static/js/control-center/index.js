@@ -42,8 +42,8 @@ function _styles() {
   .cc-panel {
     width: min(920px, 94vw); max-height: 88vh; display: flex; flex-direction: column;
     background: var(--panel, #120a1c); color: var(--fg, #cbb8ec);
-    border: 1px solid var(--border, #3a2657); border-radius: 14px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.5); overflow: hidden;
+    border: 1px solid var(--border, #3a2657); border-radius: var(--radius-lg, 16px);
+    box-shadow: var(--shadow-lg, 0 20px 60px rgba(0,0,0,.5)); overflow: hidden;
   }
   .cc-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px;
     border-bottom: 1px solid var(--border, #3a2657); }
@@ -51,21 +51,21 @@ function _styles() {
   .cc-summary { font-size: .8rem; opacity: .7; }
   .cc-head .cc-spacer { flex: 1; }
   .cc-btn { background: transparent; color: var(--fg,#cbb8ec); border: 1px solid var(--border,#3a2657);
-    border-radius: 8px; padding: 5px 10px; font-size: .78rem; cursor: pointer; }
+    border-radius: var(--radius-sm, 8px); padding: 5px 10px; font-size: .78rem; cursor: pointer; }
   .cc-btn:hover { border-color: var(--red,#b45de0); }
   .cc-close { font-size: 1.3rem; line-height: 1; padding: 2px 8px; }
   .cc-body { padding: 8px 20px 20px; overflow-y: auto; }
   .cc-group-title { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
     opacity: .55; margin: 18px 0 8px; }
   .cc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-  .cc-card { border: 1px solid var(--border,#3a2657); border-radius: 10px; padding: 11px 13px;
+  .cc-card { border: 1px solid var(--border,#3a2657); border-radius: var(--radius-md, 12px); padding: 11px 13px;
     display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,.02); }
   .cc-card-top { display: flex; align-items: center; gap: 8px; }
   .cc-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .cc-name { font-size: .86rem; font-weight: 600; }
   .cc-detail { font-size: .74rem; opacity: .72; line-height: 1.35; min-height: 1.9em; }
   .cc-card-actions { display: flex; gap: 6px; margin-top: 2px; }
-  .cc-try { background: var(--red,#b45de0); color: #fff; border: none; border-radius: 7px;
+  .cc-try { background: var(--red,#b45de0); color: #fff; border: none; border-radius: var(--radius-sm, 8px);
     padding: 4px 11px; font-size: .74rem; cursor: pointer; font-weight: 600; }
   .cc-try:hover { filter: brightness(1.08); }
   .cc-try.secondary { background: transparent; color: var(--fg,#cbb8ec); border: 1px solid var(--border,#3a2657); }

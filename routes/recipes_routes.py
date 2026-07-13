@@ -37,10 +37,8 @@ def setup_recipes_routes() -> APIRouter:
         require_admin(request)
         return {"recipes": recipes_engine.list_recipes(owner=_owner(request))}
 
-    @router.get("/tools")
-    def list_building_blocks(request: Request):
-        """Models + toolbox tools the editor can drop as nodes."""
-        require_admin(request)
+    def _building_blocks() -> Dict[str, Any]:
+        """Models + toolbox tools available as recipe nodes on this install."""
         # Available models (from the picker's endpoint list).
         models = []
         try:
@@ -73,6 +71,45 @@ def setup_recipes_routes() -> APIRouter:
         except Exception as e:
             logger.debug(f"recipes tool list failed: {e}")
         return {"models": models, "tools": tools}
+
+    @router.get("/tools")
+    def list_building_blocks(request: Request):
+        """Models + toolbox tools the editor can drop as nodes."""
+        require_admin(request)
+        return _building_blocks()
+
+    @router.get("/starters")
+    def list_starters(request: Request):
+        """Preview the starter recipes that fit this install (not saved)."""
+        require_admin(request)
+        from src import recipe_templates
+        blocks = _building_blocks()
+        recipes = recipe_templates.generate_starters(blocks["models"], blocks["tools"])
+        return {"recipes": recipes, "count": len(recipes)}
+
+    @router.post("/starters/install")
+    def install_starters(request: Request):
+        """Seed the saved-recipes list with the starter set, deduped by name."""
+        require_admin(request)
+        from src import recipe_templates
+        owner = _owner(request)
+        blocks = _building_blocks()
+        generated = recipe_templates.generate_starters(blocks["models"], blocks["tools"])
+        existing_names = {r.get("name") for r in recipes_engine.list_recipes(owner=owner)}
+        installed, skipped = [], []
+        for rec in generated:
+            if rec.get("name") in existing_names:
+                skipped.append(rec.get("name"))
+                continue
+            try:
+                saved = recipes_engine.save_recipe(
+                    {"name": rec["name"], "nodes": rec["nodes"], "edges": rec["edges"]},
+                    owner=owner,
+                )
+                installed.append({"id": saved["id"], "name": saved["name"]})
+            except ValueError as e:
+                logger.warning("starter recipe %r skipped: %s", rec.get("name"), e)
+        return {"installed": installed, "skipped": skipped, "count": len(installed)}
 
     @router.get("/{recipe_id}")
     def get_recipe(recipe_id: str, request: Request):

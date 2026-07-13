@@ -76,7 +76,7 @@
       }
       // Apply font early
       if (t && t.font) {
-        var fm = {mono:"'JetBrains Mono', 'Fira Code', monospace",sans:"system-ui, -apple-system, 'Segoe UI', sans-serif",serif:"Georgia, 'Times New Roman', serif",opendyslexic:"'OpenDyslexic', sans-serif"};
+        var fm = {inter:"'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",mono:"'JetBrains Mono', 'Fira Code', monospace",sans:"system-ui, -apple-system, 'Segoe UI', sans-serif",serif:"Georgia, 'Times New Roman', serif",opendyslexic:"'OpenDyslexic', sans-serif"};
         if (fm[t.font]) { s.setProperty('--font-family', fm[t.font]); }
         else { s.setProperty('--font-family', "'" + t.font.replace(/'/g,'') + "', sans-serif"); }
       }
@@ -223,8 +223,8 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=20260630mdfontsize">
-  <link rel="modulepreload" href="/static/app.js?v=20260630mdfontsize">
+  <link rel="stylesheet" href="/static/style.css?v=20260713uirefresh">
+  <link rel="modulepreload" href="/static/app.js?v=20260713uirefresh">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -254,8 +254,8 @@
   <div id="memory-modal" class="modal hidden">
     <div class="modal-content memory-modal-content" role="dialog" aria-label="Brain" style="background:var(--bg)">
       <div class="modal-header">
-        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>Brain</h4>
-        <button class="close-btn" id="close-memory-modal" aria-label="Close memory modal">✖</button>
+        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg>Brain</h4>
+        <button class="close-btn" id="close-memory-modal" aria-label="Close memory modal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="modal-body memory-modal-body">
         <div class="memory-tabs">
@@ -322,10 +322,11 @@
             </p>
             <div class="memory-add-row" style="margin-top:8px;">
               <div class="skill-ph-wrap" style="flex:1;min-width:0;">
-                <input type="text" id="new-memory-input" placeholder=" " class="memory-add-input skill-hint-input" aria-label="New memory text" />
+                <input type="text" id="new-memory-input" placeholder=" " maxlength="5000" class="memory-add-input skill-hint-input" aria-label="New memory text" />
                 <span class="skill-rich-ph"><span class="k">Add a memory</span> &mdash; e.g. 'I prefer concise replies' <svg class="k" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-left:4px;" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></span>
               </div>
               <select id="new-memory-category" class="memory-edit-cat-select" aria-label="Memory category"></select>
+              <button type="button" id="add-memory-btn" class="confirm-btn confirm-btn-primary" style="flex:none;">Add</button>
             </div>
           </div>
           <div class="admin-card">
@@ -462,16 +463,16 @@
   <div id="theme-modal" class="modal hidden">
   <div id="theme-popup" class="modal-content admin-modal-content" role="dialog" aria-label="Theme" style="background:var(--bg)">
     <div class="modal-header theme-popup-header" id="theme-popup-header">
-      <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="15" cy="14" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/></svg>Theme</h4>
+      <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg>Theme</h4>
       <button type="button" class="theme-opacity-wrap theme-opacity-toggle hidden" id="theme-opacity-wrap" title="Fade this window to preview the page behind it" aria-pressed="false">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         <span class="theme-opacity-label">Peek</span>
       </button>
-      <button class="close-btn" id="close-theme-popup" aria-label="Close theme">&#x2716;</button>
+      <button class="close-btn" id="close-theme-popup" aria-label="Close theme"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
     <!-- Theme tabs -->
     <div class="admin-tabs" id="theme-tabs">
-      <button class="admin-tab active" data-tab="theme-tab-browse"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/><circle cx="8" cy="9" r="1.4" fill="currentColor"/><circle cx="15" cy="14" r="1.4" fill="currentColor"/><circle cx="9" cy="15" r="1.4" fill="currentColor"/></svg>Themes</button>
+      <button class="admin-tab active" data-tab="theme-tab-browse"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg>Themes</button>
       <button class="admin-tab" data-tab="theme-tab-customize"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M9.06 11.9l-3.5 3.5a2.85 2.85 0 1 0 4.03 4.03l8.49-8.49a4.5 4.5 0 1 0-6.36-6.36L3.18 12.62"/><path d="M14 7l3 3"/></svg>Customize</button>
     </div>
 
@@ -492,12 +493,12 @@
       <div class="admin-card">
         <h2>Colors</h2>
         <div class="theme-custom" id="themeCustom">
-          <div class="color-row"><label>Background</label><input type="color" id="clr-bg"><button class="color-reset-btn" data-reset="bg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-          <div class="color-row"><label>Text</label><input type="color" id="clr-fg"><button class="color-reset-btn" data-reset="fg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-          <div class="color-row"><label>Panel</label><input type="color" id="clr-panel"><button class="color-reset-btn" data-reset="panel" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-          <div class="color-row"><label>Sidebar</label><input type="color" id="adv-sidebarBg"><button class="color-reset-btn" data-reset-adv="sidebarBg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-          <div class="color-row"><label>Border</label><input type="color" id="clr-border"><button class="color-reset-btn" data-reset="border" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-          <div class="color-row"><label>Accent</label><input type="color" id="clr-red"><button class="color-reset-btn" data-reset="red" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
+          <div class="color-row"><label>Background</label><input type="color" id="clr-bg"><button class="color-reset-btn" data-reset="bg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+          <div class="color-row"><label>Text</label><input type="color" id="clr-fg"><button class="color-reset-btn" data-reset="fg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+          <div class="color-row"><label>Panel</label><input type="color" id="clr-panel"><button class="color-reset-btn" data-reset="panel" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+          <div class="color-row"><label>Sidebar</label><input type="color" id="adv-sidebarBg"><button class="color-reset-btn" data-reset-adv="sidebarBg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+          <div class="color-row"><label>Border</label><input type="color" id="clr-border"><button class="color-reset-btn" data-reset="border" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+          <div class="color-row"><label>Accent</label><input type="color" id="clr-red"><button class="color-reset-btn" data-reset="red" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
         </div>
       </div>
       <div class="theme-adv-toggle" id="theme-adv-toggle">
@@ -507,38 +508,38 @@
         <div class="theme-adv-group">
           <div class="theme-adv-group-label">Chat Bubbles</div>
           <div class="theme-custom">
-            <div class="color-row"><label>User Chat Bubble</label><input type="color" id="adv-userBubbleBg"><button class="color-reset-btn" data-reset-adv="userBubbleBg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-            <div class="color-row"><label>AI Chat Bubble</label><input type="color" id="adv-aiBubbleBg"><button class="color-reset-btn" data-reset-adv="aiBubbleBg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-            <div class="color-row"><label>Border Chat Bubble</label><input type="color" id="adv-bubbleBorder"><button class="color-reset-btn" data-reset-adv="bubbleBorder" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
+            <div class="color-row"><label>User Chat Bubble</label><input type="color" id="adv-userBubbleBg"><button class="color-reset-btn" data-reset-adv="userBubbleBg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+            <div class="color-row"><label>AI Chat Bubble</label><input type="color" id="adv-aiBubbleBg"><button class="color-reset-btn" data-reset-adv="aiBubbleBg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+            <div class="color-row"><label>Border Chat Bubble</label><input type="color" id="adv-bubbleBorder"><button class="color-reset-btn" data-reset-adv="bubbleBorder" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
           </div>
         </div>
         <div class="theme-adv-group">
           <div class="theme-adv-group-label">Sidebar</div>
           <div class="theme-custom">
-            <div class="color-row"><label>Aegis Logo</label><input type="color" id="adv-brandColor"><button class="color-reset-btn" data-reset-adv="brandColor" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-            <div class="color-row"><label title="Hamburger menu"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></label><input type="color" id="adv-hamburgerColor"><button class="color-reset-btn" data-reset-adv="hamburgerColor" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
+            <div class="color-row"><label>Aegis Logo</label><input type="color" id="adv-brandColor"><button class="color-reset-btn" data-reset-adv="brandColor" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+            <div class="color-row"><label title="Hamburger menu"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></label><input type="color" id="adv-hamburgerColor"><button class="color-reset-btn" data-reset-adv="hamburgerColor" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
           </div>
         </div>
         <div class="theme-adv-group">
           <div class="theme-adv-group-label">Chat Input / Prompt Area</div>
           <div class="theme-custom">
-            <div class="color-row"><label>Input Bg</label><input type="color" id="adv-inputBg"><button class="color-reset-btn" data-reset-adv="inputBg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-            <div class="color-row"><label>Input Border</label><input type="color" id="adv-inputBorder"><button class="color-reset-btn" data-reset-adv="inputBorder" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-            <div class="color-row"><label>Send Btn</label><input type="color" id="adv-sendBtnBg"><button class="color-reset-btn" data-reset-adv="sendBtnBg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-            <div class="color-row"><label>Send Hover</label><input type="color" id="adv-sendBtnHover"><button class="color-reset-btn" data-reset-adv="sendBtnHover" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
+            <div class="color-row"><label>Input Bg</label><input type="color" id="adv-inputBg"><button class="color-reset-btn" data-reset-adv="inputBg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+            <div class="color-row"><label>Input Border</label><input type="color" id="adv-inputBorder"><button class="color-reset-btn" data-reset-adv="inputBorder" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+            <div class="color-row"><label>Send Btn</label><input type="color" id="adv-sendBtnBg"><button class="color-reset-btn" data-reset-adv="sendBtnBg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+            <div class="color-row"><label>Send Hover</label><input type="color" id="adv-sendBtnHover"><button class="color-reset-btn" data-reset-adv="sendBtnHover" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
           </div>
         </div>
         <div class="theme-adv-group">
           <div class="theme-adv-group-label">Code Blocks</div>
           <div class="theme-custom">
-            <div class="color-row"><label>Code Bg</label><input type="color" id="adv-codeBg"><button class="color-reset-btn" data-reset-adv="codeBg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
-            <div class="color-row"><label>Code Text</label><input type="color" id="adv-codeFg"><button class="color-reset-btn" data-reset-adv="codeFg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
+            <div class="color-row"><label>Code Bg</label><input type="color" id="adv-codeBg"><button class="color-reset-btn" data-reset-adv="codeBg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
+            <div class="color-row"><label>Code Text</label><input type="color" id="adv-codeFg"><button class="color-reset-btn" data-reset-adv="codeFg" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
           </div>
         </div>
         <div class="theme-adv-group">
           <div class="theme-adv-group-label">Controls</div>
           <div class="theme-custom">
-            <div class="color-row"><label>Toggle On</label><input type="color" id="adv-toggleActive"><button class="color-reset-btn" data-reset-adv="toggleActive" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
+            <div class="color-row"><label>Toggle On</label><input type="color" id="adv-toggleActive"><button class="color-reset-btn" data-reset-adv="toggleActive" title="Reset this color" aria-label="Reset color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></div>
           </div>
         </div>
         <div class="theme-adv-group">
@@ -588,6 +589,7 @@
           <div class="theme-fd-group">
             <label class="theme-fd-label">Font</label>
             <select id="theme-font-select" class="theme-fd-select" aria-label="Font">
+              <option value="inter">Inter (modern)</option>
               <option value="mono">Monospace</option>
               <option value="sans">Sans-serif</option>
               <option value="serif">Serif</option>
@@ -636,7 +638,7 @@
             <label class="theme-fd-label">&nbsp;</label>
             <div class="color-row" style="margin:0;padding:0;">
               <input type="color" id="theme-bg-effect-color" value="#9cdef2" title="Effect color">
-              <button class="color-reset-btn" data-reset-effect title="Reset to text color">&#x21BA;</button>
+              <button class="color-reset-btn" data-reset-effect title="Reset to text color"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
             </div>
           </div>
         </div>
@@ -659,8 +661,8 @@
         </div>
         <div class="theme-save-error" id="theme-save-error"></div>
         <div class="theme-io-row" style="margin-top:6px;">
-          <button id="theme-import-btn" class="theme-io-btn" title="Import a theme from JSON">&#x2912; Import</button>
-          <button id="theme-export-btn" class="theme-io-btn" title="Export current colors as JSON">&#x2913; Export</button>
+          <button id="theme-import-btn" class="theme-io-btn" title="Import a theme from JSON"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import</button>
+          <button id="theme-export-btn" class="theme-io-btn" title="Export current colors as JSON"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 8 12 3 17 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Export</button>
         </div>
         <textarea id="theme-import-area" class="theme-import-area hidden" placeholder="Paste theme JSON here..." rows="3"></textarea>
         <div class="theme-import-actions hidden" id="theme-import-actions">
@@ -674,7 +676,7 @@
   </div>
 
   <div id="mobile-backdrop"></div>
-  <button id="mobile-menu-btn" aria-label="Toggle sidebar">&#x2630;</button>
+  <button id="mobile-menu-btn" aria-label="Toggle sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
 
   <button class="hamburger-btn" id="hamburger-btn" title="Show sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
   <!-- new session button removed — use + in send button instead -->
@@ -683,7 +685,7 @@
     <!-- Static: core actions -->
     <button class="icon-rail-btn" id="rail-search-btn" title="Search conversations (Ctrl+K)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button>
     <button class="icon-rail-btn rail-new-chat" id="rail-new-session" title="New chat"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
-    <button class="icon-rail-btn" id="rail-delete-session" title="Delete session">&#x2715;</button>
+    <button class="icon-rail-btn" id="rail-delete-session" title="Delete session"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     <div class="rail-separator"></div>
     <!-- Control Center: one dashboard for every capability + live status -->
     <button class="icon-rail-btn" id="rail-control" title="Control Center — see & try everything"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
@@ -691,21 +693,21 @@
     <button class="icon-rail-btn" id="rail-voice" title="Voice Mode — speak to drive the agent (hands-free)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
     <div class="rail-separator"></div>
     <!-- Dynamic contextual indicators (shown only while active) -->
-    <button class="icon-rail-btn rail-dynamic" id="rail-chats" title="Chat ready" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
+    <button class="icon-rail-btn rail-dynamic" id="rail-chats" title="Chat ready" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5a2.5 2.5 0 0 1-2.5 2.5H8.5l-5 4V6A2.5 2.5 0 0 1 6 3.5h12.5A2.5 2.5 0 0 1 21 6z"/><path d="M8.5 10.5h.01"/><path d="M12 10.5h.01"/><path d="M15.5 10.5h.01"/></svg></button>
     <button class="icon-rail-btn rail-dynamic" id="rail-documents" title="Documents" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></button>
     <!-- Tool launchers — always visible, alphabetical -->
-    <button class="icon-rail-btn" id="rail-calendar" title="Calendar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
-    <button class="icon-rail-btn" id="rail-compare" title="Compare"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg></button>
-    <button class="icon-rail-btn" id="rail-recipes" title="Recipes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="7" height="6" rx="1.5"/><rect x="2" y="14" width="7" height="6" rx="1.5"/><rect x="15" y="9" width="7" height="6" rx="1.5"/><path d="M9 7h3a2 2 0 0 1 2 2v1"/><path d="M9 17h3a2 2 0 0 0 2-2v-1"/></svg></button>
-    <button class="icon-rail-btn" id="rail-cookbook" title="Cookbook"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg></button>
-    <button class="icon-rail-btn" id="rail-research" title="Deep Research"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>
+    <button class="icon-rail-btn" id="rail-calendar" title="Calendar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="17" rx="3"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M3 10h18"/><path d="M8 14.5h.01"/><path d="M12 14.5h.01"/><path d="M16 14.5h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg></button>
+    <button class="icon-rail-btn" id="rail-compare" title="Compare"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg></button>
+    <button class="icon-rail-btn" id="rail-recipes" title="Recipes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg></button>
+    <button class="icon-rail-btn" id="rail-cookbook" title="Cookbook"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/><path d="M6.6 17v3.5h10.8V17"/></svg></button>
+    <button class="icon-rail-btn" id="rail-research" title="Deep Research"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg></button>
     <button class="icon-rail-btn" id="rail-email" title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></button>
-    <button class="icon-rail-btn" id="rail-gallery" title="Gallery"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
-    <button class="icon-rail-btn" id="rail-archive" title="Library"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/></svg></button>
-    <button class="icon-rail-btn" id="rail-memory" title="Brain"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg></button>
-    <button class="icon-rail-btn" id="rail-notes" title="Notes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg></button>
-    <button class="icon-rail-btn" id="rail-tasks" title="Tasks"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></button>
-    <button class="icon-rail-btn" id="rail-theme" title="Theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 5-5 3 3 0 0 0-3-3h-2a3 3 0 0 1-3-3 5 5 0 0 1 5-5"/></svg></button>
+    <button class="icon-rail-btn" id="rail-gallery" title="Gallery"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/><path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/><circle cx="12.5" cy="7.5" r="1.4"/><path d="M21 12.5 17.75 9.25 11 16"/></svg></button>
+    <button class="icon-rail-btn" id="rail-archive" title="Library"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/></svg></button>
+    <button class="icon-rail-btn" id="rail-memory" title="Brain"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg></button>
+    <button class="icon-rail-btn" id="rail-notes" title="Notes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 13.5V6A2.5 2.5 0 0 0 18 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h7.5z"/><path d="M13.5 20.5V16a2.5 2.5 0 0 1 2.5-2.5h4.5"/><path d="M8 9h8"/><path d="M8 13h4"/></svg></button>
+    <button class="icon-rail-btn" id="rail-tasks" title="Tasks"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><path d="m5.5 7 1.4 1.4 2.7-2.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M14.5 7h6"/><path d="M14.5 17h6"/></svg></button>
+    <button class="icon-rail-btn" id="rail-theme" title="Theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg></button>
     <div style="flex:1"></div>
     <!-- Static: bottom -->
     <button class="icon-rail-btn" id="rail-help" title="Commands & help" aria-label="Commands and help"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>
@@ -737,7 +739,7 @@
 
       <div class="section" id="sessions-section">
         <div class="section-header-flex">
-          <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
+          <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5a2.5 2.5 0 0 1-2.5 2.5H8.5l-5 4V6A2.5 2.5 0 0 1 6 3.5h12.5A2.5 2.5 0 0 1 21 6z"/><path d="M8.5 10.5h.01"/><path d="M12 10.5h.01"/><path d="M15.5 10.5h.01"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
           <div style="position:relative; display:inline-block; display:flex; gap:4px; align-items:center;">
             <button type="button" class="section-header-btn list-item-plus-btn chats-manage-btn" id="chats-library-btn" title="Manage Chats (Library)">
               <span aria-hidden="true" style="display:inline-block;width:13px;height:13px;"></span>
@@ -817,7 +819,7 @@
 
       <div class="section" id="models-section">
         <div class="section-header-flex">
-          <span class="section-title"> Models</span>
+          <span class="section-title"><svg class="section-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>Models</span>
           <div style="position:relative; display:inline-block;">
             <button type="button" class="section-header-btn" id="model-sort-btn" title="Sort models">
               <svg class="sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -854,7 +856,7 @@
             style="flex-shrink:0;opacity:0.5;">
             <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
             <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
-            <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+            <path d="M12 5v13"/>
           </svg>
           <span class="grow">Brain</span>
         </div>
@@ -862,53 +864,59 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
-            <rect x="3" y="4" width="18" height="18" rx="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
+            <rect x="3" y="4.5" width="18" height="17" rx="3"/>
+            <path d="M8 2.5v4"/>
+            <path d="M16 2.5v4"/>
+            <path d="M3 10h18"/>
+            <path d="M8 14.5h.01"/>
+            <path d="M12 14.5h.01"/>
+            <path d="M16 14.5h.01"/>
+            <path d="M8 18h.01"/>
+            <path d="M12 18h.01"/>
           </svg>
           <span class="grow">Calendar</span>
         </div>
         <div class="list-item" id="tool-compare-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg>
           <span class="grow">Compare</span>
         </div>
         <div class="list-item" id="tool-recipes-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><rect x="2" y="4" width="7" height="6" rx="1.5"/><rect x="2" y="14" width="7" height="6" rx="1.5"/><rect x="15" y="9" width="7" height="6" rx="1.5"/><path d="M9 7h3a2 2 0 0 1 2 2v1"/><path d="M9 17h3a2 2 0 0 0 2-2v-1"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg>
           <span class="grow">Recipes</span>
         </div>
         <div class="list-item" id="tool-cookbook-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
-            <path d="M12 7v14"/>
-            <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>
+            <path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/>
+            <path d="M6.6 17v3.5h10.8V17"/>
           </svg>
           <span class="grow">Cookbook</span>
           <span id="cookbook-bg-status" style="display:none;font-size:9px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:12px;flex-shrink:1;min-width:0;position:relative;top:-1px;"></span>
           <span class="cookbook-notif-dot" id="cookbook-notif-dot" style="display:none;margin-left:6px;margin-right:4px;position:relative;top:-1px;left:0px;"></span>
         </div>
         <div class="list-item" id="tool-engine-btn" title="Engine: model tuning, VRAM, health">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
           <span class="grow">Engine</span>
         </div>
         <div class="list-item" id="tool-research-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.5;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg>
           <span class="grow">Deep Research</span>
         </div>
         <div class="list-item" id="tool-gallery-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <circle cx="8.5" cy="8.5" r="1.5"/>
-            <path d="M21 15l-5-5L5 21"/>
+            <rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/>
+            <path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/>
+            <circle cx="12.5" cy="7.5" r="1.4"/>
+            <path d="M21 12.5 17.75 9.25 11 16"/>
           </svg>
           <span class="grow">Gallery</span>
         </div>
         <div class="list-item" id="tool-library-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/>
+            <path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/>
           </svg>
           <span class="grow">Library</span>
           <button type="button" class="list-item-plus-btn" id="library-new-doc-btn" title="New document">
@@ -920,9 +928,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
-            <path d="M5 3h10l4 4v14H5z"/>
-            <path d="M15 3v5h5"/>
-            <path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/>
+            <path d="M20.5 13.5V6A2.5 2.5 0 0 0 18 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h7.5z"/>
+            <path d="M13.5 20.5V16a2.5 2.5 0 0 1 2.5-2.5h4.5"/>
+            <path d="M8 9h8"/>
+            <path d="M8 13h4"/>
           </svg>
           <span class="grow">Notes</span>
         </div>
@@ -930,11 +939,11 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
-            <rect x="3" y="4" width="18" height="18" rx="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-            <path d="M9 16l2 2 4-4"/>
+            <rect x="3.5" y="3.5" width="7" height="7" rx="2"/>
+            <path d="m5.5 7 1.4 1.4 2.7-2.8"/>
+            <rect x="3.5" y="13.5" width="7" height="7" rx="2"/>
+            <path d="M14.5 7h6"/>
+            <path d="M14.5 17h6"/>
           </svg>
           <span class="grow">Tasks</span>
           <span id="assistant-notif-dot" class="sidebar-notif-dot" style="display:none"></span>
@@ -944,11 +953,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/>
-            <circle cx="8" cy="9" r="1.5" fill="currentColor"/>
-            <circle cx="15" cy="14" r="1.5" fill="currentColor"/>
-            <circle cx="9" cy="15" r="1.5" fill="currentColor"/>
+            <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/>
+            <path d="M7.5 10.5h.01"/>
+            <path d="M11 6.5h.01"/>
+            <path d="M15.5 8h.01"/>
           </svg>
           <span class="grow">Theme</span>
         </div>
@@ -1036,7 +1044,7 @@
         <textarea id="message" placeholder="Message Aegis..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
-          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <!-- Which engine model is resident in VRAM right now (llama-swap
                  hot-swaps, so the loaded model can differ from the selection).
@@ -1046,11 +1054,11 @@
               <div class="model-picker-search-wrap">
                 <input type="text" id="model-picker-search" placeholder="Search models..." autocomplete="off" aria-label="Search models">
                 <button type="button" class="model-picker-refresh-btn" id="model-picker-refresh-btn" title="Refresh model picker" aria-label="Refresh model picker">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 </button>
               </div>
               <button type="button" class="model-picker-action-btn primary" id="model-picker-add-models-btn" title="Add model endpoints" aria-label="Add model endpoints">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
               </button>
             </div>
             <div class="model-picker-list" id="model-picker-list"></div>
@@ -1128,7 +1136,7 @@
           <button type="button" class="input-icon-btn tool-indicator" title="Workspace - click to clear" id="workspace-indicator-btn" aria-label="Clear workspace" style="display:none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
             <span style="font-size:11px;margin-left:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="workspace-indicator-name"></span>
-            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
           <!-- RAG toolbar indicator (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="RAG active — click to deactivate" id="rag-indicator-btn" style="display:none;">
@@ -1136,32 +1144,32 @@
               <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
             </svg>
             <span style="font-size:11px;margin-left:2px;">RAG</span>
-            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
           <!-- 6. Deep Research (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Deep Research active — click to deactivate" id="research-toggle-btn" style="display:none;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg>
             <span style="font-size:11px;margin-left:2px;">Research</span>
-            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
           <!-- 7. Group Chat (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Group Chat active — click to deactivate" id="group-toggle-btn" style="display:none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span style="font-size:11px;margin-left:2px;">Group</span>
-            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
           <input type="checkbox" id="group-toggle" style="display:none;">
           <!-- Character indicator (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Persona active — click to deactivate" id="character-indicator-btn" style="display:none;">
             <svg id="char-indicator-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             <span id="character-indicator-name" style="font-size:11px;margin-left:2px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
           <!-- Compare toolbar indicator (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Compare active — click to deactivate" id="compare-indicator-btn" style="display:none;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg>
             <span style="font-size:11px;margin-left:2px;">Compare</span>
-            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
         </div>
         <div class="chat-input-right">
@@ -1186,7 +1194,7 @@
       <div class="modal-content preset-modal-content" role="dialog" aria-label="Prompt" style="background:var(--bg)">
         <div class="modal-header">
           <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>Prompt</h4>
-          <button class="close-btn" id="close-custom-preset" aria-label="Close prompt">✖</button>
+          <button class="close-btn" id="close-custom-preset" aria-label="Close prompt"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
         </div>
         <div class="modal-body preset-modal-body">
           <div id="char-fields-wrap">
@@ -1231,7 +1239,7 @@
                 <div class="char-name-combo">
                   <input type="text" id="custom-character-name" maxlength="50" placeholder="Give your persona a name..." autocomplete="off" style="flex:1">
                   <button type="button" id="char-delete-template-btn" class="char-action-btn" title="Delete this persona and its memories" style="display:none;margin-top:-6px !important"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>Delete</button>
-                  <button type="button" id="reset-character-btn" class="char-action-btn" title="Reset to default" style="margin-top:-6px !important">&#x21BA; Reset</button>
+                  <button type="button" id="reset-character-btn" class="char-action-btn" title="Reset to default" style="margin-top:-6px !important"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Reset</button>
                 </div>
               </div>
               <label for="custom-system-prompt">System prompt</label>
@@ -1266,7 +1274,7 @@
 
 
   </main>
-  <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom">▼</button>
+  <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
   <script nonce="{{CSP_NONCE}}">
   (function(){
     const container = document.getElementById('chat-history');
@@ -1333,7 +1341,7 @@
     <div class="modal-content" role="dialog" aria-label="Rename session" style="width: 400px;">
       <div class="modal-header">
         <h4>Rename Session</h4>
-        <button class="close-btn" id="close-rename-session" aria-label="Close rename session modal">✖</button>
+        <button class="close-btn" id="close-rename-session" aria-label="Close rename session modal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="modal-body">
         <div style="margin-bottom: 12px;">
@@ -1358,8 +1366,8 @@
   <div id="cookbook-modal" class="modal hidden">
     <div class="modal-content" role="dialog" aria-label="Cookbook" style="width: min(780px, 92vw); background: var(--bg);">
       <div class="modal-header">
-        <h4 style="margin:0;margin-right:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>Cookbook</h4>
-        <button class="close-btn" id="close-cookbook-modal" aria-label="Close cookbook">✖</button>
+        <h4 style="margin:0;margin-right:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/><path d="M6.6 17v3.5h10.8V17"/></svg>Cookbook</h4>
+        <button class="close-btn" id="close-cookbook-modal" aria-label="Close cookbook"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="modal-body cookbook-body"></div>
     </div>
@@ -1369,18 +1377,18 @@
   <div id="settings-modal" class="modal hidden">
     <div class="modal-content settings-modal-content" role="dialog" aria-label="Settings">
       <div class="modal-header">
-        <h4><span style="vertical-align:-1px;margin-right:6px;font-size:15px">&#x2699;</span>Settings</h4>
+        <h4><span style="vertical-align:-1px;margin-right:6px;font-size:15px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Settings</h4>
         <button type="button" class="theme-opacity-wrap theme-opacity-toggle hidden" id="settings-opacity-wrap" title="Fade this window to preview the page behind it" aria-pressed="false">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
           <span class="theme-opacity-label">Peek</span>
         </button>
-        <button class="close-btn" aria-label="Close settings">✖</button>
+        <button class="close-btn" aria-label="Close settings"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="settings-layout">
         <div class="settings-sidebar">
           <!-- Section 1: AI plumbing (Add Models → AI Defaults → Search) -->
           <button class="settings-nav-item active" data-settings-tab="services">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
             <span>Add Models</span>
           </button>
           <button class="settings-nav-item" data-settings-tab="added-models">
@@ -1414,7 +1422,7 @@
           <div class="settings-sidebar-divider"></div>
           <!-- Section 3: UX (Appearance → Shortcuts) -->
           <button class="settings-nav-item" data-settings-tab="appearance">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg>
             <span>Appearance</span>
           </button>
           <button class="settings-nav-item" data-settings-tab="shortcuts">
@@ -1448,7 +1456,7 @@
 
         <div data-settings-panel="ai" class="hidden">
           <div class="admin-card">
-            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Default Chat Model</h2>
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 14.5a2.5 2.5 0 0 1-2.5 2.5H8.5l-5 4V6A2.5 2.5 0 0 1 6 3.5h12.5A2.5 2.5 0 0 1 21 6z"/><path d="M8.5 10.5h.01"/><path d="M12 10.5h.01"/><path d="M15.5 10.5h.01"/></svg>Default Chat Model</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">The model used when creating a new chat session.</div>
             <div class="settings-col">
               <div class="settings-row">
@@ -1515,7 +1523,7 @@
             </div>
           </div>
           <div class="admin-card">
-            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Research Model</h2>
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg>Research Model</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Model used for Deep Research, more settings under <a href="#" data-go-settings-tab="search" style="color:var(--accent, var(--red));text-decoration:underline;font-weight:600;">Search →</a></div>
             <div class="settings-col">
               <div class="settings-row">
@@ -1536,7 +1544,7 @@
           </div>
           <!-- Agent card moved to the Agent Tools tab. -->
           <div class="admin-card">
-            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>Image Generation<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-imgEnabledToggle"><span class="admin-slider"></span></label></h2>
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/><path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/><circle cx="12.5" cy="7.5" r="1.4"/><path d="M21 12.5 17.75 9.25 11 16"/></svg>Image Generation<span style="flex:1"></span><label class="admin-switch"><input type="checkbox" id="set-imgEnabledToggle"><span class="admin-slider"></span></label></h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Configure which model to use for image generation.</div>
             <div style="display:flex;flex-direction:column;gap:0.5rem;">
               <div style="display:flex;align-items:center;gap:0.75rem;">
@@ -1552,6 +1560,17 @@
                 </select>
               </div>
               <div id="set-imgSettingsMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
+            </div>
+          </div>
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Video Generation</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Default model for <code>/video</code> — used when a run doesn't say <code>model=</code>.</div>
+            <div style="display:flex;flex-direction:column;gap:0.5rem;">
+              <div style="display:flex;align-items:center;gap:0.75rem;">
+                <label class="settings-label">Model</label>
+                <select id="set-videoModelSelect" class="settings-select"><option value="">Auto (first served)</option></select>
+              </div>
+              <div id="set-videoSettingsMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
             </div>
           </div>
           <!-- TTS panel hidden — user opted out of read-aloud entirely. Kept
@@ -1700,7 +1719,7 @@
           </div>
 
           <div class="admin-card">
-            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Deep Research</h2>
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg>Deep Research</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Deep Research runtime settings. Default Model is picked in <a href="#" data-go-settings-tab="ai" style="color:var(--accent, var(--red));text-decoration:underline;font-weight:600;">AI Defaults →</a></div>
             <div class="settings-col">
               <div class="settings-row">
@@ -1763,7 +1782,7 @@
                 <input type="checkbox" checked data-ui-key="sidebar-new-chat"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5a2.5 2.5 0 0 1-2.5 2.5H8.5l-5 4V6A2.5 2.5 0 0 1 6 3.5h12.5A2.5 2.5 0 0 1 21 6z"/><path d="M8.5 10.5h.01"/><path d="M12 10.5h.01"/><path d="M15.5 10.5h.01"/></svg></span>
                 <span class="vis-label">Chats <span class="vis-hint">Chat history list</span></span>
                 <input type="checkbox" checked data-ui-key="sessions-section"><span class="vis-switch"></span>
               </label>
@@ -1783,57 +1802,57 @@
                 <input type="checkbox" checked data-ui-key="tools-section"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg></span>
                 <span class="vis-label">Brain</span>
                 <input type="checkbox" checked data-ui-key="tool-memory"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="17" rx="3"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M3 10h18"/><path d="M8 14.5h.01"/><path d="M12 14.5h.01"/><path d="M16 14.5h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg></span>
                 <span class="vis-label">Calendar</span>
                 <input type="checkbox" checked data-ui-key="tool-calendar"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg></span>
                 <span class="vis-label">Compare</span>
                 <input type="checkbox" checked data-ui-key="tool-compare"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="7" height="6" rx="1.5"/><rect x="2" y="14" width="7" height="6" rx="1.5"/><rect x="15" y="9" width="7" height="6" rx="1.5"/><path d="M9 7h3a2 2 0 0 1 2 2v1"/><path d="M9 17h3a2 2 0 0 0 2-2v-1"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg></span>
                 <span class="vis-label">Recipes</span>
                 <input type="checkbox" checked data-ui-key="tool-recipes"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/><path d="M6.6 17v3.5h10.8V17"/></svg></span>
                 <span class="vis-label">Cookbook</span>
                 <input type="checkbox" checked data-ui-key="tool-cookbook"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg></span>
                 <span class="vis-label">Deep Research</span>
                 <input type="checkbox" checked data-ui-key="tool-research"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/><path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/><circle cx="12.5" cy="7.5" r="1.4"/><path d="M21 12.5 17.75 9.25 11 16"/></svg></span>
                 <span class="vis-label">Gallery</span>
                 <input type="checkbox" checked data-ui-key="tool-gallery"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/></svg></span>
                 <span class="vis-label">Library</span>
                 <input type="checkbox" checked data-ui-key="tool-library"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 13.5V6A2.5 2.5 0 0 0 18 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h7.5z"/><path d="M13.5 20.5V16a2.5 2.5 0 0 1 2.5-2.5h4.5"/><path d="M8 9h8"/><path d="M8 13h4"/></svg></span>
                 <span class="vis-label">Notes</span>
                 <input type="checkbox" checked data-ui-key="tool-notes"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><path d="m5.5 7 1.4 1.4 2.7-2.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M14.5 7h6"/><path d="M14.5 17h6"/></svg></span>
                 <span class="vis-label">Tasks</span>
                 <input type="checkbox" checked data-ui-key="tool-tasks"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 5-5 3 3 0 0 0-3-3h-2a3 3 0 0 1-3-3 5 5 0 0 1 5-5"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg></span>
                 <span class="vis-label">Theme</span>
                 <input type="checkbox" checked data-ui-key="tool-theme"><span class="vis-switch"></span>
               </label>
@@ -1843,7 +1862,7 @@
                 <input type="checkbox" checked data-ui-key="user-bar"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
                 <span class="vis-label">Settings Button <span class="vis-hint">Cog next to user — re-open with <code>/settings</code></span></span>
                 <input type="checkbox" checked data-ui-key="sidebar-settings-btn"><span class="vis-switch"></span>
               </label>
@@ -1887,6 +1906,11 @@
                 <span class="vis-label">Sensitive Blur <span class="vis-hint">Blur emails, tokens, and secrets in AI output</span></span>
                 <input type="checkbox" data-privacy-key="sensitive-blur"><span class="vis-switch"></span>
               </label>
+              <label class="vis-row">
+                <span class="vis-icon" style="font-size:13px;line-height:14px;">🦍</span>
+                <span class="vis-label">Bonzi Buddy <span class="vis-hint">A "helpful" purple gorilla from 1999 supervises your chats</span></span>
+                <input type="checkbox" data-egg-key="bonzi"><span class="vis-switch"></span>
+              </label>
             </div>
           </div>
           <div class="admin-card" style="padding-bottom:6px;">
@@ -1923,7 +1947,7 @@
                 <input type="checkbox" checked data-ui-key="attach-btn"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg></span>
                 <span class="vis-label">Deep Research</span>
                 <input type="checkbox" checked data-ui-key="research-btn"><span class="vis-switch"></span>
               </label>
@@ -2001,10 +2025,10 @@
           </div>
 
           <div class="admin-card">
-            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>Email Tasks</h2>
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><path d="m5.5 7 1.4 1.4 2.7-2.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M14.5 7h6"/><path d="M14.5 17h6"/></svg>Email Tasks</h2>
             <div class="settings-row" style="align-items:center;">
               <div class="admin-toggle-sub" style="margin:0;flex:1;">Manage email background tasks in Tasks.</div>
-              <button class="admin-btn-add" id="set-email-open-tasks" style="display:inline-flex;align-items:center;gap:6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="opacity:0.7"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>Open Tasks</button>
+              <button class="admin-btn-add" id="set-email-open-tasks" style="display:inline-flex;align-items:center;gap:6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="opacity:0.7"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><path d="m5.5 7 1.4 1.4 2.7-2.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M14.5 7h6"/><path d="M14.5 17h6"/></svg>Open Tasks</button>
             </div>
           </div>
 
@@ -2123,7 +2147,7 @@
 
           <!-- ── Local card ─────────────────────────────────────────── -->
           <div class="admin-card">
-            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add Local Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoint)</span>
+            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add Local Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoint)</span>
               <span style="flex:1"></span>
               <button class="admin-btn-sm" id="adm-epLocalTestBtn" style="font-size:11px;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Test
@@ -2155,7 +2179,7 @@
                     <input id="adm-epLocalUrl" type="text" placeholder="Paste endpoint URL, e.g. http://localhost:11434/v1" style="flex:1;min-width:0;border-top-left-radius:0;border-bottom-left-radius:0;">
                   </div>
                   <button class="admin-btn-add" id="adm-epLocalAddBtn" style="min-width:55px;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0;">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add
                   </button>
                 </div>
                 <div class="admin-model-form-row" id="adm-epLocalApiKey-row" style="display:none;">
@@ -2168,7 +2192,7 @@
 
           <!-- ── API card ───────────────────────────────────────────── -->
           <div class="admin-card">
-            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="11" cy="12" r="8"/><path d="M19 5v6"/><path d="M16 8h6"/><path d="M7 12h8"/></svg>Add API Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoint)</span>
+            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="11" cy="12" r="8"/><path d="M19 5v6"/><path d="M16 8h6"/><path d="M7 12h8"/></svg>Add API Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoint)</span>
               <span style="flex:1"></span>
               <button class="admin-btn-sm" id="adm-epApiTestBtn" style="font-size:11px;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Test
@@ -2181,12 +2205,12 @@
                 <div id="adm-epApiMoreMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:50;min-width:200px;padding:4px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.22);flex-direction:column;gap:1px;">
                   <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.55;padding:6px 9px 2px;">Connection mode</div>
                   <button class="admin-btn-sm adm-more-item adm-kind-opt" data-kind="proxy" style="background:none;border:0;border-radius:5px;padding:7px 9px;display:flex;align-items:center;gap:8px;width:100%;text-align:left;font-size:12px;font-weight:normal;color:var(--fg);cursor:pointer;">
-                    <svg class="adm-kind-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg class="adm-kind-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     <span>Proxy</span>
                     <span style="margin-left:auto;opacity:0.5;font-size:10px;">routed via server</span>
                   </button>
                   <button class="admin-btn-sm adm-more-item adm-kind-opt" data-kind="api" style="background:none;border:0;border-radius:5px;padding:7px 9px;display:flex;align-items:center;gap:8px;width:100%;text-align:left;font-size:12px;font-weight:normal;color:var(--fg);cursor:pointer;">
-                    <svg class="adm-kind-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="visibility:hidden;"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg class="adm-kind-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="visibility:hidden;"><polyline points="20 6 9 17 4 12"/></svg>
                     <span>API (direct)</span>
                     <span style="margin-left:auto;opacity:0.5;font-size:10px;">browser→provider</span>
                   </button>
@@ -2241,7 +2265,7 @@
                     <input id="adm-epApiKey" type="password" placeholder="API key, e.g. sk-proj-AbCdEf…" autocomplete="off" style="flex:1;padding-left:28px;height:32px;box-sizing:border-box;">
                   </div>
                   <button class="admin-btn-add" id="adm-epAddBtn" style="height:32px;min-width:55px;text-align:center;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0;box-sizing:border-box;">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add
                   </button>
                 </div>
                 <div id="adm-epApiMsg" class="adm-ep-inline-msg"></div>
@@ -2258,10 +2282,10 @@
             <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><polyline points="20 6 9 17 4 12"/></svg>Added Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoints)</span>
               <span style="flex:1"></span>
               <button class="admin-btn-sm" id="adm-epProbeAllBtn" title="Re-test every endpoint and refresh online status" style="font-size:11px;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Probe
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Probe
               </button>
               <button class="admin-btn-sm" id="adm-epClearOfflineBtn" title="Remove all endpoints currently marked offline" style="font-size:11px;font-weight:normal;display:inline-flex;align-items:center;gap:4px;opacity:0.85;">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>Clear offline <span id="adm-epOfflineCount" style="opacity:0.6;margin-left:2px;"></span>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>Clear offline <span id="adm-epOfflineCount" style="opacity:0.6;margin-left:2px;"></span>
               </button>
             </h2>
             <div class="admin-toggle-sub" style="margin-bottom:12px">Endpoints you've connected. Probe re-tests them all; Clear offline removes the dead ones.</div>
@@ -2518,6 +2542,7 @@
 <script type="module" src="/static/js/voice-mode/index.js"></script>
 <script type="module" src="/static/js/theme.js"></script>
 <script type="module" src="/static/js/censor.js"></script>
+<script type="module" src="/static/js/bonzi.js"></script>
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>

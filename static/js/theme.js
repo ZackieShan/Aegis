@@ -22,6 +22,9 @@ export const THEMES = {
   retrowave:  { bg:'#1a1a2e', fg:'#e94560', panel:'#16213e', border:'#533483', red:'#e94560' },
   forest:     { bg:'#1b2a1b', fg:'#a8d5a2', panel:'#142414', border:'#3d6b3d', red:'#7cb871' },
   ocean:      { bg:'#0b1a2c', fg:'#64d2ff', panel:'#091422', border:'#1e5074', red:'#4facfe' },
+  // Millennium core — Y2K chrome: near-black steel bg, silver-ice text,
+  // steel-blue borders, electric-blue accent. Digital-rain pattern default.
+  millennium: { bg:'#05070d', fg:'#d3dce8', panel:'#0b111c', border:'#2b3d55', red:'#4da6ff' },
   ume:        { bg:'#2b1b2e', fg:'#f5c2e7', panel:'#1e1420', border:'#6c4675', red:'#f5a0c0' },
   copper:     { bg:'#1c1410', fg:'#e8c39e', panel:'#140f0a', border:'#7a5533', red:'#d4764e' },
   terminal:   { bg:'#000000', fg:'#00ff41', panel:'#0a0a0a', border:'#003b00', red:'#00ff41' },
@@ -40,12 +43,13 @@ const LS_KEY = 'aegis-theme';
 const CUSTOM_THEMES_KEY = 'aegis-custom-themes';
 
 const FONT_MAP = {
+  inter: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
   mono: "'JetBrains Mono', 'Fira Code', monospace",
   sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   serif: "Georgia, 'Times New Roman', serif",
   opendyslexic: "'OpenDyslexic', sans-serif",
 };
-const DEFAULT_FONT = 'mono';
+const DEFAULT_FONT = 'inter';
 const DEFAULT_DENSITY = 'comfortable';
 const MAX_CUSTOM_THEMES = 8;
 
@@ -60,6 +64,7 @@ const THEME_DEFAULT_PATTERN = {
   retrowave:  'embers',
   forest:     'petals',
   ocean:      'constellations',
+  millennium: 'rain',
   terminal:   'perlin-flow',
   organs:     'rain',
   ume:        'petals',
@@ -70,6 +75,7 @@ const THEME_DEFAULT_PATTERN = {
 const THEME_DEFAULT_EFFECT_COLOR = {
   aurora:     '#8a63e8',
   midnight:   '#ffffff',
+  millennium: '#4da6ff',
   organs:     '#451616',
   cute:       '#ff8cb8',
   ume:        '#f5a0c0',
@@ -79,6 +85,7 @@ const THEME_DEFAULT_EFFECT_COLOR = {
 const THEME_DEFAULT_INTENSITY = {
   aurora:     0.6,
   midnight:   0.5,
+  millennium: 0.55,
   terminal:   0.8,
   organs:     0.65,
 };
@@ -660,7 +667,7 @@ export function initThemeUI() {
         <span style="background:${c.fg}"></span>
         <span style="background:${c.red}"></span>
       </div>
-      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name)}
+      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : (name === 'millennium' ? 'millennium core' : name))}
     </div>
   `).join('');
 

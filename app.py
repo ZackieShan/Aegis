@@ -183,6 +183,8 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/gallery/style-transfer",  # full-image edit — cold model load alone can exceed 45s; own 600s httpx timeout
     "/api/video",           # video submit blocks while llama-swap cold-loads the model; own 600s httpx timeout
     "/api/memory/audit",    # retains own 120s LLM inactivity timeout
+    "/api/memory/import",   # LLM extraction w/ own 300s timeout; cold model load alone can exceed 45s
+    "/api/memory/extract",  # same LLM-bound suggestion flow as import
 )
 
 

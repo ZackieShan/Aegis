@@ -1108,18 +1108,33 @@ export async function addNewMemory() {
     });
 
     if (response.ok) {
+      const data = await response.json().catch(() => ({}));
       input.value = '';
-      await loadMemories();
-      showToast('Memory added');
+      if (data.duplicate) {
+        // A dup is a 200 no-op server-side; saying "Memory added" while the
+        // list never changes read as a silent add failure.
+        showToast('Already in memory — nothing added');
+      } else {
+        await loadMemories();
+        showToast('Memory added');
+      }
     } else {
-      const errorData = await response.json();
+      const errorData = await response.json().catch(() => ({}));
       console.error('Server error details:', errorData);
-      throw new Error(errorData.detail || 'Failed to add memory');
+      throw new Error(_memErrDetail(errorData) || 'Failed to add memory');
     }
   } catch (error) {
     console.error('Error adding memory:', error);
-    showError('Failed to add memory');
+    showError(error.message || 'Failed to add memory');
   }
+}
+
+/** Normalize a FastAPI error body: `detail` is a string for HTTPException but
+ *  an array of {msg,...} objects for 422 validation errors. */
+function _memErrDetail(errorData) {
+  const d = errorData && errorData.detail;
+  if (Array.isArray(d)) return d.map(x => x.msg || JSON.stringify(x)).join('; ');
+  return typeof d === 'string' ? d : '';
 }
 
 export async function editMemory(id) {
@@ -1225,14 +1240,25 @@ export async function extractMemory(sessionId) {
       btn.className = 'memory-item-btn save';
       btn.textContent = 'save';
       btn.addEventListener('click', async () => {
-        await fetch(`${window.location.origin}/api/memory/add`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: s })
-        });
-        btn.disabled = true;
-        btn.textContent = 'saved';
-        showToast('Saved to memory');
+        try {
+          const res = await fetch(`${window.location.origin}/api/memory/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: s })
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            showError(_memErrDetail(err) || `Save failed (${res.status})`);
+            return;
+          }
+          const data = await res.json().catch(() => ({}));
+          btn.disabled = true;
+          btn.textContent = data.duplicate ? 'exists' : 'saved';
+          showToast(data.duplicate ? 'Already in memory' : 'Saved to memory');
+        } catch (e) {
+          console.error('Suggestion save failed:', e);
+          showError('Save failed — check connection');
+        }
       });
       div.appendChild(txt);
       div.appendChild(btn);
@@ -1349,24 +1375,30 @@ async function handleImportFile(file) {
       saveAllBtn.className = 'memory-item-btn save';
       saveAllBtn.textContent = 'save all';
       saveAllBtn.addEventListener('click', async () => {
-        let saved = 0;
+        let saved = 0, duplicates = 0, failed = 0;
         for (const s of reviewItems) {
           if (!s.active || !s.text) continue;
           try {
-            await fetch(`${window.location.origin}/api/memory/add`, {
+            const res = await fetch(`${window.location.origin}/api/memory/add`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ text: s.text, category: s.category })
             });
-            saved++;
-          } catch (e) { /* skip */ }
+            if (!res.ok) { failed++; continue; }
+            const data = await res.json().catch(() => ({}));
+            if (data.duplicate) duplicates++; else saved++;
+          } catch (e) { failed++; }
         }
         body.classList.add('hidden');
         body.innerHTML = '';
         if (memList) memList.classList.remove('hidden');
         await loadMemories();
         document.querySelector('.memory-tab[data-memory-tab="browse"]')?.click();
-        showToast(`Saved ${saved} memories`);
+        const parts = [`Saved ${saved}`];
+        if (duplicates) parts.push(`${duplicates} already existed`);
+        if (failed) parts.push(`${failed} failed`);
+        if (failed) showError(parts.join(' · '));
+        else showToast(parts.join(' · '));
       });
       headerActions.appendChild(saveAllBtn);
       headerActions.appendChild(backBtn);
@@ -1395,17 +1427,27 @@ async function handleImportFile(file) {
         btn.className = 'memory-item-btn save';
         btn.textContent = 'save';
         btn.addEventListener('click', async () => {
-          await fetch(`${window.location.origin}/api/memory/add`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: item.text, category: item.category })
-          });
-          item.active = false;
-          div.remove();
-          updateHeaderTitle();
-          btn.disabled = true;
-          btn.textContent = 'saved';
-          showToast('Saved to memory');
+          try {
+            const res = await fetch(`${window.location.origin}/api/memory/add`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: item.text, category: item.category })
+            });
+            if (!res.ok) {
+              // Keep the row so the save can be retried.
+              const err = await res.json().catch(() => ({}));
+              showError(_memErrDetail(err) || `Save failed (${res.status})`);
+              return;
+            }
+            const data = await res.json().catch(() => ({}));
+            item.active = false;
+            div.remove();
+            updateHeaderTitle();
+            showToast(data.duplicate ? 'Already in memory' : 'Saved to memory');
+          } catch (e) {
+            console.error('Import save failed:', e);
+            showError('Save failed — check connection');
+          }
         });
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'memory-item-btn delete';

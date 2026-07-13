@@ -1475,6 +1475,30 @@ async function _cmdDoctor(args) {
   return true;
 }
 
+// Bonzi Buddy easter egg — summon/dismiss the purple gorilla (module in
+// static/js/bonzi.js; same state as the Settings → Appearance toggle).
+async function _cmdBonzi(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const b = window.bonziBuddy;
+  if (!b) { slashReply('Bonzi is unavailable — his module failed to load.'); return true; }
+  if (sub === 'fact') {
+    if (!b.enabled) await b.enable();
+    if (!b.enabled) { slashReply('🦍 Bonzi couldn\'t load his sprite assets — check the browser console.'); return true; }
+    b.tellFact();
+    slashReply('🦍 Bonzi has shared his wisdom.');
+    return true;
+  }
+  if (sub === 'off' || (b.enabled && sub !== 'on')) {
+    b.disable();
+    slashReply('🦍 Bonzi has returned to 1999. `/bonzi` brings him back.');
+  } else {
+    await b.enable();
+    if (!b.enabled) { slashReply('🦍 Bonzi couldn\'t load his sprite assets — check the browser console.'); return true; }
+    slashReply('🦍 **Bonzi Buddy** has entered the chat. Click him, right-click him, drag him around — or send him home with `/bonzi off` (also in Settings → Appearance).');
+  }
+  return true;
+}
+
 // Local observability — show recent LLM/agent calls (model, latency, tools).
 async function _cmdTraces(args) {
   await typewriterReply('Reading recent traces…');
@@ -6637,6 +6661,13 @@ const COMMANDS = {
     help: 'Check what\'s working and fix missing pieces (/doctor, /doctor fix <id>)',
     handler: (args) => _cmdDoctor(args),
     usage: '/doctor'
+  },
+  bonzi: {
+    alias: ['buddy'],
+    category: 'Tools',
+    help: 'Summon or dismiss Bonzi Buddy (/bonzi, /bonzi off, /bonzi fact)',
+    handler: (args) => _cmdBonzi(args),
+    usage: '/bonzi'
   },
   traces: {
     alias: ['observability', 'trace'],

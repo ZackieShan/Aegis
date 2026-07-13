@@ -79,6 +79,8 @@ output.txt.txt
 
 # …except shipped static assets
 !static/icons/*.png
+# …and character/agent sprite sheets (Bonzi easter egg).
+!static/agents/**/*.png
 
 # …except shipped demo assets in docs/ that the README links to.
 !docs/*.jpg

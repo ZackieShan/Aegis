@@ -15,13 +15,13 @@
   var THEME_DEFAULT_PATTERN = {
     aurora:'constellations', dark:'none', light:'dots', midnight:'rain', paper:'dots',
     cyberpunk:'synapse', retrowave:'embers', forest:'petals',
-    ocean:'constellations', terminal:'perlin-flow', organs:'rain',
+    ocean:'constellations', millennium:'rain', terminal:'perlin-flow', organs:'rain',
     ume:'petals', cute:'sparkles'
   };
   var THEME_DEFAULT_EFFECT_COLOR = {
-    aurora:'#8a63e8', midnight:'#ffffff', organs:'#451616', cute:'#ff8cb8', ume:'#f5a0c0'
+    aurora:'#8a63e8', midnight:'#ffffff', millennium:'#4da6ff', organs:'#451616', cute:'#ff8cb8', ume:'#f5a0c0'
   };
-  var THEME_DEFAULT_INTENSITY = { aurora:0.6, midnight:0.5, terminal:0.8, organs:0.65 };
+  var THEME_DEFAULT_INTENSITY = { aurora:0.6, midnight:0.5, millennium:0.55, terminal:0.8, organs:0.65 };
   try {
     var t = JSON.parse(localStorage.getItem('aegis-theme'));
     var s = document.documentElement.style;
@@ -85,6 +85,8 @@
 })();
 </script>
 <style>
+  @font-face { font-family: 'Inter'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-Regular.woff2') format('woff2'); }
+  @font-face { font-family: 'Inter'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-SemiBold.woff2') format('woff2'); }
   @font-face { font-family: 'JetBrains Mono'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/JetBrainsMono-Regular.woff2') format('woff2'); }
   @font-face { font-family: 'JetBrains Mono'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/JetBrainsMono-SemiBold.woff2') format('woff2'); }
   @font-face { font-family: 'Fira Code'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/FiraCode-Regular.woff2') format('woff2'); }
@@ -117,7 +119,7 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg); color: var(--fg);
     display: flex; justify-content: center; align-items: flex-start;
     min-height: 100vh; min-height: 100dvh;
@@ -125,7 +127,7 @@
     transition: padding-top 0.2s ease;
   }
   .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
     padding: 2rem; width: 360px; max-width: 90vw;
     /* Sit above the bg-effect canvases (which spawn at z-index:0) so the
        falling rain / drifting petals / etc. don't streak across the
@@ -136,9 +138,9 @@
     text-align: center; margin-bottom: 1.5rem;
   }
   .logo span {
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 2rem; font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: -0.02em;
     /* Same gradient as the main app's welcome-screen "Aegis" title
        (static/style.css #welcome-screen .welcome-name) so the brand
        wordmark is consistent across login + first-launch screens. */
@@ -151,10 +153,10 @@
   label { display: block; font-size: 0.85rem; margin-bottom: 0.3rem; color: color-mix(in srgb, var(--fg) 65%, transparent); }
   input:not(.remember-check) {
     width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 1rem;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-    color: var(--fg); font-size: 0.95rem; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--fg); font-size: 0.95rem; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
-  input:focus { outline: none; border-color: var(--red); }
+  input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 20%, transparent); }
   /* On touch devices keep inputs at >=16px so iOS Safari doesn't zoom the whole
      page when a field is focused (it auto-zooms any focused input under 16px).
      This page has its own inline styles, so it doesn't inherit the main app's
@@ -173,11 +175,11 @@
     /* Asymmetric vertical padding nudges the label 1px down while keeping
        the button's total height the same as 0.7rem all-around. */
     padding: calc(0.7rem + 1px) 0.7rem calc(0.7rem - 1px);
-    border: none; border-radius: 6px;
+    border: none; border-radius: 8px;
     /* Darken the brand red slightly so #fff label text clears the WCAG AA
        4.5:1 contrast threshold (plain --red #e06c75 only reaches ~3.2:1). */
     background: color-mix(in srgb, var(--red) 78%, #000); color: #fff; font-size: 1rem; cursor: pointer;
-    font-weight: 600; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-weight: 600; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
   button:hover { background: color-mix(in srgb, var(--red) 66%, black); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -234,7 +236,7 @@
   .version-label {
     position: fixed; bottom: 12px; right: 16px;
     font-size: 0.7rem; opacity: 0.25;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     pointer-events: none; user-select: none;
   }
   /* Whirlpool-style spinner shown in the submit button while login /

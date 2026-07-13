@@ -624,18 +624,35 @@ async def audit_memories(
             )
             return {"before": before_count, "after": before_count, "error": "unsafe_removal"}
 
-        # Merge audited entries back with other users' entries
+        # Merge audited entries back with other users' entries. The LLM call
+        # above can take up to 120s; anything the owner added in that window is
+        # in the fresh load_all() but NOT in the pre-await `existing` snapshot —
+        # preserve those instead of silently deleting a just-added memory.
+        snapshot_ids = {m["id"] for m in existing}
+        all_entries = memory_manager.load_all()
+        audited_ids = {e["id"] for e in final_entries}
+        added_during_audit = [
+            e for e in all_entries
+            if e["id"] not in snapshot_ids and e["id"] not in audited_ids
+            and (owner is None or e.get("owner") == owner or e.get("owner") is None)
+        ]
+        if added_during_audit:
+            logger.info(
+                "Memory audit: preserving %d entries added while the LLM call was in flight",
+                len(added_during_audit),
+            )
         if owner:
-            all_entries = memory_manager.load_all()
-            audited_ids = {e["id"] for e in final_entries}
             other_entries = [e for e in all_entries if e.get("owner") != owner and (e.get("owner") is not None)]
             # Also keep legacy entries that weren't part of this audit
             for e in all_entries:
                 if e.get("owner") is None and e["id"] not in audited_ids and e["id"] not in {o["id"] for o in other_entries}:
                     other_entries.append(e)
-            saved_entries = final_entries + other_entries
+            preserved_ids = {e["id"] for e in other_entries}
+            saved_entries = final_entries + other_entries + [
+                e for e in added_during_audit if e["id"] not in preserved_ids
+            ]
         else:
-            saved_entries = final_entries
+            saved_entries = final_entries + added_during_audit
         memory_manager.save(saved_entries)
         logger.info(
             f"Memory audit complete: {before_count} -> {after_count} entries "

@@ -803,6 +803,45 @@ async function initImageSettings() {
   if (enabledToggle) enabledToggle.addEventListener('change', function() { syncImgDisabled(); saveSettings(); });
 }
 
+/* ── Video ── */
+async function initVideoSettings() {
+  const modelSel = el('set-videoModelSelect');
+  const msg = el('set-videoSettingsMsg');
+  if (!modelSel) return;
+  try {
+    // /api/video/models already applies the server's video-model detector to
+    // every served endpoint, so it is the single source of truth here.
+    const res = await fetch('/api/video/models', { credentials: 'same-origin' });
+    const data = await res.json();
+    const ids = (data.models || []).map(m => m.model).filter(Boolean);
+    sortModelIds(ids).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
+    if (!ids.length) {
+      ['wan2.2-t2v', 'ltx2.3-video'].forEach(mid => {
+        const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid + ' (not served)'; modelSel.appendChild(opt);
+      });
+    }
+  } catch (e) { console.warn('Failed to load video models for settings', e); }
+  try {
+    const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    const settings = await settingsRes.json();
+    if (settings.video_model) {
+      // Keep a saved-but-unserved choice visible instead of silently blanking it.
+      if (![...modelSel.options].some(o => o.value === settings.video_model)) {
+        const opt = document.createElement('option'); opt.value = settings.video_model; opt.textContent = settings.video_model + ' (not served)'; modelSel.appendChild(opt);
+      }
+      modelSel.value = settings.video_model;
+    }
+  } catch (e) { console.warn('Failed to load settings', e); }
+  modelSel.addEventListener('change', async function() {
+    try {
+      const res = await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_model: modelSel.value }) });
+      if (!res.ok) throw new Error(res.status === 403 ? 'admin only' : 'HTTP ' + res.status);
+      msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
+    } catch (e) { msg.textContent = 'Failed to save (' + e.message + ')'; msg.style.color = 'var(--red)'; }
+  });
+}
+
 /* ── Vision ── */
 async function initVisionSettings() {
   const vlSel = el('set-vlModelSelect');
@@ -1734,6 +1773,7 @@ async function initAgentSettings() {
 function initAppearance() {
   syncAppearanceCheckboxes();
   syncPrivacyCheckboxes();
+  syncEggCheckboxes();
 
   modalEl.querySelectorAll('[data-ui-key]').forEach(function(chk) {
     chk.addEventListener('change', async function() {
@@ -1786,6 +1826,16 @@ function initAppearance() {
     });
   });
 
+  modalEl.querySelectorAll('[data-egg-key]').forEach(function(chk) {
+    chk.addEventListener('change', function() {
+      if (chk.dataset.eggKey !== 'bonzi') return;
+      localStorage.setItem('aegis-bonzi', chk.checked ? 'on' : 'off');
+      window.dispatchEvent(new CustomEvent('aegis-bonzi-change', {
+        detail: { enabled: chk.checked }
+      }));
+    });
+  });
+
   // Per-section reset buttons (arrow-circle-back icon in each card's h2).
   // Removes only the keys belonging to this section from the persisted
   // visibility map so other sections keep their user settings.
@@ -1819,6 +1869,12 @@ function syncAppearanceCheckboxes() {
 function syncPrivacyCheckboxes() {
   modalEl.querySelectorAll('[data-privacy-key="sensitive-blur"]').forEach(function(chk) {
     chk.checked = localStorage.getItem('aegis-sensitive-blur') === 'on';
+  });
+}
+
+function syncEggCheckboxes() {
+  modalEl.querySelectorAll('[data-egg-key="bonzi"]').forEach(function(chk) {
+    chk.checked = localStorage.getItem('aegis-bonzi') === 'on';
   });
 }
 
@@ -2330,6 +2386,7 @@ function initAll() {
   initTeacherModel();
   initUtilityModel();
   initImageSettings();
+  initVideoSettings();
   initVisionSettings();
   initTtsSettings();
   initSttSettings();
@@ -5719,6 +5776,9 @@ function syncAdminVisibility() {
 export function open(tab) {
   if (!initialized) initAll();
   syncAppearanceCheckboxes();
+  // Bonzi state can change outside this modal (/bonzi, his Goodbye menu),
+  // so re-read it on every open, not just at init.
+  syncEggCheckboxes();
   if (modalEl.classList.contains('hidden')) {
     resetWindowPlacement();
   }

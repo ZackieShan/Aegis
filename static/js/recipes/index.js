@@ -61,17 +61,17 @@ function _injectStyles() {
   }
   .recipe-name-input {
     font: 600 14px/1.2 inherit; background: transparent; color: var(--fg, #eee);
-    border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; min-width: 180px;
+    border: 1px solid transparent; border-radius: var(--radius-sm, 8px); padding: 5px 8px; min-width: 180px;
   }
   .recipe-name-input:hover { border-color: var(--border, #333); }
-  .recipe-name-input:focus { border-color: var(--accent, #6cf); outline: none; }
+  .recipe-name-input:focus { border-color: var(--accent, var(--red)); outline: none; }
   .recipe-btn {
     display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
     font: 500 12.5px/1 inherit; color: var(--fg, #eee); background: var(--panel, #1b1b1b);
-    border: 1px solid var(--border, #333); border-radius: 6px; padding: 7px 11px;
+    border: 1px solid var(--border, #333); border-radius: var(--radius-sm, 8px); padding: 7px 11px;
   }
-  .recipe-btn:hover { border-color: var(--accent, #6cf); }
-  .recipe-btn.primary { background: var(--accent, #6cf); color: #04121f; border-color: var(--accent, #6cf); font-weight: 600; }
+  .recipe-btn:hover { border-color: var(--accent, var(--red)); }
+  .recipe-btn.primary { background: var(--accent, var(--red)); color: #fff; border-color: var(--accent, var(--red)); font-weight: 600; }
   .recipe-btn.primary:hover { filter: brightness(1.08); }
   .recipe-btn[disabled] { opacity: 0.5; pointer-events: none; }
   .recipe-body { flex: 1; display: flex; min-height: 0; }
@@ -87,9 +87,9 @@ function _injectStyles() {
   .palette-item {
     text-align: left; cursor: pointer; font: 500 12px/1.2 inherit; color: var(--fg, #eee);
     background: var(--panel, #1b1b1b); border: 1px solid var(--border, #333);
-    border-radius: 6px; padding: 7px 9px; display: flex; align-items: center; gap: 7px;
+    border-radius: var(--radius-sm, 8px); padding: 7px 9px; display: flex; align-items: center; gap: 7px;
   }
-  .palette-item:hover { border-color: var(--accent, #6cf); transform: translateX(1px); }
+  .palette-item:hover { border-color: var(--accent, var(--red)); transform: translateX(1px); }
   .palette-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .palette-empty { font-size: 11px; opacity: 0.5; padding: 4px 2px; }
   .recipe-canvas-wrap { flex: 1; position: relative; overflow: auto; background:
@@ -97,63 +97,63 @@ function _injectStyles() {
     background-size: 22px 22px; }
   #recipe-canvas { position: relative; width: 2400px; height: 1600px; }
   #recipe-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-  #recipe-edges path.wire { fill: none; stroke: var(--accent, #6cf); stroke-width: 2.5; opacity: 0.75; }
+  #recipe-edges path.wire { fill: none; stroke: var(--accent, var(--red)); stroke-width: 2.5; opacity: 0.75; }
   #recipe-edges path.wire-hit { fill: none; stroke: transparent; stroke-width: 14px; pointer-events: stroke; cursor: pointer; }
-  #recipe-edges path.wire-temp { fill: none; stroke: var(--accent, #6cf); stroke-width: 2.5; stroke-dasharray: 5 4; opacity: 0.9; }
+  #recipe-edges path.wire-temp { fill: none; stroke: var(--accent, var(--red)); stroke-width: 2.5; stroke-dasharray: 5 4; opacity: 0.9; }
   .recipe-node {
     position: absolute; z-index: 2; width: 210px; background: var(--panel, #1b1b1b);
-    border: 1px solid var(--border, #333); border-radius: 9px; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    border: 1px solid var(--border, #333); border-radius: var(--radius-md, 12px); box-shadow: var(--shadow-md, 0 4px 14px rgba(0,0,0,0.35));
     font-size: 12px; color: var(--fg, #eee);
   }
-  .recipe-node.sel { border-color: var(--accent, #6cf); box-shadow: 0 0 0 1px var(--accent, #6cf), 0 4px 14px rgba(0,0,0,0.4); }
+  .recipe-node.sel { border-color: var(--accent, var(--red)); box-shadow: 0 0 0 1px var(--accent, var(--red)), var(--shadow-md, 0 4px 14px rgba(0,0,0,0.4)); }
   .recipe-node .node-head {
     display: flex; align-items: center; gap: 6px; padding: 7px 9px; cursor: grab;
-    border-bottom: 1px solid var(--border, #333); border-radius: 9px 9px 0 0;
-    background: color-mix(in srgb, var(--type-color, #6cf) 16%, transparent);
+    border-bottom: 1px solid var(--border, #333); border-radius: var(--radius-md, 12px) var(--radius-md, 12px) 0 0;
+    background: color-mix(in srgb, var(--type-color, var(--accent, var(--red))) 16%, transparent);
   }
   .recipe-node .node-head:active { cursor: grabbing; }
   .recipe-node .node-type { font-weight: 700; text-transform: capitalize; }
-  .recipe-node .node-id { font-size: 10px; opacity: 0.55; font-family: ui-monospace, monospace; }
+  .recipe-node .node-id { font-size: 10px; opacity: 0.55; font-family: var(--mono, ui-monospace, monospace); }
   .recipe-node .node-del { margin-left: auto; cursor: pointer; opacity: 0.5; font-size: 14px; line-height: 1; padding: 0 2px; }
   .recipe-node .node-del:hover { opacity: 1; color: var(--color-error, #f66); }
   .recipe-node .node-body { padding: 8px 9px; display: flex; flex-direction: column; gap: 6px; }
   .recipe-node select, .recipe-node input, .recipe-node textarea {
     width: 100%; box-sizing: border-box; font: 11.5px/1.35 inherit; color: var(--fg, #eee);
-    background: var(--bg, #111); border: 1px solid var(--border, #333); border-radius: 5px; padding: 5px 6px;
+    background: var(--bg, #111); border: 1px solid var(--border, #333); border-radius: var(--radius-sm, 8px); padding: 5px 6px;
   }
   .recipe-node textarea { resize: vertical; min-height: 46px; }
   .recipe-node .node-hint { font-size: 10px; opacity: 0.5; }
   .recipe-node .arg-row { display: flex; flex-direction: column; gap: 2px; }
-  .recipe-node .arg-row label { font-size: 10px; opacity: 0.7; font-family: ui-monospace, monospace; }
+  .recipe-node .arg-row label { font-size: 10px; opacity: 0.7; font-family: var(--mono, ui-monospace, monospace); }
   .node-port {
     position: absolute; width: 14px; height: 14px; border-radius: 50%;
-    background: var(--bg, #111); border: 2px solid var(--accent, #6cf); top: 12px; cursor: crosshair; z-index: 3;
+    background: var(--bg, #111); border: 2px solid var(--accent, var(--red)); top: 12px; cursor: crosshair; z-index: 3;
   }
   .node-port.in { left: -8px; }
   .node-port.out { right: -8px; }
-  .node-port:hover { background: var(--accent, #6cf); }
-  .node-port.hot { background: var(--accent, #6cf); transform: scale(1.25); }
+  .node-port:hover { background: var(--accent, var(--red)); }
+  .node-port.hot { background: var(--accent, var(--red)); transform: scale(1.25); }
   .recipe-run {
     border-top: 1px solid var(--border, #333); padding: 9px 12px; display: flex; flex-direction: column;
     gap: 8px; max-height: 42%; overflow-y: auto; background: color-mix(in srgb, var(--panel, #1b1b1b) 40%, transparent);
   }
   .recipe-run-top { display: flex; gap: 8px; align-items: center; }
   .recipe-run-input { flex: 1; font: 12.5px/1.2 inherit; color: var(--fg, #eee);
-    background: var(--bg, #111); border: 1px solid var(--border, #333); border-radius: 6px; padding: 8px 10px; }
+    background: var(--bg, #111); border: 1px solid var(--border, #333); border-radius: var(--radius-sm, 8px); padding: 8px 10px; }
   .recipe-step { border: 1px solid var(--border, #333); border-radius: 7px; padding: 7px 9px; background: var(--bg, #111); }
   .recipe-step .step-head { display: flex; gap: 7px; align-items: center; font-size: 11px; margin-bottom: 3px; }
   .recipe-step .step-badge { font: 600 9.5px/1 inherit; text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--accent, #6cf) 22%, transparent); }
-  .recipe-step .step-label { font-family: ui-monospace, monospace; opacity: 0.7; }
-  .recipe-step pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 11px/1.45 ui-monospace, monospace;
+    padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--accent, var(--red)) 22%, transparent); }
+  .recipe-step .step-label { font-family: var(--mono, ui-monospace, monospace); opacity: 0.7; }
+  .recipe-step pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 11px/1.45 var(--mono, ui-monospace, monospace);
     max-height: 160px; overflow: auto; opacity: 0.92; }
-  .recipe-final { border-color: var(--accent, #6cf); }
+  .recipe-final { border-color: var(--accent, var(--red)); }
   .recipe-empty-hint { position: absolute; top: 42%; left: 0; right: 0; text-align: center;
     opacity: 0.4; font-size: 13px; pointer-events: none; z-index: 0; }
   .recipe-menu { position: absolute; z-index: 40; background: var(--panel, #1b1b1b); border: 1px solid var(--border, #333);
-    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 5px; min-width: 200px; max-height: 320px; overflow-y: auto; }
+    border-radius: var(--radius-md, 12px); box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.4)); padding: 5px; min-width: 200px; max-height: 320px; overflow-y: auto; }
   .recipe-menu button { display: block; width: 100%; text-align: left; cursor: pointer; font: 12px/1.3 inherit;
-    color: var(--fg, #eee); background: transparent; border: 0; border-radius: 5px; padding: 6px 8px; }
+    color: var(--fg, #eee); background: transparent; border: 0; border-radius: var(--radius-sm, 8px); padding: 6px 8px; }
   .recipe-menu button:hover { background: color-mix(in srgb, var(--fg, #eee) 9%, transparent); }
   .recipe-menu .menu-empty { padding: 6px 8px; font-size: 11px; opacity: 0.5; }
   `;
@@ -181,7 +181,7 @@ function _build() {
       <div class="recipe-toolbar">
         <input class="recipe-name-input" id="recipe-name" value="${_esc(_recipeName)}" spellcheck="false" />
         <button class="recipe-btn" id="recipe-new">New</button>
-        <button class="recipe-btn" id="recipe-example" title="Load a ready-made example graph">✨ Example</button>
+        <button class="recipe-btn" id="recipe-starters" title="Install or load ready-made starter recipes built for what you have">✨ Starters</button>
         <button class="recipe-btn" id="recipe-open">Open…</button>
         <button class="recipe-btn" id="recipe-save">Save</button>
         <span style="flex:1"></span>
@@ -199,7 +199,7 @@ function _build() {
                 2. Drag from a node's right dot ● to another's left dot to wire them.<br>
                 3. Type a run input below and hit ▶ Run.
               </div>
-              <div style="margin-top:12px;opacity:0.7">New here? Click <b>✨ Example</b> up top to load a working graph.</div>
+              <div style="margin-top:12px;opacity:0.7">New here? Click <b>✨ Starters</b> up top to install ready-made recipes or load one to tweak.</div>
             </div>
           </div>
         </div>
@@ -219,7 +219,7 @@ function _build() {
   modal.addEventListener('mousedown', (e) => { if (e.target === modal) return; });
   modal.querySelector('#recipe-name').addEventListener('input', (e) => { _recipeName = e.target.value; });
   modal.querySelector('#recipe-new').addEventListener('click', _newRecipe);
-  modal.querySelector('#recipe-example').addEventListener('click', _exampleMenu);
+  modal.querySelector('#recipe-starters').addEventListener('click', _startersMenu);
   modal.querySelector('#recipe-open').addEventListener('click', _openMenu);
   modal.querySelector('#recipe-save').addEventListener('click', _save);
   modal.querySelector('#recipe-delete').addEventListener('click', _deleteCurrent);
@@ -332,7 +332,7 @@ function _renderNode(node) {
   el.id = 'rnode-' + node.id;
   el.style.left = node.x + 'px';
   el.style.top = node.y + 'px';
-  el.style.setProperty('--type-color', TYPE_COLORS[node.type] || '#6cf');
+  el.style.setProperty('--type-color', TYPE_COLORS[node.type] || 'var(--accent, var(--red))');
 
   const head = _el('div', 'node-head');
   head.appendChild(_el('span', 'node-type', node.type));
@@ -647,130 +647,80 @@ function _newRecipe() {
   _syncEmptyHint();
 }
 
-// Small menu of ready-made starter graphs so a first-time user sees a working
-// recipe instead of a blank canvas.
-function _exampleMenu(e) {
+// Starter recipes: the backend generates a set tailored to what this install
+// actually has (best available model + only the toolboxes that are connected),
+// so a first-timer can install them into their saved list with one click or
+// load any into the editor to tweak.
+async function _startersMenu(e) {
   document.querySelectorAll('.recipe-menu').forEach(m => m.remove());
-  const menu = _el('div', 'recipe-menu');
+  // Capture the button rect BEFORE awaiting — e.currentTarget is nulled once
+  // the async handler yields at the first await.
   const btn = e.currentTarget.getBoundingClientRect();
+  let starters = [];
+  try {
+    const res = await fetch(`${API}/api/recipes/starters`, { credentials: 'same-origin' });
+    if (res.ok) starters = (await res.json()).recipes || [];
+  } catch (_) {}
+  const menu = _el('div', 'recipe-menu');
   menu.style.left = btn.left + 'px';
   menu.style.top = (btn.bottom + 4) + 'px';
-  const items = [
-    ['🕵  Domain dossier', 'OSINT: whois + DNS → risk brief', _tmplDomainDossier],
-    ['📈  Analyst debate', 'Market: data → value/growth/contrarian → portfolio manager', _tmplAnalystDebate],
-  ];
-  items.forEach(([label, sub, fn]) => {
-    const b = _el('button');
-    b.innerHTML = `<div>${label}</div><div style="font-size:10.5px;opacity:0.55">${sub}</div>`;
-    b.addEventListener('click', () => { menu.remove(); fn(); });
-    menu.appendChild(b);
-  });
+  if (!starters.length) {
+    menu.appendChild(_el('div', 'menu-empty', 'No starters available — add a model in Settings first.'));
+  } else {
+    const all = _el('button');
+    all.innerHTML = `<div><b>⬇ Install all ${starters.length} to my recipes</b></div>`
+      + `<div style="font-size:10.5px;opacity:0.55">Saved so you can Open + Run them anytime</div>`;
+    all.addEventListener('click', () => { menu.remove(); _installStarters(); });
+    menu.appendChild(all);
+    const sep = _el('div');
+    sep.style.cssText = 'height:1px;background:var(--border,#333);opacity:.5;margin:4px 0';
+    menu.appendChild(sep);
+    starters.forEach(r => {
+      const b = _el('button');
+      b.innerHTML = `<div>${_esc(r.name)}</div>`
+        + `<div style="font-size:10.5px;opacity:0.55">${_esc(r.description || '')}</div>`;
+      b.addEventListener('click', () => {
+        menu.remove();
+        _loadGraph(r);
+        _toast('Loaded into the editor — press ▶ Run, or Save to keep it.');
+      });
+      menu.appendChild(b);
+    });
+  }
   document.body.appendChild(menu);
   const off = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', off); } };
   setTimeout(() => document.addEventListener('mousedown', off), 0);
 }
 
-function _mk(type, x, y, config) {
-  const n = { id: _newId(), type, x, y, config: config || {} };
-  _nodes.push(n);
-  return n;
-}
-function _finishTemplate(name, runValue) {
-  _recipeName = name;
-  const nameInput = document.getElementById('recipe-name');
-  if (nameInput) nameInput.value = _recipeName;
-  const runInput = document.getElementById('recipe-run-input');
-  if (runInput && runValue) runInput.value = runValue;
-  _nodes.forEach(_renderNode);
-  _drawEdges();
-  _syncEmptyHint();
-}
-
-// OSINT: run input → whois + DNS → model risk brief → output.
-function _tmplDomainDossier() {
-  _newRecipe();
-  const toolNames = _blocks.tools.map(t => t.name);
-  const model = _bestModel();
-  const inNode = _mk('input', 60, 150, { label: 'Domain' });
-  const outNode = _mk('output', 880, 150, {});
-  const parents = [];
-  if (toolNames.includes('osint_whois') || toolNames.includes('osint_dns')) {
-    if (toolNames.includes('osint_whois')) {
-      const w = _mk('tool', 330, 60, { tool: 'osint_whois', args: { target: '{{input}}' } });
-      _edges.push({ from: inNode.id, to: w.id }); parents.push(w.id);
+async function _installStarters() {
+  try {
+    const res = await fetch(`${API}/api/recipes/starters/install`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    if (!res.ok) { _toast('Install failed: ' + await _errText(res)); return; }
+    const d = await res.json();
+    const n = d.count || 0;
+    const sk = (d.skipped || []).length;
+    if (n) {
+      _toast(`Installed ${n} starter recipe${n === 1 ? '' : 's'}${sk ? ` (${sk} already present)` : ''} — open them via “Open…”.`);
+    } else {
+      _toast(sk ? 'Starter recipes are already installed — see “Open…”.' : 'No starters to install.');
     }
-    if (toolNames.includes('osint_dns')) {
-      const d = _mk('tool', 330, 240, { tool: 'osint_dns', args: { domain: '{{input}}', record_type: 'A' } });
-      _edges.push({ from: inNode.id, to: d.id }); parents.push(d.id);
-    }
-    const m = _mk('model', 610, 150, { model, prompt: 'Write a short risk brief on this domain from the recon above.' });
-    parents.forEach(p => _edges.push({ from: p, to: m.id }));
-    _edges.push({ from: m.id, to: outNode.id });
-  } else {
-    const m = _mk('model', 400, 150, { model, prompt: 'Summarize the following in 3 bullet points:\n\n{{input}}' });
-    _edges.push({ from: inNode.id, to: m.id });
-    _edges.push({ from: m.id, to: outNode.id });
-  }
-  _finishTemplate('Domain dossier (example)', 'example.com');
-}
-
-// Market "hedge fund" pattern (inspired by ai-hedge-fund, but fully local):
-// ticker → market data tools → three investor-persona model nodes → a
-// portfolio-manager node that weighs them → output. Persona prompts carry no
-// {{refs}}, so the engine auto-prepends each node's upstream data as context.
-function _tmplAnalystDebate() {
-  _newRecipe();
-  const toolNames = _blocks.tools.map(t => t.name);
-  const model = _bestModel();
-  const inNode = _mk('input', 40, 230, { label: 'Ticker' });
-  const dataNodes = [];
-  if (toolNames.includes('market_analyze')) {
-    const a = _mk('tool', 280, 110, { tool: 'market_analyze', args: { symbol: '{{input}}' } });
-    _edges.push({ from: inNode.id, to: a.id }); dataNodes.push(a.id);
-  }
-  if (toolNames.includes('market_fundamentals')) {
-    const f = _mk('tool', 280, 350, { tool: 'market_fundamentals', args: { symbol: '{{input}}' } });
-    _edges.push({ from: inNode.id, to: f.id }); dataNodes.push(f.id);
-  }
-  if (!dataNodes.length) {
-    // Market toolbox not connected — degrade to a single analyst on raw input.
-    const a = _mk('model', 320, 230, { model, prompt: 'Give a bull and bear case for this ticker:\n\n{{input}}' });
-    const out = _mk('output', 620, 230, {});
-    _edges.push({ from: inNode.id, to: a.id });
-    _edges.push({ from: a.id, to: out.id });
-    _finishTemplate('Analyst debate (needs Market toolbox)', 'NVDA');
-    return;
-  }
-  const personas = [
-    ['Value investor', 110, 'You are a disciplined value investor in the Buffett/Graham tradition. Using the market data above, judge whether this is a quality business at a fair price. Cite valuation (P/E, P/B, FCF), margins, and balance-sheet health. End with your call: BULLISH, BEARISH, or NEUTRAL, and a one-line reason.'],
-    ['Growth investor', 230, 'You are a growth investor in the Cathie Wood/Peter Lynch tradition. Using the market data above, judge the growth story: revenue/earnings growth, momentum, and narrative. Weigh upside against the price paid. End with your call: BULLISH, BEARISH, or NEUTRAL, and a one-line reason.'],
-    ['Contrarian / risk', 350, 'You are a contrarian risk manager in the Burry/Taleb tradition. Using the market data above, stress-test the bull case: overvaluation, debt, volatility, crowding, and tail risks. End with your call: BULLISH, BEARISH, or NEUTRAL, and a one-line reason.'],
-  ];
-  const personaIds = [];
-  personas.forEach(([label, y, prompt]) => {
-    const p = _mk('model', 560, y, { model, prompt, label });
-    dataNodes.forEach(d => _edges.push({ from: d, to: p.id }));
-    personaIds.push(p.id);
-  });
-  const pm = _mk('model', 860, 230, {
-    model, label: 'Portfolio manager',
-    prompt: 'You are the portfolio manager. Three analysts gave their views above. Weigh them, note where they agree and disagree, and give a final call — BUY, HOLD, or SELL — with a confidence (low/medium/high) and a 2-sentence rationale. This is educational analysis, not investment advice.',
-  });
-  personaIds.forEach(id => _edges.push({ from: id, to: pm.id }));
-  const outNode = _mk('output', 1140, 230, {});
-  _edges.push({ from: pm.id, to: outNode.id });
-  _finishTemplate('Analyst debate (example)', 'NVDA');
+  } catch (e) { _toast('Install failed: ' + e.message); }
 }
 
 async function _openMenu(e) {
   document.querySelectorAll('.recipe-menu').forEach(m => m.remove());
+  // Read the button rect before awaiting — e.currentTarget is null after the
+  // async handler yields.
+  const btn = e.currentTarget.getBoundingClientRect();
   let list = [];
   try {
     const res = await fetch(`${API}/api/recipes`, { credentials: 'same-origin' });
     if (res.ok) list = (await res.json()).recipes || [];
   } catch (_) {}
   const menu = _el('div', 'recipe-menu');
-  const btn = e.currentTarget.getBoundingClientRect();
   menu.style.left = btn.left + 'px';
   menu.style.top = (btn.bottom + 4) + 'px';
   if (!list.length) {
@@ -787,26 +737,34 @@ async function _openMenu(e) {
   setTimeout(() => document.addEventListener('mousedown', off), 0);
 }
 
+// Load a full recipe graph object into the editor. `r.id` present → editing a
+// saved recipe; absent (e.g. a starter template) → a fresh unsaved graph so
+// Save creates a new one instead of overwriting.
+function _loadGraph(r) {
+  _newRecipe();
+  _recipeId = r.id || null;
+  _recipeName = r.name || 'Untitled recipe';
+  document.getElementById('recipe-name').value = _recipeName;
+  _nodes = (r.nodes || []).map(n => ({
+    id: n.id, type: n.type,
+    x: typeof n.x === 'number' ? n.x : 80, y: typeof n.y === 'number' ? n.y : 80,
+    config: n.config || {},
+  }));
+  _edges = (r.edges || []).map(e => ({ from: e.from, to: e.to }));
+  // Keep the id counter ahead of loaded ids like "n7".
+  _nodes.forEach(n => { const m = /^n(\d+)$/.exec(n.id); if (m) _nodeSeq = Math.max(_nodeSeq, +m[1]); });
+  _nodes.forEach(_renderNode);
+  _drawEdges();
+  _syncEmptyHint();
+  const runInput = document.getElementById('recipe-run-input');
+  if (runInput && r.run_example) runInput.value = r.run_example;
+}
+
 async function _load(id) {
   try {
     const res = await fetch(`${API}/api/recipes/${id}`, { credentials: 'same-origin' });
     if (!res.ok) { _toast('Could not open recipe.'); return; }
-    const r = await res.json();
-    _newRecipe();
-    _recipeId = r.id;
-    _recipeName = r.name || 'Untitled recipe';
-    document.getElementById('recipe-name').value = _recipeName;
-    _nodes = (r.nodes || []).map(n => ({
-      id: n.id, type: n.type,
-      x: typeof n.x === 'number' ? n.x : 80, y: typeof n.y === 'number' ? n.y : 80,
-      config: n.config || {},
-    }));
-    _edges = (r.edges || []).map(e => ({ from: e.from, to: e.to }));
-    // Keep the id counter ahead of loaded ids like "n7".
-    _nodes.forEach(n => { const m = /^n(\d+)$/.exec(n.id); if (m) _nodeSeq = Math.max(_nodeSeq, +m[1]); });
-    _nodes.forEach(_renderNode);
-    _drawEdges();
-    _syncEmptyHint();
+    _loadGraph(await res.json());
   } catch (e) { _toast('Open failed: ' + e.message); }
 }
 

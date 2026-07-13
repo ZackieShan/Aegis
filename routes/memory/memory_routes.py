@@ -90,13 +90,19 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         from src.auth_helpers import require_privilege
         require_privilege(request, "can_manage_memory")
         if memory_data is None:
+            # Fallback for empty/form bodies. Pydantic errors here would
+            # surface as raw 500s (no app-level ValidationError handler), so
+            # translate them into a clean 400 instead.
             form = await request.form()
-            memory_data = MemoryAddRequest(
-                text=form.get("text"),
-                category=form.get("category", "fact"),
-                source=form.get("source", "user"),
-                session_id=form.get("session_id")
-            )
+            try:
+                memory_data = MemoryAddRequest(
+                    text=form.get("text"),
+                    category=form.get("category", "fact"),
+                    source=form.get("source", "user"),
+                    session_id=form.get("session_id")
+                )
+            except Exception:
+                raise HTTPException(400, "text is required")
 
         user = _owner(request)
         text = (memory_data.text or "").strip()
@@ -104,7 +110,10 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
             raise HTTPException(400, "empty memory")
         user_mem = memory_manager.load(owner=user)
         if memory_manager.find_duplicates(text, user_mem):
-            return {"ok": True, "count": len(user_mem), "message": "Memory already exists"}
+            # `duplicate` lets the frontend say "Already in memory" instead of
+            # a false "Memory added" (the list never changes on a dup, which
+            # used to read as a silent add failure).
+            return {"ok": True, "duplicate": True, "count": len(user_mem), "message": "Memory already exists"}
 
         if memory_data.session_id:
             try:
@@ -119,9 +128,15 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         all_mem = memory_manager.load_all()
         all_mem.append(new_entry)
         memory_manager.save(all_mem)
-        # Sync vector index
+        # Sync vector index off the event loop — ChromaDB's HTTP client has no
+        # read timeout, so a wedged (port-open, unresponsive) Chroma would
+        # otherwise block the loop and hang the whole server.
         if memory_vector and memory_vector.healthy:
-            memory_vector.add(new_entry["id"], text)
+            import asyncio as _asyncio
+            try:
+                await _asyncio.to_thread(memory_vector.add, new_entry["id"], text)
+            except Exception:
+                logger.warning("memory vector sync failed for %s", new_entry["id"], exc_info=True)
         try:
             from src.event_bus import fire_event
             fire_event("memory_added", user)
@@ -356,9 +371,10 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
                 )
         else:
             endpoint_url, model, headers = resolve_task_endpoint(owner=user)
-    
-        if not endpoint_url or not model:
-            raise HTTPException(400, "No LLM model configured. Set a default model in Settings.")
+
+        # NOTE: the "no LLM configured" gate lives below, AFTER the .json fast
+        # path — a memories.json export round-trips without any LLM, so it must
+        # import even on a box with no model configured.
 
         content = await read_upload_limited(file, MEMORY_IMPORT_MAX_BYTES, "Memory import")
         filename = file.filename or "upload"
@@ -416,6 +432,9 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
                         })
                 if direct:
                     return {"suggestions": direct, "filename": filename}
+
+        if not endpoint_url or not model:
+            raise HTTPException(400, "No LLM model configured. Set a default model in Settings.")
 
         # Truncate very long documents
         if len(text) > 15000:
@@ -480,7 +499,23 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
             lines = [_strip_list_prefix(l.strip()) for l in raw.splitlines() if l.strip() and len(l.strip()) > 5]
             return {"suggestions": [{"text": l, "category": "fact"} for l in lines[:20]], "filename": filename}
         except Exception as e:
-            logger.error(f"Memory import extraction failed: {e}")
+            # LLM unreachable (llama-swap/Ollama down or cold-load hang) must
+            # not make the whole import fail — fall back to a heuristic
+            # line-split over the document so the user still gets a reviewable
+            # list. The review UI lets them discard the noise.
+            logger.error(f"Memory import extraction failed, using heuristic fallback: {e}")
+            fallback = [
+                _strip_list_prefix(l.strip())
+                for l in text.splitlines()
+                if 10 <= len(l.strip()) <= 300
+            ]
+            fallback = [l for l in fallback if l][:20]
+            if fallback:
+                return {
+                    "suggestions": [{"text": l, "category": "fact"} for l in fallback],
+                    "filename": filename,
+                    "note": f"LLM extraction unavailable ({e}); showing raw lines for review",
+                }
             raise HTTPException(502, f"LLM extraction failed: {str(e)}")
 
     @router.post("/{memory_id}/pin")

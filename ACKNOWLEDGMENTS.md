@@ -46,6 +46,13 @@ The full license texts are kept in [`licenses/`](licenses/).
   Deep Research feature (`services/research/`, `src/research_handler.py`,
   `routes/research_routes.py`, `services/search/`). Full text in
   [`licenses/DeepResearch-Apache-2.0.txt`](licenses/DeepResearch-Apache-2.0.txt).
+- **[clippy.js](https://github.com/smore-inc/clippy.js)** by **Smore
+  (Fireplace, Inc)** — source of the converted MS-Agent character data used by
+  the Bonzi Buddy easter egg (`static/agents/bonzi/`: sprite sheet, animation
+  JSON, and sounds; the player in `static/js/bonzi.js` is original to Aegis).
+  Copyright © 2012 Fireplace, Inc. **MIT License** (code/data only — the
+  character art and sounds remain the property of their respective owners; see
+  [`licenses/clippyjs-MIT-LICENSE.txt`](licenses/clippyjs-MIT-LICENSE.txt)).
 
 ---
 

@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'aegis-v369';
+const CACHE_NAME = 'aegis-v375';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -15,6 +15,9 @@ const CACHE_NAME = 'aegis-v369';
 const PRECACHE = [
   '/',
   '/static/style.css',
+  '/static/fonts/Inter-Regular.woff2',
+  '/static/fonts/Inter-Medium.woff2',
+  '/static/fonts/Inter-SemiBold.woff2',
   '/static/app.js',
   '/static/js/storage.js',
   '/static/js/ui.js',
@@ -52,6 +55,7 @@ const PRECACHE = [
   '/static/js/tourAutoplay.js',
   '/static/js/theme.js',
   '/static/js/censor.js',
+  '/static/js/bonzi.js',
   '/static/js/settings.js',
   '/static/js/admin.js',
   '/static/js/init.js',
@@ -150,7 +154,9 @@ self.addEventListener('fetch', (e) => {
       caches.open(CACHE_NAME).then(async cache => {
         const cached = await cache.match(e.request, { ignoreSearch: true });
         const fetching = fetch(e.request).then(res => {
-          if (res && res.ok) cache.put(e.request, res.clone());
+          // Only full responses: cache.put() REJECTS on 206 partials, which
+          // audio/video elements request via Range headers.
+          if (res && res.status === 200) cache.put(e.request, res.clone());
           return res;
         }).catch(() => cached);
         return cached || fetching;

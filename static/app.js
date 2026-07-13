@@ -1711,8 +1711,10 @@ function initializeEventListeners() {
   
   const newMemoryInput = el('new-memory-input');
   if (newMemoryInput) {
-    newMemoryInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
+    // keydown, not the deprecated keypress — keypress never fires under some
+    // soft keyboards/automation, which made Enter-to-add silently dead.
+    newMemoryInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
         memoryModule.addNewMemory();
       }
     });

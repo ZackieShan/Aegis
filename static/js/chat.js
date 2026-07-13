@@ -409,6 +409,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       isStreaming = true;
       _setForegroundChatBusy(true);
       _startStallWatchdog();
+      try { window.bonziBuddy?.onThinking?.(); } catch (_) {}
     } else if (state === 'idle') {
       submitBtn.dataset.mode = '';
       delete submitBtn.dataset.phase;
@@ -416,6 +417,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       isStreaming = false;
       _setForegroundChatBusy(false);
       _stopStallWatchdog();
+      try { window.bonziBuddy?.onStreamIdle?.(); } catch (_) {}
       // Defer to global updater which handles mic/newchat/send modes
       if (window._updateSendBtnIcon) {
         setTimeout(window._updateSendBtnIcon, 50);
@@ -3137,6 +3139,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         if (addAITTSButton && accumulated && window.aiTTSManager?._provider !== 'disabled' && window.aiTTSManager?.available) {
           addAITTSButton(footerTarget, accumulated);
         }
+        try { window.bonziBuddy?.onReplyDone?.(accumulated); } catch (_) {}
         // TTS auto-play: streaming mode flushes remaining text, non-streaming enqueues full message
         if (accumulated && window.aiTTSManager && window.aiTTSManager.autoPlay) {
           const ttsBtn = holder.querySelector('.ai-tts-button');

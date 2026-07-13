@@ -137,6 +137,51 @@ def test_finish_job_writes_video_and_marks_done(tmp_path, monkeypatch):
     assert (tmp_path / fname).read_bytes() == payload
 
 
+# ── default video model preference (Settings → AI → Video Generation) ───────
+_DETECTED = [
+    {"model": "wan2.2-t2v", "endpoint": "llama-swap"},
+    {"model": "ltx2.3-video", "endpoint": "llama-swap"},
+]
+
+
+def test_pick_video_model_prefers_served_setting(monkeypatch):
+    import routes.video_routes as vr
+
+    monkeypatch.setattr(vr, "get_user_setting", lambda key, owner, default=None: "ltx2.3-video")
+    assert vr._pick_video_model("me", _DETECTED) == "ltx2.3-video"
+
+
+def test_pick_video_model_falls_back_when_setting_unserved(monkeypatch):
+    import routes.video_routes as vr
+
+    monkeypatch.setattr(vr, "get_user_setting", lambda key, owner, default=None: "hunyuan-t2v")
+    assert vr._pick_video_model("me", _DETECTED) == "wan2.2-t2v"
+
+
+def test_pick_video_model_defaults_to_first_detected(monkeypatch):
+    import routes.video_routes as vr
+
+    monkeypatch.setattr(vr, "get_user_setting", lambda key, owner, default=None: "")
+    assert vr._pick_video_model("me", _DETECTED) == "wan2.2-t2v"
+
+
+def test_pick_video_model_reads_global_fallback(monkeypatch):
+    import routes.video_routes as vr
+
+    # get_user_setting's default arg carries the global setting — a user with
+    # no per-user pref should land on the admin-configured global value.
+    monkeypatch.setattr(vr, "get_setting", lambda key, default="": "ltx2.3-video")
+    monkeypatch.setattr(vr, "get_user_setting", lambda key, owner, default=None: default)
+    assert vr._pick_video_model("me", _DETECTED) == "ltx2.3-video"
+
+
+def test_video_model_setting_registered():
+    from src.settings import DEFAULT_SETTINGS, _PER_USER_KEYS
+
+    assert DEFAULT_SETTINGS.get("video_model") == ""
+    assert "video_model" in _PER_USER_KEYS
+
+
 def test_finish_job_bad_b64_marks_error(tmp_path, monkeypatch):
     import src.video_generation as vg
     monkeypatch.setattr(vg, "GENERATED_IMAGES_DIR", str(tmp_path))

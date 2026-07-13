@@ -60,12 +60,12 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
         embedding_model = getattr(rag_manager, '_model', None) if rag_manager else None
         memory_vector = MemoryVectorStore(DATA_DIR, embedding_model=embedding_model)
         if memory_vector.healthy:
-            # Rebuild index from existing memories if empty
-            if memory_vector.count() == 0:
-                existing = memory_manager.load()
-                if existing:
-                    memory_vector.rebuild(existing)
-                    logger.info(f"Rebuilt memory vector index from {len(existing)} existing entries")
+            # Id-level backfill of any entries missing from the index. The old
+            # count()==0-only rebuild could never repair partial drift (e.g.
+            # 19 vectors indexed vs 106 saved memories after Chroma outages).
+            existing = memory_manager.load()
+            if existing:
+                memory_vector.reconcile(existing)
             logger.info("MemoryVectorStore initialized")
         else:
             # Keep the unhealthy object (do NOT reset to None): consumers gate on

@@ -12,8 +12,31 @@ from fastapi import APIRouter, HTTPException, Request
 
 from src import video_generation
 from src.auth_helpers import get_current_user, require_privilege
+from src.settings import get_setting, get_user_setting
 
 logger = logging.getLogger(__name__)
+
+
+def _pick_video_model(user, detected):
+    """Resolve the video model for a generate call that named none.
+
+    Prefers the `video_model` setting (per-user override, then global), but
+    only when that model is actually served — llama-swap 404s a request for
+    an unknown model id, so an unserved preference falls back to the first
+    detected model instead of failing the run.
+    """
+    served = [d.get("model") for d in detected if d.get("model")]
+    preferred = str(
+        get_user_setting("video_model", user, get_setting("video_model", "")) or ""
+    ).strip()
+    if preferred and preferred in served:
+        return preferred
+    if preferred:
+        logger.info(
+            "video_model setting %r is not served; falling back to %s",
+            preferred, served[0] if served else "none",
+        )
+    return served[0] if served else ""
 
 
 def _clamp(val, lo, hi, default):
@@ -45,7 +68,7 @@ def setup_video_routes() -> APIRouter:
             detected = video_generation.list_video_models(user)
             if not detected:
                 raise HTTPException(400, "No video model is served. Add a Wan/LTX entry to the engine config (llama-swap.yaml) first.")
-            model = detected[0]["model"]
+            model = _pick_video_model(user, detected)
 
         # Dimensions must suit video latents (multiples of 16); frames follow
         # the 4k+1 pattern both Wan and LTX are trained on.

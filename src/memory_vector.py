@@ -7,6 +7,8 @@ Stores pre-computed embeddings (ChromaDB does not manage embedding).
 """
 
 import logging
+import threading
+import time
 from typing import List, Dict, Optional
 
 from src.embedding_lanes import (
@@ -27,12 +29,17 @@ class MemoryVectorStore:
 
     COLLECTION_NAME = "aegis_memories"
 
+    REINIT_COOLDOWN_S = 30
+
     def __init__(self, data_dir: str, embedding_model=None):
         self._model = embedding_model
         self._collection = None
         self._lanes = []
         self._healthy = False
+        self._last_init_attempt = 0.0
+        self._reinit_lock = threading.Lock()
 
+        self._last_init_attempt = time.time()
         self._initialize()
 
     def _initialize(self):
@@ -56,8 +63,35 @@ class MemoryVectorStore:
         except Exception as e:
             logger.error(f"MemoryVectorStore init failed: {e}")
 
+    def _maybe_reinit(self):
+        """Kick off a background re-init when unhealthy (e.g. ChromaDB was down
+        at startup and has since come back). Previously _healthy=False was
+        permanent until an app restart, so every memory added afterwards was
+        never embedded. Non-blocking: callers never wait on the probe."""
+        if self._healthy:
+            return
+        if time.time() - self._last_init_attempt < self.REINIT_COOLDOWN_S:
+            return
+        if not self._reinit_lock.acquire(blocking=False):
+            return
+
+        def _bg():
+            try:
+                self._last_init_attempt = time.time()
+                self._initialize()
+                if self._healthy:
+                    logger.info("MemoryVectorStore recovered after re-init")
+            except Exception:
+                logger.debug("MemoryVectorStore re-init attempt failed", exc_info=True)
+            finally:
+                self._reinit_lock.release()
+
+        threading.Thread(target=_bg, daemon=True, name="memvec-reinit").start()
+
     @property
     def healthy(self) -> bool:
+        if not self._healthy:
+            self._maybe_reinit()
         return self._healthy
 
     def _embed(self, texts: List[str]) -> List[List[float]]:
@@ -184,6 +218,50 @@ class MemoryVectorStore:
             except Exception as e:
                 logger.warning("memory similarity search failed in %s lane: %s", lane.name, e)
         return None
+
+    def reconcile(self, memories: List[Dict]) -> int:
+        """Backfill lane collections with entries missing from the index.
+
+        Unlike rebuild() this never deletes and is cheap when the index is
+        already complete, so it is safe to run on every startup. Catches the
+        drift left behind by outages (e.g. index had 19 vectors while
+        memory.json held 106 entries) that the old count()==0-only rebuild
+        could never repair. Returns how many (id, lane) adds were made."""
+        if not self._healthy:
+            return 0
+        wanted = [
+            (m["id"], m["text"].strip())
+            for m in memories
+            if m.get("id") and isinstance(m.get("text"), str) and m["text"].strip()
+        ]
+        if not wanted:
+            return 0
+        added = 0
+        for lane in self._lanes:
+            try:
+                existing = set(lane.collection.get(include=[])["ids"])
+            except Exception as e:
+                logger.warning("memory reconcile: cannot list %s lane ids: %s", lane.name, e)
+                continue
+            missing = [(mid, text) for mid, text in wanted if mid not in existing]
+            for i in range(0, len(missing), 100):
+                batch = missing[i:i + 100]
+                ids = [b[0] for b in batch]
+                texts = [b[1] for b in batch]
+                try:
+                    lane.collection.add(
+                        ids=ids,
+                        embeddings=lane.encode(texts),
+                        documents=texts,
+                        metadatas=[{"source": "memory"}] * len(ids),
+                    )
+                    added += len(ids)
+                except Exception as e:
+                    logger.warning("memory reconcile failed in %s lane: %s", lane.name, e)
+                    break
+        if added:
+            logger.info("MemoryVectorStore reconciled: %d missing vectors backfilled", added)
+        return added
 
     def rebuild(self, memories: List[Dict]):
         """Rebuild the entire index from a list of memory entries.

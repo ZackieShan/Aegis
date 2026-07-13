@@ -31,7 +31,7 @@ function _styles() {
   .vm-orb.busy { opacity: .7; cursor: default; }
   @keyframes vm-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(229,72,77,.5); } 50% { box-shadow: 0 0 0 14px rgba(229,72,77,0); } }
   .vm-status { background: var(--panel,#120a1c); color: var(--fg,#cbb8ec); border: 1px solid var(--border,#3a2657);
-    border-radius: 10px; padding: 7px 12px; font-size: .78rem; max-width: 260px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+    border-radius: var(--radius-md, 12px); padding: 7px 12px; font-size: .78rem; max-width: 260px; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
   .vm-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: .72rem; opacity: .85; }
   .vm-row input { accent-color: var(--red,#b45de0); }
   .vm-close { background: none; border: none; color: var(--fg,#cbb8ec); opacity: .6; cursor: pointer; font-size: .72rem; }
