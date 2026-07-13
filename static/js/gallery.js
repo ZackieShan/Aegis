@@ -42,6 +42,7 @@ let _activeModel = null;
 let _activeAlbum = null;
 let _galleryCascaded = false;   // play the domino-in cascade once per open
 let _favoritesOnly = false;
+let _kind = null;              // media section: null (all) | 'photos' | 'generated' | 'videos'
 let _sort = 'recent';
 let _shuffleSeed = Math.floor(Math.random() * 2 ** 31);
 let _offset = 0;
@@ -100,6 +101,7 @@ async function _fetchLibrary(append) {
   if (_activeModel) params.set('model', _activeModel);
   if (_activeAlbum) params.set('album', _activeAlbum);
   if (_favoritesOnly) params.set('favorites', 'true');
+  if (_kind) params.set('kind', _kind);
   try {
     const res = await fetch(`${API_BASE}/api/gallery/library?${params}`, { credentials: 'same-origin' });
     const data = await res.json();
@@ -111,7 +113,7 @@ async function _fetchLibrary(append) {
     // Cache an "empty" verdict so the next open of an empty gallery doesn't
     // flash skeleton tiles before the real "No photos yet" message.
     try {
-      const _noFilters = !_search && !_activeTags.length && !_activeModel && !_activeAlbum && !_favoritesOnly;
+      const _noFilters = !_search && !_activeTags.length && !_activeModel && !_activeAlbum && !_favoritesOnly && !_kind;
       if (_noFilters) {
         if (_items.length === 0) localStorage.setItem('gallery-known-empty', '1');
         else localStorage.removeItem('gallery-known-empty');
@@ -238,6 +240,12 @@ async function _bulkUpload(filesOrItems, fallbackAlbumId) {
     _sort = 'recent';
     const sortSel = document.getElementById('gallery-sort');
     if (sortSel) sortSel.value = 'recent';
+  }
+  // Same intent for the section chips: a Generated/Videos filter would hide
+  // the fresh upload and make it look like the upload failed.
+  if (done - dupes - errors > 0 && _kind) {
+    _kind = null;
+    _renderAlbums();
   }
   _fetchLibrary(false);
   _fetchAlbums();
@@ -386,9 +394,13 @@ function _renderAlbums() {
     // Order: All, then the heart, then any active tag chips (to the right of
     // both), then the active-album chip. No favorites-within-an-album view, so
     // the heart is hidden while an album is active.
-    let fhtml = `<button class="gallery-chip${!_activeAlbum && !_favoritesOnly ? ' active' : ''}" data-album="">All</button>`;
+    let fhtml = `<button class="gallery-chip${!_activeAlbum && !_favoritesOnly && !_kind ? ' active' : ''}" data-album="">All</button>`;
     if (!_activeAlbum) {
       fhtml += `<button class="gallery-chip gallery-chip-fav${_favoritesOnly ? ' active' : ''}" data-fav="true" title="Favorites">&#9829;</button>`;
+      // Media sections: your own photos, AI-generated images, and videos.
+      fhtml += `<button class="gallery-chip gallery-chip-kind${_kind === 'photos' ? ' active' : ''}" data-kind="photos" title="Uploaded photos">Photos</button>`;
+      fhtml += `<button class="gallery-chip gallery-chip-kind${_kind === 'generated' ? ' active' : ''}" data-kind="generated" title="AI-generated images">Generated</button>`;
+      fhtml += `<button class="gallery-chip gallery-chip-kind${_kind === 'videos' ? ' active' : ''}" data-kind="videos" title="Videos (generated and uploaded)">Videos</button>`;
     }
     _activeTags.forEach(t => {
       fhtml += `<span class="gallery-chip gallery-chip-active-album" title="Filtered to tag — click × to remove"><span>#${_esc(t)}</span><button class="gallery-chip-clear" data-clear-tag="${_esc(t)}" aria-label="Remove tag filter">&times;</button></span>`;
@@ -404,6 +416,7 @@ function _renderAlbums() {
       _favoritesOnly = false;
       _activeAlbum = null;
       _activeTags = [];
+      _kind = null;
       _fetchLibrary(false);
       _renderAlbums();
     });
@@ -412,6 +425,15 @@ function _renderAlbums() {
       _activeAlbum = null;
       _fetchLibrary(false);
       _renderAlbums();
+    });
+    filterC.querySelectorAll('.gallery-chip-kind').forEach(btn => {
+      btn.addEventListener('click', () => {
+        // Radio semantics: clicking the active section returns to All.
+        _kind = (_kind === btn.dataset.kind) ? null : btn.dataset.kind;
+        _activeAlbum = null;
+        _fetchLibrary(false);
+        _renderAlbums();
+      });
     });
     filterC.querySelector('.gallery-chip-clear[data-clear="album"]')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -646,6 +668,9 @@ function _wireAlbumsEvents(scope) {
       }
       _activeAlbum = card.dataset.album || null;
       _favoritesOnly = false;
+      // The kind chips are hidden while an album is active, so a lingering
+      // section filter would silently (and un-clearably) empty the album.
+      _kind = null;
       // Hide any open photo detail before swapping context — otherwise the
       // previously-viewed photo lingers on top when the user lands back on
       // the Photos tab.
@@ -1196,7 +1221,15 @@ function _renderGrid() {
     </div>`;
 
   if (_items.length === 0) {
-    grid.innerHTML = uploadTile + '<div class="gallery-empty">No photos yet. Click Upload or drag-and-drop to get started!</div>';
+    // Filter-aware empty state: with a section/search/tag filter active the
+    // library may well have items — saying "No photos yet, click Upload" there
+    // is false and reads like a failed upload.
+    const _filtered = _kind || _favoritesOnly || _search || _activeTags.length || _activeAlbum;
+    const _kindNoun = ({ videos: 'videos', generated: 'generated images', photos: 'photos' })[_kind] || 'items';
+    const emptyMsg = _filtered
+      ? `No ${_kindNoun} match this view — try the All chip.`
+      : 'No photos yet. Click Upload or drag-and-drop to get started!';
+    grid.innerHTML = uploadTile + `<div class="gallery-empty">${emptyMsg}</div>`;
     _wireUploadTile();
     if (loadMore) loadMore.style.display = 'none';
     return;
@@ -2666,10 +2699,11 @@ export function openGallery() {
     // If we just emptied a FILTERED view (e.g. deleted every photo under a tag),
     // drop the filters and reload the full library so the user isn't stranded on
     // a blank screen with a now-empty tag/album/favorites filter still active.
-    if (_items.length === 0 && (_activeTags.length || _activeAlbum || _favoritesOnly)) {
+    if (_items.length === 0 && (_activeTags.length || _activeAlbum || _favoritesOnly || _kind)) {
       _activeTags = [];
       _activeAlbum = null;
       _favoritesOnly = false;
+      _kind = null;
       _fetchLibrary(false);
       _renderAlbums();
       return;
@@ -2864,6 +2898,7 @@ export async function openGalleryImage(imageId) {
   _activeModel = null;
   _activeAlbum = null;
   _favoritesOnly = false;
+  _kind = null;
   _sort = 'recent';
   const searchInput = document.getElementById('gallery-search');
   if (searchInput) searchInput.value = '';

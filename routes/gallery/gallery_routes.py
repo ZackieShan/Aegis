@@ -133,6 +133,17 @@ _IMAGE_MODEL_ID_RE = re.compile(
 # the OpenAI /v1/images/edits shape rather than a bare /images/inpaint route.
 _EDIT_MODEL_ID_RE = re.compile(r"inpaint|edit|fill", re.I)
 
+# Media types the gallery stores. Shared by the upload validator and the
+# library `kind` filter (Photos / Generated / Videos sections).
+VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
+IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
+
+# `model` values that mean "this row is a user upload, not AI-generated".
+# The upload handlers never write NULL: gallery uploads stamp "imported"
+# (below) and chat attachments stamp "chat-upload" (routes/upload_routes.py) —
+# so the Photos/Generated split must treat these sentinels as uploads.
+UPLOAD_MODEL_SENTINELS = ("imported", "chat-upload")
+
 
 def _endpoint_lists_image_model(ep) -> bool:
     try:
@@ -140,6 +151,24 @@ def _endpoint_lists_image_model(ep) -> bool:
     except Exception:
         cached = []
     return any(_IMAGE_MODEL_ID_RE.search(str(m) or "") for m in cached)
+
+
+def _default_gallery_model(ep) -> str:
+    """Best model id on `ep` for a full-image AI edit when the editor didn't
+    send one. llama-swap routes /v1/images/* by the payload's `model` field, so
+    omitting it 404s — never send a model-less request to a local multi-model
+    endpoint. Prefer an edit-capable model (instruction edits beat img2img for
+    'AI Edit'), else the first image-capable id. "" when the endpoint lists
+    none (single-purpose servers route fine without a model)."""
+    try:
+        cached = json.loads(getattr(ep, "cached_models", None) or "[]")
+    except Exception:
+        return ""
+    imgs = [str(m) for m in cached if m and _IMAGE_MODEL_ID_RE.search(str(m))]
+    for m in imgs:
+        if _EDIT_MODEL_ID_RE.search(m):
+            return m
+    return imgs[0] if imgs else ""
 
 
 def _visible_gallery_endpoints(db, owner: str | None):
@@ -270,8 +299,6 @@ def setup_gallery_routes() -> APIRouter:
             img_dir.mkdir(parents=True, exist_ok=True)
 
             ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
-            VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
-            IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
             if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
                 raise HTTPException(400, f"Unsupported file type: .{ext}")
             is_video = ext in VIDEO_EXTS
@@ -527,6 +554,14 @@ def setup_gallery_routes() -> APIRouter:
         if not ep:
             raise HTTPException(400, "No image generation endpoint configured. Serve an image model (e.g. qwen-image) and it will be picked up automatically.")
 
+        # The editor sends _model only when its picker holds an explicit
+        # selection; an empty picker used to produce a model-less payload that
+        # llama-swap couldn't route (404 → "failed to stylize"). Default it.
+        if not chosen_model:
+            chosen_model = _default_gallery_model(ep)
+            if chosen_model:
+                logger.info("style_transfer: no model selected — defaulting to %s", chosen_model)
+
         base_url = ep.base_url.rstrip("/")
         if not base_url.endswith("/v1"):
             base_url += "/v1"
@@ -587,7 +622,10 @@ def setup_gallery_routes() -> APIRouter:
                     img_data = data.get("data", [{}])[0].get("b64_json", "")
                     if img_data:
                         return {"image": img_data}
-                return {"error": f"Style transfer failed ({resp.status_code})"}
+                logger.error("style_transfer generations: status %s model=%r %s",
+                             resp.status_code, payload.get("model"), resp.text[:200])
+                hint = " — no routable model on the endpoint" if resp.status_code == 404 and not payload.get("model") else ""
+                return {"error": f"Style transfer failed ({resp.status_code}){hint}"}
         except Exception:
             logger.exception("style_transfer: request failed")
             return {"error": "Style transfer failed"}
@@ -622,6 +660,7 @@ def setup_gallery_routes() -> APIRouter:
         tag: Optional[str] = Query(None),
         model: Optional[str] = Query(None),
         album: Optional[str] = Query(None),
+        kind: Optional[str] = Query(None),
         favorites: bool = Query(False),
         sort: str = Query("recent"),
         seed: Optional[int] = Query(None),
@@ -687,6 +726,23 @@ def setup_gallery_routes() -> APIRouter:
             # Model filter
             if model:
                 q = q.filter(GalleryImage.model == model)
+
+            # Kind filter — the gallery's Photos / Generated / Videos sections.
+            # Videos = video file extension (generated or uploaded); Generated =
+            # a real AI model id is recorded; Photos = uploads (NULL/'' legacy
+            # rows plus the sentinel values the upload handlers stamp).
+            if kind in ("photos", "generated", "videos"):
+                from sqlalchemy import and_, or_ as _or2
+                _video_pred = _or2(*[GalleryImage.filename.ilike(f"%.{e}") for e in sorted(VIDEO_EXTS)])
+                _upload_pred = _or2(GalleryImage.model == None,  # noqa: E711
+                                    GalleryImage.model == "",
+                                    GalleryImage.model.in_(UPLOAD_MODEL_SENTINELS))
+                if kind == "videos":
+                    q = q.filter(_video_pred)
+                elif kind == "generated":
+                    q = q.filter(and_(~_upload_pred, ~_video_pred))
+                else:  # photos: uploads that aren't videos
+                    q = q.filter(and_(_upload_pred, ~_video_pred))
 
             # Album filter
             if album:
