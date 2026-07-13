@@ -125,6 +125,34 @@ capability's health:
 
 ![Control Center dashboard](docs/media/control-center.png)
 
+**Deep Research.** Ask a question, and an LLM-in-the-loop agent runs rounds of web
+search, reads the sources, and writes a cited report — here it's 16 rounds over 117
+URLs on a local model, ending in a magazine-style visual report:
+
+![Deep Research reading sources with a live progress graph](docs/media/research-progress.png)
+
+![The finished visual research report](docs/media/research-report.png)
+
+**Cookbook.** Scans your hardware and rates every model against it — fit, VRAM,
+context, and expected speed — then downloads and serves the one you pick:
+
+![Cookbook hardware scan and model fit table](docs/media/cookbook.png)
+
+**Brain.** Long-term memory the AI carries across chats — recall, edit, and curate
+what it knows about you, alongside teachable skills:
+
+![Brain panel with long-term memories](docs/media/brain.png)
+
+**Document editor.** A split-pane workspace: notes and docs on one side, the chat on
+the other, with versioning and markdown preview:
+
+![Document editor beside the chat](docs/media/doc-editor.png)
+
+**Code Canvas.** Describe what to build; the local coding model writes it into a
+runnable buffer you can edit with follow-up AI instructions:
+
+![Code Canvas with generated Python](docs/media/code-canvas.png)
+
 ## Quick Start
 
 New here? The **[Quickstart guide](QUICKSTART.md)** covers everything from
