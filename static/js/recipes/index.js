@@ -280,6 +280,8 @@ function _renderPalette() {
 // sensible default model so a recipe doesn't silently fake tool output.
 function _rankModel(m) {
   const s = String(m || '').toLowerCase();
+  // Non-text models (diffusion/video/vision/audio) can't drive a model node.
+  if (/image|video|diffusion|vision|-vl\b|embed|whisper|tts|\bwan[0-9.]|\bltx|flux|sdxl|stable-diffusion/.test(s)) return 0;
   if (/qwen|firefunction|command-?r|hermes/.test(s)) return 5;
   if (/gemma-?([3-9]|1[0-9])|gemma4/.test(s)) return 5;
   if (/llama-?[34]|mistral|mixtral/.test(s)) return 4;
@@ -290,9 +292,12 @@ function _rankModel(m) {
 function _bestModel() {
   const list = _blocks.models || [];
   if (!list.length) return '';
-  let best = list[0];
-  for (const m of list) if (_rankModel(m) > _rankModel(best)) best = m;
-  return best;
+  let best = '';
+  for (const m of list) {
+    if (_rankModel(m) <= 0) continue;
+    if (!best || _rankModel(m) > _rankModel(best)) best = m;
+  }
+  return best || list[0];
 }
 
 // ── Nodes ────────────────────────────────────────────────────────────────────

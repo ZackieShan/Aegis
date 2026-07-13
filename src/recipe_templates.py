@@ -22,6 +22,10 @@ from typing import Any, Callable, Dict, List, Optional, Set
 # matches what the editor would choose. Higher = better default.
 def rank_model(name: str) -> int:
     s = (name or "").lower()
+    # Non-text models (diffusion/video/vision/audio) can't drive a model node.
+    if re.search(r"image|video|diffusion|vision|-vl\b|embed|whisper|tts|"
+                 r"\bwan[0-9.]|\bltx|flux|sdxl|stable-diffusion", s):
+        return 0
     if re.search(r"qwen|firefunction|command-?r|hermes", s):
         return 5
     if re.search(r"gemma-?([3-9]|1[0-9])|gemma4", s):
@@ -36,9 +40,12 @@ def rank_model(name: str) -> int:
 
 
 def best_model(models: List[str]) -> Optional[str]:
-    """Pick the highest-ranked model; ties keep the earliest (picker order)."""
+    """Pick the highest-ranked text model; ties keep the earliest (picker
+    order). Rank-0 entries (image/video/vision models) are never picked."""
     best: Optional[str] = None
     for m in models or []:
+        if rank_model(m) <= 0:
+            continue
         if best is None or rank_model(m) > rank_model(best):
             best = m
     return best

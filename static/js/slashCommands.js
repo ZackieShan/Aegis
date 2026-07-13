@@ -14,6 +14,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import modelsModule from './models.js';
 import chatRenderer from './chatRenderer.js';
+import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
 import themeModule from './theme.js';
 import documentModule from './document.js';
@@ -418,6 +419,13 @@ function _slashFooter(msgEl) {
  * Typewriter-style reply that looks like a streamed AI response.
  * Returns a promise that resolves when the animation finishes.
  */
+// slashReply treats its argument as pre-rendered HTML. Commands that
+// compose their replies in markdown (bold, `code`, newlines) go through
+// this so the markup actually renders.
+function slashReplyMd(text) {
+  slashReply(markdownModule.processWithThinking(markdownModule.squashOutsideCode(String(text ?? ''))));
+}
+
 function typewriterReply(text, options = {}) {
   return new Promise(resolve => {
     const chatBox = document.getElementById('chat-history');
@@ -1443,12 +1451,12 @@ async function _cmdDoctor(args) {
       const r = await fetch(`/api/doctor/fix/${encodeURIComponent(id)}`, { method: 'POST', credentials: 'same-origin' });
       const d = await r.json().catch(() => ({}));
       if (d.ok) {
-        slashReply(`✓ Fixed **${id}**. ` + (d.restart ? 'Restart Aegis to apply it.' : 'It should work now.'));
+        slashReplyMd(`✓ Fixed **${id}**. ` + (d.restart ? 'Restart Aegis to apply it.' : 'It should work now.'));
       } else {
-        slashReply(`✗ Couldn't fix **${id}**: ${d.error || 'unknown error'}` + (d.output ? `\n\n<pre>${(d.output || '').replace(/</g, '&lt;')}</pre>` : ''));
+        slashReplyMd(`✗ Couldn't fix **${id}**: ${d.error || 'unknown error'}` + (d.output ? '\n\n```\n' + d.output + '\n```' : ''));
       }
     } catch (e) {
-      slashReply(`✗ Fix failed: ${e.message}`);
+      slashReplyMd(`✗ Fix failed: ${e.message}`);
     }
     return true;
   }
@@ -1462,15 +1470,15 @@ async function _cmdDoctor(args) {
       if (!c.ok && c.remedy) {
         if (c.remedy.auto) {
           const verb = c.remedy.kind === 'pip' ? `install \`${c.remedy.package}\`` : `set up \`${c.remedy.package}\``;
-          lines.push(`&nbsp;&nbsp;&nbsp;→ **Fixable:** type \`/doctor fix ${c.id}\` and I'll ${verb} (asks nothing else).`);
+          lines.push(`→ **Fixable:** type \`/doctor fix ${c.id}\` and I'll ${verb} (asks nothing else).`);
         }
-        if (c.remedy.hint) lines.push(`&nbsp;&nbsp;&nbsp;→ ${c.remedy.hint}`);
+        if (c.remedy.hint) lines.push(`→ ${c.remedy.hint}`);
       }
     });
     lines.push(data.problems ? `\n${data.problems} issue(s) found.` : '\nEverything looks healthy. 🎉');
-    slashReply(lines.join('\n'));
+    slashReplyMd(lines.join('\n'));
   } catch (e) {
-    slashReply(`System check failed: ${e.message}`);
+    slashReplyMd(`System check failed: ${e.message}`);
   }
   return true;
 }
@@ -1480,21 +1488,21 @@ async function _cmdDoctor(args) {
 async function _cmdBonzi(args) {
   const sub = (args[0] || '').toLowerCase();
   const b = window.bonziBuddy;
-  if (!b) { slashReply('Bonzi is unavailable — his module failed to load.'); return true; }
+  if (!b) { slashReplyMd('Bonzi is unavailable — his module failed to load.'); return true; }
   if (sub === 'fact') {
     if (!b.enabled) await b.enable();
-    if (!b.enabled) { slashReply('🦍 Bonzi couldn\'t load his sprite assets — check the browser console.'); return true; }
+    if (!b.enabled) { slashReplyMd('🦍 Bonzi couldn\'t load his sprite assets — check the browser console.'); return true; }
     b.tellFact();
-    slashReply('🦍 Bonzi has shared his wisdom.');
+    slashReplyMd('🦍 Bonzi has shared his wisdom.');
     return true;
   }
   if (sub === 'off' || (b.enabled && sub !== 'on')) {
     b.disable();
-    slashReply('🦍 Bonzi has returned to 1999. `/bonzi` brings him back.');
+    slashReplyMd('🦍 Bonzi has returned to 1999. `/bonzi` brings him back.');
   } else {
     await b.enable();
-    if (!b.enabled) { slashReply('🦍 Bonzi couldn\'t load his sprite assets — check the browser console.'); return true; }
-    slashReply('🦍 **Bonzi Buddy** has entered the chat. Click him, right-click him, drag him around — or send him home with `/bonzi off` (also in Settings → Appearance).');
+    if (!b.enabled) { slashReplyMd('🦍 Bonzi couldn\'t load his sprite assets — check the browser console.'); return true; }
+    slashReplyMd('🦍 **Bonzi Buddy** has entered the chat. Click him, right-click him, drag him around — or send him home with `/bonzi off` (also in Settings → Appearance).');
   }
   return true;
 }
@@ -1509,22 +1517,22 @@ async function _cmdTraces(args) {
     ]);
     const stats = await sres.json().catch(() => ({}));
     const data = await lres.json().catch(() => ({ traces: [] }));
-    if (!stats.enabled) { slashReply('Tracing is **off**. Enable it in Settings (or set `tracing_enabled`).'); return true; }
+    if (!stats.enabled) { slashReplyMd('Tracing is **off**. Enable it in Settings (or set `tracing_enabled`).'); return true; }
     const lines = [`**Observability** — ${stats.total || 0} calls recorded`];
     (stats.by_model || []).slice(0, 5).forEach(m => {
-      lines.push(`&nbsp;&nbsp;• \`${m.model}\` — ${m.calls} calls, avg ${m.avg_latency_ms ?? '—'} ms, ${m.output_tokens} out-tokens`);
+      lines.push(`• \`${m.model}\` — ${m.calls} calls, avg ${m.avg_latency_ms ?? '—'} ms, ${m.output_tokens} out-tokens`);
     });
     lines.push('\n**Recent:**');
     (data.traces || []).forEach(t => {
       const secs = t.latency_ms != null ? (t.latency_ms / 1000).toFixed(1) + 's' : '—';
       const tools = (t.tool_calls && t.tool_calls.length) ? ` · 🔧 ${t.tool_calls.map(x => String(x).split('__').pop()).join(', ')}` : '';
       const err = t.error ? ' · ⚠ ' + t.error : '';
-      lines.push(`&nbsp;&nbsp;\`${t.kind}\` ${t.model || '?'} — ${secs}${t.output_tokens ? ' · ' + t.output_tokens + ' tok' : ''}${tools}${err}`);
+      lines.push(`\`${t.kind}\` ${t.model || '?'} — ${secs}${t.output_tokens ? ' · ' + t.output_tokens + ' tok' : ''}${tools}${err}`);
     });
-    if (!(data.traces || []).length) lines.push('&nbsp;&nbsp;_(no calls yet — send a message)_');
-    slashReply(lines.join('\n'));
+    if (!(data.traces || []).length) lines.push('_(no calls yet — send a message)_');
+    slashReplyMd(lines.join('\n'));
   } catch (e) {
-    slashReply('Could not read traces: ' + e.message);
+    slashReplyMd('Could not read traces: ' + e.message);
   }
   return true;
 }
@@ -1539,26 +1547,26 @@ async function _cmdGraph(args) {
       const r = await fetch('/api/graph/build', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const d = await r.json().catch(() => ({}));
-      if (d.ok) slashReply(`Built the graph: **${d.triples_added}** new facts from ${d.processed} memories (total ${d.total}). Try \`/graph <term>\`.`);
-      else slashReply('Build failed: ' + (d.error || 'unknown'));
+      if (d.ok) slashReplyMd(`Built the graph: **${d.triples_added}** new facts from ${d.processed} memories (total ${d.total}). Try \`/graph <term>\`.`);
+      else slashReplyMd('Build failed: ' + (d.error || 'unknown'));
       return true;
     }
     if (sub === 'stats' || !args.length) {
       const d = await (await fetch('/api/graph/stats', { credentials: 'same-origin' })).json();
       const ent = (d.entities || []).slice(0, 8).map(e => `\`${e.name}\` (${e.count})`).join(', ');
-      slashReply(`**Knowledge graph** — ${d.total || 0} facts${ent ? '\n\nTop entities: ' + ent : ''}` +
+      slashReplyMd(`**Knowledge graph** — ${d.total || 0} facts${ent ? '\n\nTop entities: ' + ent : ''}` +
                  (d.total ? '\n\nRecall with `/graph <term>`.' : '\n\nEmpty — run `/graph build` to extract from your memories.'));
       return true;
     }
     const term = args.join(' ');
     const d = await (await fetch('/api/graph/query?q=' + encodeURIComponent(term), { credentials: 'same-origin' })).json();
     const facts = d.facts || [];
-    if (!facts.length) { slashReply(`No graph facts about \`${term}\`. (Run \`/graph build\` if you haven't.)`); return true; }
+    if (!facts.length) { slashReplyMd(`No graph facts about \`${term}\`. (Run \`/graph build\` if you haven't.)`); return true; }
     const lines = [`**Knowledge graph — ${term}**`];
-    facts.slice(0, 20).forEach(f => lines.push(`&nbsp;&nbsp;• ${f.subject} — *${f.relation}* — ${f.object}`));
-    slashReply(lines.join('\n'));
+    facts.slice(0, 20).forEach(f => lines.push(`• ${f.subject} — *${f.relation}* — ${f.object}`));
+    slashReplyMd(lines.join('\n'));
   } catch (e) {
-    slashReply('Graph memory error: ' + e.message);
+    slashReplyMd('Graph memory error: ' + e.message);
   }
   return true;
 }
@@ -1577,11 +1585,11 @@ async function _cmdCode(args) {
     const path = args.slice(1).join(' ').trim();
     if (!path) {
       const cur = localStorage.getItem('aegis_code_ws');
-      slashReply(cur ? `Coding workspace: \`${cur}\`` : 'No workspace set. Use `/code ws <path>` (point at a repo or folder).');
+      slashReplyMd(cur ? `Coding workspace: \`${cur}\`` : 'No workspace set. Use `/code ws <path>` (point at a repo or folder).');
       return true;
     }
     localStorage.setItem('aegis_code_ws', path);
-    slashReply(`Coding workspace set to \`${path}\`.\n\nNow describe an edit — e.g. \`/code add a --verbose flag to cli.py\`.`);
+    slashReplyMd(`Coding workspace set to \`${path}\`.\n\nNow describe an edit — e.g. \`/code add a --verbose flag to cli.py\`.`);
     return true;
   }
 
@@ -1589,13 +1597,13 @@ async function _cmdCode(args) {
     const m = args.slice(1).join(' ').trim();
     if (!m) {
       const cur = localStorage.getItem('aegis_code_model');
-      slashReply(cur ? `Preferred coding model: \`${cur}\` (reset with \`/code model auto\`).`
+      slashReplyMd(cur ? `Preferred coding model: \`${cur}\` (reset with \`/code model auto\`).`
                      : 'Model: **auto** (best local coder). Override with `/code model <name>`.');
       return true;
     }
-    if (m.toLowerCase() === 'auto') { localStorage.removeItem('aegis_code_model'); slashReply('Coding model set to **auto**.'); return true; }
+    if (m.toLowerCase() === 'auto') { localStorage.removeItem('aegis_code_model'); slashReplyMd('Coding model set to **auto**.'); return true; }
     localStorage.setItem('aegis_code_model', m);
-    slashReply(`Coding model set to \`${m}\`.`);
+    slashReplyMd(`Coding model set to \`${m}\`.`);
     return true;
   }
 
@@ -1603,7 +1611,7 @@ async function _cmdCode(args) {
     try {
       const d = await (await fetch('/api/code/status', { credentials: 'same-origin' })).json();
       if (!d.available) {
-        slashReply('Coding agent **unavailable** — Aider isn\'t installed.\n\nExpected an isolated venv at `engine/aider-venv`. Create it and `pip install aider-chat`.');
+        slashReplyMd('Coding agent **unavailable** — Aider isn\'t installed.\n\nExpected an isolated venv at `engine/aider-venv`. Create it and `pip install aider-chat`.');
         return true;
       }
       const ws = localStorage.getItem('aegis_code_ws');
@@ -1614,19 +1622,19 @@ async function _cmdCode(args) {
       lines.push(`Model: ${pref ? '`' + pref + '`' : '**auto** — ' + (top || 'no models found')}`);
       if (d.code_root) lines.push(`Fenced to: \`${d.code_root}\``);
       lines.push('\nDescribe an edit with `/code <task>`.');
-      slashReply(lines.join('\n'));
-    } catch (e) { slashReply('Coding status failed: ' + e.message); }
+      slashReplyMd(lines.join('\n'));
+    } catch (e) { slashReplyMd('Coding status failed: ' + e.message); }
     return true;
   }
 
   if (!args.length || sub === 'help') {
-    slashReply([
+    slashReplyMd([
       '**Coding agent** — drive Aider on your local model, scoped to a repo.',
       '',
-      '&nbsp;&nbsp;`/code ws <path>` — point at a repo or folder',
-      '&nbsp;&nbsp;`/code <task>` — describe an edit in plain English',
-      '&nbsp;&nbsp;`/code status` — what\'s available + current setup',
-      '&nbsp;&nbsp;`/code model <name>` — pin a model (default: best local coder)',
+      '`/code ws <path>` — point at a repo or folder',
+      '`/code <task>` — describe an edit in plain English',
+      '`/code status` — what\'s available + current setup',
+      '`/code model <name>` — pin a model (default: best local coder)',
       '',
       'Inside a git repo each edit auto-commits, so you can `git revert` anything.',
     ].join('\n'));
@@ -1634,7 +1642,7 @@ async function _cmdCode(args) {
   }
 
   const ws = localStorage.getItem('aegis_code_ws');
-  if (!ws) { slashReply('Set a workspace first: `/code ws <path>` (point at a repo or folder).'); return true; }
+  if (!ws) { slashReplyMd('Set a workspace first: `/code ws <path>` (point at a repo or folder).'); return true; }
   const task = args.join(' ').trim();
   const model = localStorage.getItem('aegis_code_model') || undefined;
   await typewriterReply(`Coding in \`${ws}\`… (running Aider on your local model — this can take a bit)`);
@@ -1645,7 +1653,7 @@ async function _cmdCode(args) {
       body: JSON.stringify({ workspace: ws, task, model }),
     });
     const d = await r.json().catch(() => ({}));
-    if (d.ok === false && d.error && !d.output) { slashReply('✗ ' + d.error); return true; }
+    if (d.ok === false && d.error && !d.output) { slashReplyMd('✗ ' + d.error); return true; }
     const lines = [];
     lines.push(d.ok ? `✓ **Done** in ${d.seconds}s on \`${d.model}\``
                     : `⚠ **Finished with issues** (${d.seconds}s, \`${d.model || '?'}\`)`);
@@ -1653,8 +1661,8 @@ async function _cmdCode(args) {
     else lines.push('_No files changed._');
     if (d.output) lines.push(`\n<pre>${String(d.output).replace(/</g, '&lt;').slice(0, 6000)}</pre>`);
     if (d.error && !d.ok) lines.push('\n' + d.error);
-    slashReply(lines.join('\n'));
-  } catch (e) { slashReply('Coding run failed: ' + e.message); }
+    slashReplyMd(lines.join('\n'));
+  } catch (e) { slashReplyMd('Coding run failed: ' + e.message); }
   return true;
 }
 
@@ -1670,30 +1678,30 @@ async function _cmdWiki(args) {
     try {
       const d = await (await fetch('/api/wiki', { credentials: 'same-origin' })).json();
       const wikis = d.wikis || [];
-      if (!wikis.length) { slashReply('No wikis yet. Generate one: `/wiki <path-to-repo>`.'); return true; }
+      if (!wikis.length) { slashReplyMd('No wikis yet. Generate one: `/wiki <path-to-repo>`.'); return true; }
       const lines = ['**Saved wikis**'];
-      wikis.forEach(w => lines.push(`&nbsp;&nbsp;• \`${w.name}\` — ${(w.size / 1024).toFixed(1)} KB  ·  \`/wiki show ${w.name}\``));
-      slashReply(lines.join('\n'));
-    } catch (e) { slashReply('Could not list wikis: ' + e.message); }
+      wikis.forEach(w => lines.push(`• \`${w.name}\` — ${(w.size / 1024).toFixed(1)} KB  ·  \`/wiki show ${w.name}\``));
+      slashReplyMd(lines.join('\n'));
+    } catch (e) { slashReplyMd('Could not list wikis: ' + e.message); }
     return true;
   }
 
   if (sub === 'show' && args[1]) {
     try {
       const d = await (await fetch('/api/wiki/' + encodeURIComponent(args[1]), { credentials: 'same-origin' })).json();
-      if (d.markdown) slashReply(d.markdown);
-      else slashReply('Wiki not found: `' + args[1] + '`');
-    } catch (e) { slashReply('Could not read wiki: ' + e.message); }
+      if (d.markdown) slashReplyMd(d.markdown);
+      else slashReplyMd('Wiki not found: `' + args[1] + '`');
+    } catch (e) { slashReplyMd('Could not read wiki: ' + e.message); }
     return true;
   }
 
   if (sub === 'help') {
-    slashReply([
+    slashReplyMd([
       '**Repo wiki** — turn a local repo into a structured markdown wiki.',
       '',
-      '&nbsp;&nbsp;`/wiki <path>` — scan a repo and write its wiki',
-      '&nbsp;&nbsp;`/wiki list` — saved wikis',
-      '&nbsp;&nbsp;`/wiki show <name>` — print a saved wiki',
+      '`/wiki <path>` — scan a repo and write its wiki',
+      '`/wiki list` — saved wikis',
+      '`/wiki show <name>` — print a saved wiki',
       '',
       'Runs on your local model — Overview, Architecture, and a Module guide.',
     ].join('\n'));
@@ -1709,9 +1717,9 @@ async function _cmdWiki(args) {
       body: JSON.stringify({ path }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!d.ok) { slashReply('✗ ' + (d.error || 'wiki generation failed')); return true; }
-    slashReply(`✓ **${d.name}** wiki — ${d.file_count} files, ${d.seconds}s on \`${d.model}\` (saved).\n\n---\n\n${d.markdown}`);
-  } catch (e) { slashReply('Wiki generation failed: ' + e.message); }
+    if (!d.ok) { slashReplyMd('✗ ' + (d.error || 'wiki generation failed')); return true; }
+    slashReplyMd(`✓ **${d.name}** wiki — ${d.file_count} files, ${d.seconds}s on \`${d.model}\` (saved).\n\n---\n\n${d.markdown}`);
+  } catch (e) { slashReplyMd('Wiki generation failed: ' + e.message); }
   return true;
 }
 
@@ -1728,15 +1736,15 @@ async function _cmdEngine(args) {
 
   if (sub === 'set' && args[1] && args[2]) {
     const model = args[1], ctx = parseInt(args[2], 10);
-    if (!ctx) { slashReply('Usage: `/engine set <model> <tokens>` — e.g. `/engine set qwen3-coder-30b 65536`'); return true; }
+    if (!ctx) { slashReplyMd('Usage: `/engine set <model> <tokens>` — e.g. `/engine set qwen3-coder-30b 65536`'); return true; }
     await typewriterReply(`Setting \`${model}\` context to ${_fmtCtx(ctx)}…`);
     try {
       const r = await fetch('/api/engine/tune', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, context: ctx }) });
       const d = await r.json().catch(() => ({}));
-      if (d.ok) slashReply(`✓ \`${model}\`: ${_fmtCtx(d.old_ctx)} → **${_fmtCtx(d.new_ctx)}** tokens. ${d.note || ''} (applies on the model's next load)`);
-      else slashReply('✗ ' + (d.error || d.detail || 'failed'));
-    } catch (e) { slashReply('Engine set failed: ' + e.message); }
+      if (d.ok) slashReplyMd(`✓ \`${model}\`: ${_fmtCtx(d.old_ctx)} → **${_fmtCtx(d.new_ctx)}** tokens. ${d.note || ''} (applies on the model's next load)`);
+      else slashReplyMd('✗ ' + (d.error || d.detail || 'failed'));
+    } catch (e) { slashReplyMd('Engine set failed: ' + e.message); }
     return true;
   }
 
@@ -1747,16 +1755,16 @@ async function _cmdEngine(args) {
       const r = await fetch('/api/engine/tune', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(model ? { model } : {}) });
       const d = await r.json().catch(() => ({}));
-      if (!d.ok) { slashReply('✗ ' + (d.error || 'tune failed')); return true; }
+      if (!d.ok) { slashReplyMd('✗ ' + (d.error || 'tune failed')); return true; }
       const lines = ['**Auto-tuned context sizes**'];
       (d.applied || []).forEach(a => {
-        if (a.new_ctx) lines.push(`&nbsp;&nbsp;✓ \`${a.model}\` — ${_fmtCtx(a.old_ctx)} → **${_fmtCtx(a.new_ctx)}**`);
-        else if (a.unchanged) lines.push(`&nbsp;&nbsp;• \`${a.model}\` — already ${_fmtCtx(a.unchanged)} (optimal)`);
-        else lines.push(`&nbsp;&nbsp;– \`${a.model}\` — skipped (${a.skipped || a.error})`);
+        if (a.new_ctx) lines.push(`✓ \`${a.model}\` — ${_fmtCtx(a.old_ctx)} → **${_fmtCtx(a.new_ctx)}**`);
+        else if (a.unchanged) lines.push(`• \`${a.model}\` — already ${_fmtCtx(a.unchanged)} (optimal)`);
+        else lines.push(`– \`${a.model}\` — skipped (${a.skipped || a.error})`);
       });
       lines.push('\n_Changes hot-reload on each model\'s next load — no restart._');
-      slashReply(lines.join('\n'));
-    } catch (e) { slashReply('Engine tune failed: ' + e.message); }
+      slashReplyMd(lines.join('\n'));
+    } catch (e) { slashReplyMd('Engine tune failed: ' + e.message); }
     return true;
   }
 
@@ -1767,21 +1775,21 @@ async function _cmdEngine(args) {
       const d = await r.json().catch(() => ({}));
       if (d.ok) {
         const what = (d.unloaded || []).length ? '`' + d.unloaded.join('`, `') + '`' : 'nothing was loaded';
-        slashReply(`✓ Engine VRAM freed (${what}). Models reload automatically on next use.`);
-      } else slashReply('✗ ' + (d.detail || d.error || 'unload failed'));
-    } catch (e) { slashReply('Engine unload failed: ' + e.message); }
+        slashReplyMd(`✓ Engine VRAM freed (${what}). Models reload automatically on next use.`);
+      } else slashReplyMd('✗ ' + (d.detail || d.error || 'unload failed'));
+    } catch (e) { slashReplyMd('Engine unload failed: ' + e.message); }
     return true;
   }
 
   if (sub === 'help') {
-    slashReply([
+    slashReplyMd([
       '**Engine tuner** — right-size each model\'s token window to your GPU automatically.',
       '',
-      '&nbsp;&nbsp;`/engine` — show VRAM + current vs recommended context',
-      '&nbsp;&nbsp;`/engine tune` — apply the recommended size to every model',
-      '&nbsp;&nbsp;`/engine tune <model>` — auto-tune just one',
-      '&nbsp;&nbsp;`/engine set <model> <tokens>` — set it yourself',
-      '&nbsp;&nbsp;`/engine unload` — free engine VRAM now (models reload on next use)',
+      '`/engine` — show VRAM + current vs recommended context',
+      '`/engine tune` — apply the recommended size to every model',
+      '`/engine tune <model>` — auto-tune just one',
+      '`/engine set <model> <tokens>` — set it yourself',
+      '`/engine unload` — free engine VRAM now (models reload on next use)',
       '',
       'No YAML editing, no restart — llama-swap hot-reloads the change.',
     ].join('\n'));
@@ -1800,30 +1808,30 @@ async function _cmdEngine(args) {
       resp = await fetch('/api/engine/status', { credentials: 'same-origin', signal: ctrl.signal });
     } finally { clearTimeout(timer); }
     const d = await resp.json();
-    if (d.detail || (d.models == null)) { slashReply('Engine tuner unavailable — is the llama-swap engine configured?'); return true; }
+    if (d.detail || (d.models == null)) { slashReplyMd('Engine tuner unavailable — is the llama-swap engine configured?'); return true; }
     const vram = d.vram_mb ? (d.vram_mb / 1024).toFixed(0) + ' GB VRAM' : 'no GPU detected';
     const ram = d.ram_mb ? ' · ' + (d.ram_mb / 1024).toFixed(0) + ' GB RAM' : '';
     const lines = [`**Engine context** — ${vram}${ram}`];
-    if ((d.running || []).length) lines.push(`&nbsp;&nbsp;_loaded now: \`${d.running.join('`, `')}\` — \`/engine unload\` frees the VRAM_`);
-    if (!(d.models || []).length) lines.push('&nbsp;&nbsp;_no tunable models in the llama-swap config_');
+    if ((d.running || []).length) lines.push(`_loaded now: \`${d.running.join('`, `')}\` — \`/engine unload\` frees the VRAM_`);
+    if (!(d.models || []).length) lines.push('_no tunable models in the llama-swap config_');
     (d.models || []).forEach(m => {
       const cur = _fmtCtx(m.current_ctx);
       if (m.recommended && m.recommended !== m.current_ctx) {
-        lines.push(`&nbsp;&nbsp;\`${m.model}\` — now **${cur}**, recommend **${_fmtCtx(m.recommended)}**${m.note ? ' (' + m.note + ')' : ''}`);
+        lines.push(`\`${m.model}\` — now **${cur}**, recommend **${_fmtCtx(m.recommended)}**${m.note ? ' (' + m.note + ')' : ''}`);
       } else if (m.recommended) {
-        lines.push(`&nbsp;&nbsp;\`${m.model}\` — **${cur}** ✓ optimal`);
+        lines.push(`\`${m.model}\` — **${cur}** ✓ optimal`);
       } else {
-        lines.push(`&nbsp;&nbsp;\`${m.model}\` — **${cur}** (${m.reason || 'manual'})`);
+        lines.push(`\`${m.model}\` — **${cur}** (${m.reason || 'manual'})`);
       }
     });
     const anyRec = (d.models || []).some(m => m.recommended && m.recommended !== m.current_ctx);
     if (anyRec) lines.push('\nApply all with `/engine tune`, or set one: `/engine set <model> <tokens>`.');
-    slashReply(lines.join('\n'));
+    slashReplyMd(lines.join('\n'));
   } catch (e) {
     if (e && e.name === 'AbortError') {
-      slashReply('Engine status timed out — the engine is probably busy loading a model. Try again in a moment.');
+      slashReplyMd('Engine status timed out — the engine is probably busy loading a model. Try again in a moment.');
     } else {
-      slashReply('Engine status failed: ' + e.message);
+      slashReplyMd('Engine status failed: ' + e.message);
     }
   }
   return true;
@@ -1838,13 +1846,13 @@ async function _cmdEngine(args) {
 async function _cmdVideo(args) {
   const sub = (args[0] || '').toLowerCase();
   if (!args.length || sub === 'help') {
-    slashReply([
+    slashReplyMd([
       '**Local video generation** — runs a served Wan/LTX model through the engine.',
       '',
-      '&nbsp;&nbsp;`/video <prompt>` — generate a short clip (auto-picks a video model)',
-      '&nbsp;&nbsp;`/video model=<id> <prompt>` — choose the model',
-      '&nbsp;&nbsp;`/video frames=33 fps=16 size=832x480 <prompt>` — tune length/rate/size',
-      '&nbsp;&nbsp;`/video models` — list served video models',
+      '`/video <prompt>` — generate a short clip (auto-picks a video model)',
+      '`/video model=<id> <prompt>` — choose the model',
+      '`/video frames=33 fps=16 size=832x480 <prompt>` — tune length/rate/size',
+      '`/video models` — list served video models',
       '',
       'Clips take a few minutes and are saved to the Gallery automatically.',
     ].join('\n'));
@@ -1855,10 +1863,10 @@ async function _cmdVideo(args) {
       const r = await fetch('/api/video/models', { credentials: 'same-origin' });
       const d = await r.json();
       const list = d.models || [];
-      slashReply(list.length
-        ? '**Served video models**\n' + list.map(m => `&nbsp;&nbsp;\`${m.model}\`` + (m.endpoint ? ' — ' + m.endpoint : '')).join('\n')
+      slashReplyMd(list.length
+        ? '**Served video models**\n' + list.map(m => `\`${m.model}\`` + (m.endpoint ? ' — ' + m.endpoint : '')).join('\n')
         : 'No video models served yet — add a Wan/LTX entry to the engine config (`engine/llama-swap.yaml`).');
-    } catch (e) { slashReply('Video models lookup failed: ' + e.message); }
+    } catch (e) { slashReplyMd('Video models lookup failed: ' + e.message); }
     return true;
   }
 
@@ -1870,7 +1878,7 @@ async function _cmdVideo(args) {
     if (m && !rest.length) opts[m[1].toLowerCase()] = m[2]; else rest.push(a);
   }
   const prompt = rest.join(' ').trim();
-  if (!prompt) { slashReply('Usage: `/video <prompt>` — e.g. `/video a red fox running through snow`'); return true; }
+  if (!prompt) { slashReplyMd('Usage: `/video <prompt>` — e.g. `/video a red fox running through snow`'); return true; }
 
   const payload = { prompt };
   if (opts.model) payload.model = opts.model;
@@ -1887,11 +1895,11 @@ async function _cmdVideo(args) {
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) { slashReply('✗ ' + (d.detail || d.error || `Video start failed (${r.status})`)); return true; }
+    if (!r.ok) { slashReplyMd('✗ ' + (d.detail || d.error || `Video start failed (${r.status})`)); return true; }
     jobId = d.job_id; model = d.model;
-  } catch (e) { slashReply('Video start failed: ' + e.message); return true; }
+  } catch (e) { slashReplyMd('Video start failed: ' + e.message); return true; }
 
-  const rep = slashReply(`🎬 Generating video with \`${model}\` — a clip takes a few minutes (the first run also loads the model). It lands here and in the Gallery.`);
+  const rep = slashReplyMd(`🎬 Generating video with \`${model}\` — a clip takes a few minutes (the first run also loads the model). It lands here and in the Gallery.`);
   const status = document.createElement('div');
   status.className = 'generated-image-caption';
   status.textContent = 'Queued…';
@@ -6788,21 +6796,21 @@ const COMMANDS = {
     alias: ['recon', 'intel'],
     category: 'Toolboxes',
     help: 'Scope a message to the OSINT toolbox: /osint <query>',
-    handler: () => (slashReply('Type `/osint <query>` — e.g. `/osint whois example.com`. That one message runs with the OSINT tools.'), true),
+    handler: () => (slashReplyMd('Type `/osint <query>` — e.g. `/osint whois example.com`. That one message runs with the OSINT tools.'), true),
     usage: '/osint whois example.com'
   },
   market: {
     alias: ['stocks', 'crypto'],
     category: 'Toolboxes',
     help: 'Scope a message to the Market toolbox: /market <query>',
-    handler: () => (slashReply('Type `/market <query>` — e.g. `/market how is gold doing`. That one message runs with the Market tools.'), true),
+    handler: () => (slashReplyMd('Type `/market <query>` — e.g. `/market how is gold doing`. That one message runs with the Market tools.'), true),
     usage: '/market how is gold doing'
   },
   troubleshoot: {
     alias: ['net', 'diagnose'],
     category: 'Toolboxes',
     help: 'Scope a message to the Troubleshoot toolbox: /troubleshoot <query>',
-    handler: () => (slashReply('Type `/troubleshoot <query>` — e.g. `/troubleshoot is example.com reachable`. That one message runs with the network tools.'), true),
+    handler: () => (slashReplyMd('Type `/troubleshoot <query>` — e.g. `/troubleshoot is example.com reachable`. That one message runs with the network tools.'), true),
     usage: '/troubleshoot is example.com reachable'
   },
   mcp: {

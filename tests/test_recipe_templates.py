@@ -25,6 +25,23 @@ def test_best_model_prefers_capable_tool_caller():
     assert rt.best_model([]) is None
 
 
+def test_best_model_never_picks_non_text_models():
+    # A real llama-swap install serves image/video/vision models alongside the
+    # LLMs; picker order lists qwen-image before qwen3-coder-30b, and a bare
+    # substring rank ("qwen") used to make the image model win every template.
+    served = [
+        "ltx2.3-video", "qwen-image", "qwen-image-edit",
+        "qwen-image-rapid-nsfw", "qwen-vl", "qwen3-coder-30b",
+        "supergemma4-26b", "wan2.2-t2v",
+    ]
+    assert rt.best_model(served) == "qwen3-coder-30b"
+    for m in ("qwen-image", "ltx2.3-video", "qwen-vl", "wan2.2-t2v",
+              "stable-diffusion-3.5-medium", "flux-schnell"):
+        assert rt.rank_model(m) == 0, m
+    # An install serving ONLY non-text models has no usable default.
+    assert rt.best_model(["qwen-image", "wan2.2-t2v"]) is None
+
+
 def test_all_generated_recipes_validate():
     recipes = rt.generate_starters(["qwen3-coder-30b"], ALL_TOOLS)
     assert recipes, "expected starters with a model + all toolboxes"

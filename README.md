@@ -108,6 +108,12 @@ chat, coding, vision, image, and video models — with a live "loaded in VRAM" i
 
 ![Model picker with locally served models](docs/media/models.png)
 
+**The engine tunes itself.** `/engine` reads each GGUF's real KV-cache cost and your
+free VRAM, then right-sizes every model's context window — no YAML editing, no
+restart; llama-swap hot-reloads the change:
+
+![The /engine command showing per-model context recommendations](docs/media/engine.png)
+
 **Image generation and gallery.** Generated media lands in the Gallery next to your
 own photos (this lighthouse came out of a served Qwen-Image model in 8 steps):
 
@@ -152,6 +158,27 @@ the other, with versioning and markdown preview:
 runnable buffer you can edit with follow-up AI instructions:
 
 ![Code Canvas with generated Python](docs/media/code-canvas.png)
+
+**Recipes — visual multi-agent workflows.** Wire tools and models together on a node
+canvas, with branch and loop logic. This built-in starter feeds two market tools into
+three investor personas — value, growth, and contrarian — then a portfolio manager
+weighs their takes; every node runs on your local model:
+
+![Recipes node editor with the analyst-debate starter](docs/media/recipes.png)
+
+**Eighteen built-in themes** (plus a full customizer — colors, fonts, background
+effects). Aurora is the default; there's a Y2K "millennium core", a terminal green,
+paper, cyberpunk, and more:
+
+![Theme picker with the built-in themes](docs/media/themes.png)
+
+**And… Bonzi.** Flip one switch in Settings → Appearance (or type `/bonzi`) and a
+certain purple gorilla from 1999 moves back in — animations, sounds, terrible jokes
+and all, resurrected locally from the original MS-Agent sprite data:
+
+<p align="center">
+  <img src="docs/media/bonzi.gif" alt="Bonzi Buddy easter egg — the purple gorilla waves hello next to the chat box" width="500">
+</p>
 
 ## Quick Start
 
