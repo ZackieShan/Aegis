@@ -12,6 +12,10 @@
   <a href="ROADMAP.md">Roadmap</a>
 </p>
 
+<p align="center">
+  <img src="docs/media/chat.png" alt="Aegis — chatting with a local model, with its thinking process and token speed" width="900">
+</p>
+
 ---
 
 ## What Aegis is
@@ -81,6 +85,45 @@ hardware you own. See the [roadmap](ROADMAP.md).
 > The local inference binaries (llama.cpp, llama-swap, Node/Playwright, Aider,
 > stable-diffusion.cpp) install with one command — see the
 > **[engine setup guide](docs/engine-setup.md)**.
+
+## Screenshots
+
+Everything below was produced on a single machine (one RTX 4090) by models Aegis
+serves locally — including the video and the photos.
+
+**Local video generation.** `/video a small red fox trotting through fresh snow at
+golden hour` submits an async job to the engine (Wan 2.2 or LTX-2.3 under
+stable-diffusion.cpp) and streams progress right into the chat until the clip lands:
+
+![Generating a video from chat with /video](docs/media/video-flow.gif)
+
+The finished clip — LTX-2.3, rendered locally in about three minutes, audio included:
+
+<p align="center">
+  <img src="docs/media/sample-video.gif" alt="A locally generated video clip of a fox in snow at golden hour" width="560">
+</p>
+
+**One engine, many models.** The picker lists every GGUF served through llama-swap —
+chat, coding, vision, image, and video models — with a live "loaded in VRAM" indicator:
+
+![Model picker with locally served models](docs/media/models.png)
+
+**Image generation and gallery.** Generated media lands in the Gallery next to your
+own photos (this lighthouse came out of a served Qwen-Image model in 8 steps):
+
+![Gallery with generated image and video](docs/media/gallery.png)
+
+![Photo detail view](docs/media/image-detail.png)
+
+**AI image editor.** Masked inpaint, background removal, upscaling, and full-image
+instruction edits, driven by a served edit model (Qwen-Image-Edit):
+
+![Image editor with AI inpaint panel](docs/media/editor.png)
+
+**Control Center.** One dashboard for the engine, VRAM, models, agents, and every
+capability's health:
+
+![Control Center dashboard](docs/media/control-center.png)
 
 ## Quick Start
 
