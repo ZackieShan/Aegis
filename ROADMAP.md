@@ -17,6 +17,14 @@ The local-first foundation is in place:
   and repo → wiki.
 - **Media & voice** — local image generation (stable-diffusion.cpp), on-device Whisper
   speech-to-text + text-to-speech with a hands-free Voice Mode, and a local vision model.
+- **Media studio** — local video generation up to ~10s (Wan 2.2, LTX-2 with audio),
+  image-to-video from any gallery still, style presets (one locked look — model + prompt
+  affixes + seed + LoRAs — across every generation), an `/image` command with real
+  seeds/steps/negative prompts, and a model library that auto-tags everything on disk by
+  capability and best use.
+- **Two media engines** — stable-diffusion.cpp for speed and **ComfyUI** as a sibling
+  engine for what it can't run (GGUF video merges, FLUX.2-klein, Lightning LoRAs), with
+  VRAM handed back after every job so both share one GPU.
 - **Knowledge & operability** — knowledge-graph memory, local call tracing, a Control
   Center dashboard, and a Doctor self-check with guarded one-click fixes.
 
@@ -37,6 +45,19 @@ The local-first foundation is in place:
 - **Slimmer agent prompts** — tool schemas, skills, memory, and instructions can eat a small
   model's context before the request even starts; tighter prompts and smaller default tool
   sets for 4k/8k/16k windows.
+
+### Richer local media
+- **Character animation (video-to-video)** — Wan 2.2 Animate through the ComfyUI engine:
+  drive a character image with a reference video (pose transfer), the biggest unlock left
+  in the media stack.
+- **Image-to-video on more pipelines** — LTX-2 image conditioning through ComfyUI so the
+  fast merges can animate stills too, not just the sd.cpp path.
+- **Two-stage LTX upscaling** — render small, latent-upscale 2x, refine; the upscaler
+  models are already part of the standard companion set.
+- **One-click serve** — the Media Studio library already shows which models on disk aren't
+  served; add a button that writes the engine config entry for you.
+- **Video editing steps** — trim, frame-interpolate, and ESRGAN-upscale clips from the
+  Gallery, reusing the upscalers the library already tags.
 
 ### Deepen the loop
 - **Code Canvas everywhere** — "open in canvas" on chat code blocks, and auto-open when the
