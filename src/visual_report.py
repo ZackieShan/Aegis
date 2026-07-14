@@ -20,14 +20,67 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup
+from bs4.element import PreformattedString
 
 from src.research_utils import strip_thinking
 from urllib.parse import urlparse
 
 import markdown
-import nh3
+
+try:
+    import nh3
+except ImportError as _nh3_exc:
+    # Windows Smart App Control / WDAC can block nh3's Rust extension
+    # ("DLL load failed while importing nh3: An Application Control policy
+    # has blocked this file"). Degrade to the pure-Python BeautifulSoup
+    # sanitizer below instead of losing the whole visual-report feature.
+    nh3 = None
+    _NH3_IMPORT_ERROR = str(_nh3_exc)
+else:
+    _NH3_IMPORT_ERROR = None
 
 logger = logging.getLogger(__name__)
+
+if nh3 is None:
+    logger.warning(
+        "nh3 unavailable (%s); visual reports will use the pure-Python "
+        "fallback sanitizer.",
+        _NH3_IMPORT_ERROR,
+    )
+
+# Snapshot of nh3's default allowlists (nh3 0.3.5) so the fallback path keeps
+# the same policy when nh3 itself can't be imported.
+_DEFAULT_ALLOWED_TAGS = {
+    "a", "abbr", "acronym", "area", "article", "aside", "b", "bdi", "bdo",
+    "blockquote", "br", "caption", "center", "cite", "code", "col",
+    "colgroup", "data", "dd", "del", "details", "dfn", "div", "dl", "dt",
+    "em", "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5",
+    "h6", "header", "hgroup", "hr", "i", "img", "ins", "kbd", "li", "map",
+    "mark", "nav", "ol", "p", "pre", "q", "rp", "rt", "rtc", "ruby", "s",
+    "samp", "small", "span", "strike", "strong", "sub", "summary", "sup",
+    "table", "tbody", "td", "th", "thead", "time", "tr", "tt", "u", "ul",
+    "var", "wbr",
+}
+_DEFAULT_ALLOWED_ATTRS = {
+    "a": {"href", "hreflang"},
+    "bdo": {"dir"},
+    "blockquote": {"cite"},
+    "col": {"align", "char", "charoff", "span"},
+    "colgroup": {"align", "char", "charoff", "span"},
+    "del": {"cite", "datetime"},
+    "hr": {"align", "size", "width"},
+    "img": {"align", "alt", "height", "src", "width"},
+    "ins": {"cite", "datetime"},
+    "ol": {"start"},
+    "q": {"cite"},
+    "table": {"align", "char", "charoff", "summary"},
+    "tbody": {"align", "char", "charoff"},
+    "td": {"align", "char", "charoff", "colspan", "headers", "rowspan"},
+    "tfoot": {"align", "char", "charoff"},
+    "th": {"align", "char", "charoff", "colspan", "headers", "rowspan", "scope"},
+    "thead": {"align", "char", "charoff"},
+    "tr": {"align", "char", "charoff"},
+}
 
 # Tags/attributes permitted in rendered research-report HTML. Starts from nh3's
 # safe defaults (which drop <script>, inline event handlers, and javascript:
@@ -35,8 +88,12 @@ logger = logging.getLogger(__name__)
 # collapsible raw-findings block (<details>/<summary>), heading anchors for the
 # table of contents (id), codehilite classes, table alignment, and the
 # target/rel that _md_to_html puts on external links.
-_REPORT_ALLOWED_TAGS = set(nh3.ALLOWED_TAGS) | {"details", "summary"}
-_REPORT_ALLOWED_ATTRS = {k: set(v) for k, v in nh3.ALLOWED_ATTRIBUTES.items()}
+if nh3 is not None:
+    _REPORT_ALLOWED_TAGS = set(nh3.ALLOWED_TAGS) | {"details", "summary"}
+    _REPORT_ALLOWED_ATTRS = {k: set(v) for k, v in nh3.ALLOWED_ATTRIBUTES.items()}
+else:
+    _REPORT_ALLOWED_TAGS = set(_DEFAULT_ALLOWED_TAGS) | {"details", "summary"}
+    _REPORT_ALLOWED_ATTRS = {k: set(v) for k, v in _DEFAULT_ALLOWED_ATTRS.items()}
 for _h in ("h1", "h2", "h3", "h4", "h5", "h6"):
     _REPORT_ALLOWED_ATTRS.setdefault(_h, set()).add("id")
 for _t in ("span", "code", "pre", "div", "table", "td", "th"):
@@ -49,6 +106,62 @@ _REPORT_ALLOWED_ATTRS.setdefault("img", set()).update({"src", "alt", "title"})
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Fallback-sanitizer policy (only used when nh3 is unavailable). Reports only
+# ever emit web/mail links, so the scheme allowlist is narrower than nh3's.
+# Scheme-less URLs (relative paths, #fragment anchors) are always allowed.
+_FALLBACK_URL_SCHEMES = {"http", "https", "mailto"}
+_URL_ATTRS = {"href", "src", "cite"}
+# Active/metadata content whose text must not leak into the page; everything
+# else disallowed is unwrapped so its inner text survives.
+_FALLBACK_DROP_WITH_CONTENT = [
+    "script", "style", "iframe", "object", "embed", "template", "noscript",
+    "svg", "math", "form", "select", "option", "textarea", "button", "input",
+    "frame", "frameset", "link", "meta", "base", "head", "title",
+]
+
+
+def _fallback_url_allowed(url) -> bool:
+    if not isinstance(url, str):
+        return False
+    # Browsers skip ASCII control chars/whitespace when resolving a scheme
+    # ("java\tscript:" runs), so strip them before deciding one is present.
+    compact = re.sub(r"[\x00-\x20]+", "", url)
+    scheme, sep, _ = compact.partition(":")
+    if not sep:
+        return True
+    # A ":" after "/", "?" or "#" is path/query material, not a scheme.
+    if re.search(r"[/?#]", scheme):
+        return True
+    return scheme.lower() in _FALLBACK_URL_SCHEMES
+
+
+def _fallback_clean(html_str: str) -> str:
+    """Allowlist-sanitize report HTML without nh3 (pure Python, via bs4).
+
+    Used when the nh3 extension DLL can't load (e.g. Windows Smart App
+    Control / WDAC blocking nh3.pyd). Enforces the same tag/attribute
+    allowlist as the nh3 path: drops active content, comments, inline event
+    handlers, and javascript:/data: URLs.
+    """
+    soup = BeautifulSoup(html_str, "html.parser")
+    for node in soup.find_all(string=lambda s: isinstance(s, PreformattedString)):
+        node.extract()  # comments, CDATA, doctypes, processing instructions
+    for el in soup.find_all(_FALLBACK_DROP_WITH_CONTENT):
+        el.decompose()
+    for el in soup.find_all(True):
+        if el.name not in _REPORT_ALLOWED_TAGS:
+            el.unwrap()
+            continue
+        allowed = _REPORT_ALLOWED_ATTRS.get(el.name, set())
+        for attr in list(el.attrs):
+            value = el.attrs[attr]
+            if attr not in allowed:
+                del el.attrs[attr]
+            elif attr in _URL_ATTRS and not _fallback_url_allowed(value):
+                del el.attrs[attr]
+    return str(soup)
+
 
 def _autolink_urls(md_text: str) -> str:
     """Convert bare URLs to markdown links before processing.
@@ -91,12 +204,15 @@ def _md_to_html(md_text: str) -> str:
     )
     # Sanitize: report content is untrusted and the report CSP allows inline
     # scripts, so strip active content while keeping the formatting above.
-    result = nh3.clean(
-        result,
-        tags=_REPORT_ALLOWED_TAGS,
-        attributes=_REPORT_ALLOWED_ATTRS,
-        link_rel=None,
-    )
+    if nh3 is not None:
+        result = nh3.clean(
+            result,
+            tags=_REPORT_ALLOWED_TAGS,
+            attributes=_REPORT_ALLOWED_ATTRS,
+            link_rel=None,
+        )
+    else:
+        result = _fallback_clean(result)
     return result
 
 

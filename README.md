@@ -66,7 +66,14 @@ hardware you own. See the [roadmap](ROADMAP.md).
 - **Repo → Wiki** (`/wiki`) — turn any local repo into a structured Overview / Architecture / module guide.
 
 **Create & converse**
-- **Image generation** — fully local diffusion, OpenAI-images-compatible.
+- **Image generation** (`/image`) — fully local diffusion with seeds, steps, and negative prompts.
+- **Video generation** (`/video`) — local clips up to ~10s, with audio on LTX-2 models; **animate
+  any gallery still** into a clip (`/video image=last` or the Gallery's Animate button).
+- **Style presets** (`/style`) — lock a model + prompt affixes + seed + LoRAs into a named
+  look that applies to every image and video generation.
+- **Media Studio** — every model on disk auto-tagged by capability and best use, with rescan.
+- **Two media engines** — stable-diffusion.cpp for speed, **ComfyUI** for workflows it can't
+  run (GGUF video merges, FLUX.2-klein, Lightning LoRAs); VRAM is handed back after every job.
 - **Voice** — on-device speech-to-text + text-to-speech, plus a hands-free **Voice Mode**:
   speak, the agent acts, it reads the reply back.
 - **Vision** — a local vision model for images and screenshots.
@@ -125,6 +132,38 @@ own photos (this lighthouse came out of a served Qwen-Image model in 8 steps):
 instruction edits, driven by a served edit model (Qwen-Image-Edit):
 
 ![Image editor with AI inpaint panel](docs/media/editor.png)
+
+**Style presets — one look across every prompt.** A preset locks a model, prompt
+affixes, a seed, and LoRAs into a named style; activate it once and every image and
+video generation matches. Different prompts, same preset, below — nothing else shared:
+
+![Two different prompts rendered with one locked style preset](docs/media/style-presets.png)
+
+**Image-to-video.** Any still in the Gallery grows an **Animate** button (or
+`/video image=last <motion prompt>` from chat) — the clip starts on your exact
+image, first frame pixel-for-pixel:
+
+<p align="center">
+  <img src="docs/media/image-to-video.gif" alt="A generated still animated into a video clip — she lowers the umbrella as rain falls" width="400">
+</p>
+
+**Media Studio.** Every served model plus every file in the drop folder,
+auto-tagged by capability and what it's best used for — with a rescan button and a
+filter that searches the tags (try "extraction" or "translation"). Style presets are
+managed in the same panel:
+
+![Media Studio model library with capability tags](docs/media/media-studio.png)
+
+![Media Studio style preset editor](docs/media/media-studio-styles.png)
+
+**A second engine: ComfyUI.** Aegis drives ComfyUI workflows over its local API as
+a sibling to llama-swap — GGUF video models via custom nodes, joint audio+video
+LTX-2 merges, FLUX.2-klein, and 4-step Lightning LoRAs — and frees its VRAM after
+every job so both engines share one GPU. This klein render took 40 seconds locally:
+
+<p align="center">
+  <img src="docs/media/comfy-klein.png" alt="A photoreal cabin interior generated locally by FLUX.2-klein through the ComfyUI engine" width="560">
+</p>
 
 **Control Center.** One dashboard for the engine, VRAM, models, agents, and every
 capability's health:

@@ -40576,3 +40576,69 @@ body.theme-frosted .modal {
      drag math in bonzi.js stays 1:1 under the scale */
   .bonzi-container { transform: scale(0.8); transform-origin: top left; }
 }
+
+/* ── Media Studio (Settings tab): style presets + tagged model library ────── */
+.media-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg, var(--panel));
+  color: var(--fg);
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.media-input:focus { outline: 1px solid var(--accent, var(--red)); }
+.media-style-item, .media-model-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.media-style-item.active-style {
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, var(--red)) 7%, transparent);
+}
+.media-model-name { font-weight: 600; word-break: break-all; }
+.media-model-sub { opacity: 0.6; font-size: 11px; }
+.media-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  margin: 1px 3px 1px 0;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 40%, transparent);
+  color: color-mix(in srgb, var(--fg) 88%, transparent);
+  background: color-mix(in srgb, var(--accent, var(--red)) 10%, transparent);
+}
+.media-chip.best {
+  border-color: color-mix(in srgb, var(--ok, #4caf7d) 45%, transparent);
+  background: color-mix(in srgb, var(--ok, #4caf7d) 9%, transparent);
+}
+.media-chip.warn-chip {
+  border-color: color-mix(in srgb, var(--warn, #e0a050) 50%, transparent);
+  background: color-mix(in srgb, var(--warn, #e0a050) 10%, transparent);
+}
+.media-group-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.55;
+  margin: 12px 0 6px;
+}
+.media-badge-served {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ok, #4caf7d) 18%, transparent);
+  color: var(--fg);
+  white-space: nowrap;
+}
+/* .settings-col's display:flex would defeat the hidden attribute */
+#media-style-form[hidden] { display: none !important; }

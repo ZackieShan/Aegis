@@ -834,6 +834,21 @@ from routes.video_routes import setup_video_routes
 app.include_router(setup_video_routes())
 logger.info("Video generation routes initialized")
 
+# Style presets — saved generation styles shared by the image + video paths
+from routes.styles_routes import setup_styles_routes
+app.include_router(setup_styles_routes())
+logger.info("Style preset routes initialized")
+
+# Direct image generation (drives /image) — same engine as the agent tool
+from routes.image_gen_routes import setup_image_gen_routes
+app.include_router(setup_image_gen_routes())
+logger.info("Image generation routes initialized")
+
+# Model registry — tagged inventory of served aliases + the models/ folder
+from routes.model_registry_routes import setup_model_registry_routes
+app.include_router(setup_model_registry_routes())
+logger.info("Model registry routes initialized")
+
 # Code canvas — generate + inline AI-edit a code buffer (local coder)
 from routes.canvas_routes import setup_canvas_routes
 app.include_router(setup_canvas_routes())

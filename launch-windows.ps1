@@ -280,7 +280,33 @@ if ($swapProc) {
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopSwap | Out-Null
 }
 
-# 6e. Put Aegis's portable Node (engine/node) on PATH so npx-based MCP servers
+# 6e. ComfyUI is the second media engine (workflows sd.cpp can't run: GGUF
+#     video models via custom nodes, Wan-Animate, node ecosystem). Optional —
+#     started only when engine/comfyui exists. Aegis frees its VRAM after
+#     each job so it coexists with llama-swap on one GPU.
+$comfyProc = $null
+$comfyDir  = Join-Path $engineDir "comfyui"
+$comfyMain = Join-Path $comfyDir "ComfyUI\main.py"
+$comfyPy   = Join-Path $comfyDir "venv\Scripts\python.exe"
+$comfyPort = if ($env:COMFYUI_PORT) { $env:COMFYUI_PORT } else { "8188" }
+if (Test-PortOpen "127.0.0.1" $comfyPort) {
+    Write-Host ("ComfyUI already running on 127.0.0.1:{0} - using it." -f $comfyPort) -ForegroundColor Cyan
+} elseif ((Test-Path $comfyMain) -and (Test-Path $comfyPy)) {
+    $comfyLog = Join-Path $env:TEMP "aegis-comfyui.log"
+    Write-Step ("Starting ComfyUI in the background on 127.0.0.1:{0}" -f $comfyPort)
+    $comfyProc = Start-Process -FilePath $comfyPy `
+        -ArgumentList @($comfyMain, "--listen", "127.0.0.1", "--port", $comfyPort, "--disable-auto-launch") `
+        -WorkingDirectory (Split-Path $comfyMain) `
+        -WindowStyle Hidden -RedirectStandardOutput $comfyLog -RedirectStandardError "$comfyLog.err" -PassThru
+} else {
+    Write-Host ("ComfyUI not found at {0} - skipping (sd-server still handles image/video)." -f $comfyDir) -ForegroundColor DarkGray
+}
+if ($comfyProc) {
+    $stopComfy = { if ($comfyProc -and -not $comfyProc.HasExited) { try { $comfyProc.Kill() } catch {} } }.GetNewClosure()
+    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopComfy | Out-Null
+}
+
+# 6f. Put Aegis's portable Node (engine/node) on PATH so npx-based MCP servers
 #     (the built-in Browser / Playwright) and the doctor's npx check find it,
 #     without requiring a system-wide Node install. Skipped cleanly if absent.
 $nodeDir = Join-Path $engineDir "node"

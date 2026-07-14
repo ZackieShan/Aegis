@@ -1850,11 +1850,15 @@ async function _cmdVideo(args) {
       '**Local video generation** — runs a served Wan/LTX model through the engine.',
       '',
       '`/video <prompt>` — generate a short clip (auto-picks a video model)',
+      '`/video length=5s <prompt>` — clip length in seconds (up to ~10s; default 2s)',
+      '`/video image=last <prompt>` — animate your newest gallery image (or `image=<gallery-id>`)',
       '`/video model=<id> <prompt>` — choose the model',
-      '`/video frames=33 fps=16 size=832x480 <prompt>` — tune length/rate/size',
+      '`/video style=<name> <prompt>` — apply a saved style preset (see `/style`)',
+      '`/video frames=81 fps=24 size=832x480 seed=42 <prompt>` — fine-grained knobs',
       '`/video models` — list served video models',
       '',
-      'Clips take a few minutes and are saved to the Gallery automatically.',
+      'LTX renders at 24fps with audio; Wan at 16fps. Render time grows with length —',
+      'keep long clips at modest sizes (e.g. 512x288). Saved to the Gallery automatically.',
     ].join('\n'));
     return true;
   }
@@ -1874,21 +1878,25 @@ async function _cmdVideo(args) {
   const opts = {};
   const rest = [];
   for (const a of args) {
-    const m = /^(model|frames|fps|size|seed)=(.+)$/i.exec(a);
+    const m = /^(model|frames|fps|size|seed|length|seconds|duration|style|image|from)=(.+)$/i.exec(a);
     if (m && !rest.length) opts[m[1].toLowerCase()] = m[2]; else rest.push(a);
   }
   const prompt = rest.join(' ').trim();
-  if (!prompt) { slashReplyMd('Usage: `/video <prompt>` — e.g. `/video a red fox running through snow`'); return true; }
+  if (!prompt) { slashReplyMd('Usage: `/video <prompt>` — e.g. `/video length=5s a red fox running through snow` or `/video image=last the camera slowly pans`'); return true; }
 
   const payload = { prompt };
   if (opts.model) payload.model = opts.model;
+  if (opts.style) payload.style = opts.style;
+  if (opts.image || opts.from) payload.image_id = opts.image || opts.from;
   if (opts.frames) payload.video_frames = parseInt(opts.frames, 10);
   if (opts.fps) payload.fps = parseInt(opts.fps, 10);
   if (opts.seed) payload.seed = parseInt(opts.seed, 10);
+  const lengthOpt = opts.length || opts.seconds || opts.duration;
+  if (lengthOpt && !opts.frames) payload.duration = parseFloat(lengthOpt); // "5s" parses as 5
   const sizeMatch = opts.size && /^(\d+)x(\d+)$/i.exec(opts.size);
   if (sizeMatch) { payload.width = parseInt(sizeMatch[1], 10); payload.height = parseInt(sizeMatch[2], 10); }
 
-  let jobId, model;
+  let jobId, model, clipInfo = '';
   try {
     const r = await fetch('/api/video/generate', {
       method: 'POST', credentials: 'same-origin',
@@ -1897,9 +1905,11 @@ async function _cmdVideo(args) {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { slashReplyMd('✗ ' + (d.detail || d.error || `Video start failed (${r.status})`)); return true; }
     jobId = d.job_id; model = d.model;
+    if (d.duration_s) clipInfo = ` (${d.duration_s}s · ${d.video_frames}f @ ${d.fps}fps)`;
+    if (d.animating_image) clipInfo += ' · from your image';
   } catch (e) { slashReplyMd('Video start failed: ' + e.message); return true; }
 
-  const rep = slashReplyMd(`🎬 Generating video with \`${model}\` — a clip takes a few minutes (the first run also loads the model). It lands here and in the Gallery.`);
+  const rep = slashReplyMd(`🎬 Generating video with \`${model}\`${clipInfo} — longer clips take longer to render (the first run also loads the model). It lands here and in the Gallery.`);
   const status = document.createElement('div');
   status.className = 'generated-image-caption';
   status.textContent = 'Queued…';
@@ -1962,6 +1972,234 @@ async function _cmdVideo(args) {
       status.textContent = `${d.status === 'running' ? 'Rendering' : 'Queued'}… ${mm}:${ss}${pct}`;
     }
   }, 4000);
+  return true;
+}
+
+async function _cmdImage(args) {
+  const sub = (args[0] || '').toLowerCase();
+  if (!args.length || sub === 'help') {
+    slashReplyMd([
+      '**Local image generation** — runs a served diffusion model through the engine.',
+      '',
+      '`/image <prompt>` — generate with the configured default model',
+      '`/image model=<id> <prompt>` — pick a model (e.g. `qwen-image`, `qwen-image-rapid-nsfw`)',
+      '`/image style=<name> <prompt>` — apply a saved style preset (see `/style`)',
+      '`/image seed=42 steps=20 cfg=4 size=768x768 <prompt>` — reproducibility knobs',
+      '`/image negative=blurry,_low_quality <prompt>` — negative prompt (use `_` for spaces)',
+      '`/image models` — list served image models',
+      '',
+      'Same `seed=` + same prompt + same model reproduces an image exactly; keep the seed',
+      'and vary the prompt to hold one look across shots. Saved to the Gallery automatically.',
+    ].join('\n'));
+    return true;
+  }
+  if (sub === 'models') {
+    try {
+      const r = await fetch('/api/image/models', { credentials: 'same-origin' });
+      const d = await r.json();
+      const list = d.models || [];
+      slashReplyMd(list.length
+        ? '**Served image models**\n' + list.map(m => `\`${m.model}\`` + (m.endpoint ? ' — ' + m.endpoint : '')).join('\n')
+        : 'No image models served yet — serve one (e.g. qwen-image) via the engine config (`engine/llama-swap.yaml`).');
+    } catch (e) { slashReplyMd('Image models lookup failed: ' + e.message); }
+    return true;
+  }
+
+  // Leading key=value options, then the prompt.
+  const opts = {};
+  const rest = [];
+  for (const a of args) {
+    const m = /^(model|size|quality|seed|steps|cfg|negative|style)=(.+)$/i.exec(a);
+    if (m && !rest.length) opts[m[1].toLowerCase()] = m[2]; else rest.push(a);
+  }
+  const prompt = rest.join(' ').trim();
+  if (!prompt) { slashReplyMd('Usage: `/image <prompt>` — e.g. `/image style=neon-noir a rainy alley at night`'); return true; }
+
+  const payload = { prompt };
+  if (opts.model) payload.model = opts.model;
+  if (opts.style) payload.style = opts.style;
+  if (opts.size) payload.size = opts.size;
+  if (opts.quality) payload.quality = opts.quality;
+  if (opts.seed) payload.seed = parseInt(opts.seed, 10);
+  if (opts.steps) payload.steps = parseInt(opts.steps, 10);
+  if (opts.cfg) payload.cfg_scale = parseFloat(opts.cfg);
+  if (opts.negative) payload.negative_prompt = opts.negative.replace(/_/g, ' ');
+
+  const rep = slashReplyMd(`🎨 Generating image${opts.model ? ' with \`' + opts.model + '\`' : ''}…`);
+  const status = document.createElement('div');
+  status.className = 'generated-image-caption';
+  status.textContent = 'Rendering… (the first run also loads the model)';
+  rep.body.appendChild(status);
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    if (!document.contains(rep.el)) { clearInterval(timer); return; }
+    const s = Math.round((Date.now() - t0) / 1000);
+    status.textContent = `Rendering… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }, 1000);
+
+  let d;
+  try {
+    const r = await fetch('/api/image/generate', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    d = await r.json().catch(() => ({}));
+    if (!r.ok && !d.error) d.error = d.detail || `Image generation failed (${r.status})`;
+  } catch (e) { d = { error: e.message }; }
+  clearInterval(timer);
+
+  if (!d || d.error || !d.image_url) {
+    status.textContent = '✗ ' + ((d && (d.error || d.detail)) || 'Image generation failed');
+    return true;
+  }
+  status.remove();
+  const img = document.createElement('img');
+  img.className = 'generated-image';
+  img.src = d.image_url;
+  img.alt = prompt;
+  rep.body.appendChild(img);
+  const bits = [
+    d.image_model, d.image_size,
+    d.image_style ? 'style: ' + d.image_style : '',
+    d.image_seed !== undefined ? 'seed: ' + d.image_seed : '',
+  ].filter(Boolean).join(' · ');
+  const cap = document.createElement('div');
+  cap.className = 'generated-image-caption';
+  cap.textContent = `${prompt} — ${bits} — saved to Gallery`;
+  rep.body.appendChild(cap);
+  uiModule.scrollHistory();
+  // The bubble's initial persist only captured the placeholder — record the
+  // outcome so a reloaded transcript shows the image, not "Rendering…".
+  _persistMsg('assistant', `![${prompt.replace(/[\[\]]/g, '')}](${d.image_url})\n\n${bits} — saved to Gallery`, { source: 'slash' });
+  return true;
+}
+
+async function _cmdStyle(args) {
+  const sub = (args[0] || '').toLowerCase();
+
+  const fetchStyles = async () => {
+    const r = await fetch('/api/styles', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  };
+
+  if (!sub || sub === 'list' || sub === 'help') {
+    if (sub === 'help' || !sub) {
+      try {
+        const d = await fetchStyles();
+        const lines = (d.styles || []).map(s => {
+          const on = d.active === s.id ? '● ' : '';
+          const bits = [s.image_model, s.video_model, s.seed !== undefined ? 'seed ' + s.seed : '']
+            .filter(Boolean).join(', ');
+          return `${on}\`${s.id}\`${bits ? ' — ' + bits : ''}${s.description ? ' — ' + s.description : ''}`;
+        });
+        slashReplyMd([
+          '**Style presets** — one saved look applied across image + video generations.',
+          '',
+          lines.length ? lines.join('\n') : '_No styles saved yet._',
+          '',
+          '`/style use <name>` — activate (applies to chat gens, `/image`, `/video`)',
+          '`/style off` — deactivate · `/style show <name>` · `/style delete <name>`',
+          '`/style save <name> prefix="oil painting, warm light" negative="blurry" seed=42 model=qwen-image video=ltx2.3-video steps=20 cfg=4 size=768x768 lora=<file>:0.8`',
+          '',
+          'Locking a `seed` (plus prefix/suffix + one model) is what keeps the look consistent',
+          'across different prompts.',
+        ].join('\n'));
+      } catch (e) { slashReplyMd('Styles lookup failed: ' + e.message); }
+      return true;
+    }
+  }
+
+  if (sub === 'use') {
+    const name = (args[1] || '').trim();
+    if (!name) { slashReplyMd('Usage: `/style use <name>`'); return true; }
+    try {
+      const r = await fetch('/api/styles/active', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+      });
+      const d = await r.json().catch(() => ({}));
+      slashReplyMd(r.ok
+        ? `✓ Style \`${d.active}\` is now active — every image/video generation applies it until \`/style off\`.`
+        : '✗ ' + (d.detail || 'Could not activate style'));
+    } catch (e) { slashReplyMd('✗ ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'off' || sub === 'none' || sub === 'clear') {
+    try {
+      await fetch('/api/styles/active', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '' }),
+      });
+      slashReplyMd('✓ Style deactivated — generations run unstyled again.');
+    } catch (e) { slashReplyMd('✗ ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'show') {
+    const name = (args[1] || '').trim().toLowerCase();
+    try {
+      const d = await fetchStyles();
+      const s = (d.styles || []).find(x => x.id === name || (x.name || '').toLowerCase() === name);
+      if (!s) { slashReplyMd(`No style named \`${name}\`.`); return true; }
+      const rows = ['image_model', 'video_model', 'prompt_prefix', 'prompt_suffix', 'negative_prompt', 'seed', 'steps', 'cfg_scale', 'size']
+        .filter(k => s[k] !== undefined)
+        .map(k => `${k}: \`${s[k]}\``);
+      if (s.loras && s.loras.length) rows.push('loras: ' + s.loras.map(l => `\`${l.name}:${l.weight}\``).join(' '));
+      slashReplyMd(`**${s.name}** (\`${s.id}\`)${d.active === s.id ? ' — active' : ''}\n` + rows.join('\n'));
+    } catch (e) { slashReplyMd('✗ ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'delete' || sub === 'rm' || sub === 'remove') {
+    const name = (args[1] || '').trim();
+    if (!name) { slashReplyMd('Usage: `/style delete <name>`'); return true; }
+    try {
+      const r = await fetch('/api/styles/' + encodeURIComponent(name), { method: 'DELETE', credentials: 'same-origin' });
+      const d = await r.json().catch(() => ({}));
+      slashReplyMd(r.ok ? `✓ Deleted style \`${name}\`.` : '✗ ' + (d.detail || 'Delete failed'));
+    } catch (e) { slashReplyMd('✗ ' + e.message); }
+    return true;
+  }
+
+  if (sub === 'save' || sub === 'add' || sub === 'set') {
+    const name = (args[1] || '').replace(/"/g, '').trim();
+    if (!name) { slashReplyMd('Usage: `/style save <name> prefix="..." seed=42 model=... lora=name:0.8`'); return true; }
+    const tail = args.slice(2).join(' ');
+    const kv = {}; const loras = [];
+    const rx = /(\w+)=("([^"]*)"|\S+)/g; let m;
+    while ((m = rx.exec(tail))) {
+      const key = m[1].toLowerCase();
+      const val = m[3] !== undefined ? m[3] : m[2];
+      if (key === 'lora') loras.push(val); else kv[key] = val;
+    }
+    const body = {
+      name,
+      description: kv.description || kv.desc,
+      image_model: kv.model || kv.image_model,
+      video_model: kv.video || kv.video_model,
+      prompt_prefix: kv.prefix, prompt_suffix: kv.suffix,
+      negative_prompt: kv.negative || kv.negative_prompt,
+      seed: kv.seed, steps: kv.steps,
+      cfg_scale: kv.cfg || kv.cfg_scale, size: kv.size,
+    };
+    if (loras.length) body.loras = loras;
+    Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+    try {
+      const r = await fetch('/api/styles', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      slashReplyMd(r.ok
+        ? `✓ Saved style \`${d.style.id}\` — try \`/style use ${d.style.id}\` or \`/image style=${d.style.id} <prompt>\`.`
+        : '✗ ' + (d.detail || 'Save failed'));
+    } catch (e) { slashReplyMd('✗ ' + e.message); }
+    return true;
+  }
+
+  slashReplyMd('Unknown subcommand. `/style` lists presets and shows usage.');
   return true;
 }
 
@@ -6715,9 +6953,23 @@ const COMMANDS = {
   video: {
     alias: ['vid', 'videogen'],
     category: 'Tools',
-    help: 'Generate video locally on a served Wan/LTX model: /video <prompt>, /video models',
+    help: 'Generate video locally on a served Wan/LTX model: /video length=5s <prompt>, /video models',
     handler: (args) => _cmdVideo(args),
     usage: '/video <prompt>'
+  },
+  image: {
+    alias: ['img', 'imagine'],
+    category: 'Tools',
+    help: 'Generate an image locally: /image <prompt> (model=/style=/seed=/steps= opts), /image models',
+    handler: (args) => _cmdImage(args),
+    usage: '/image <prompt>'
+  },
+  style: {
+    alias: ['styles', 'preset'],
+    category: 'Tools',
+    help: 'Style presets — one saved look for all image/video gens: /style, /style use <name>, /style save <name> …',
+    handler: (args) => _cmdStyle(args),
+    usage: '/style'
   },
   control: {
     alias: ['hub', 'dashboard', 'capabilities'],

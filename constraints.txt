@@ -97,7 +97,9 @@ mmh3==5.2.1
 mpmath==1.3.0
 multidict==6.7.1
 networkx==3.6.1
-nh3==0.3.6
+# nh3 pinned to 0.3.5: Windows Smart App Control blocks 0.3.6's nh3.pyd
+# (Code Integrity event 3077, "Application Control policy has blocked this file").
+nh3==0.3.5
 niquests==3.20.1
 numba==0.66.0
 numpy==2.4.6

@@ -115,6 +115,7 @@ async def start_video_job(
     video_frames: int = 33,
     fps: int = 16,
     seed: int = -1,
+    init_image_b64: Optional[str] = None,
 ) -> str:
     """Submit a generation to sd-server and return a local job id.
 
@@ -136,6 +137,10 @@ async def start_video_job(
         "seed": int(seed),
         "output_format": "webm",
     }
+    if init_image_b64:
+        # First-frame conditioning (image-to-video). sd-server resizes the
+        # reference to the requested dimensions itself.
+        payload["init_image"] = init_image_b64
 
     # The submit itself is quick, but llama-swap holds the request while it
     # cold-loads the model (two Wan experts + a CPU text encoder ≈ minutes).
@@ -169,6 +174,7 @@ async def start_video_job(
         "height": int(height),
         "video_frames": int(video_frames),
         "fps": int(fps),
+        "has_init_image": bool(init_image_b64),
         "created": time.time(),
         "remote_id": remote_id,
         "video_url": None,
@@ -249,14 +255,21 @@ async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
 
 def _finish_job(job: Dict[str, Any], result: Dict[str, Any]) -> None:
     ext = str(result.get("output_format") or "webm").lower()
-    if ext not in ("webm", "mp4", "avi", "webp"):
-        ext = "webm"
     try:
         raw = base64.b64decode(result["b64_json"])
     except Exception:
         job["error"] = "Video server returned undecodable data"
         job["status"] = "error"
         return
+    finish_job_bytes(job, raw, ext)
+
+
+def finish_job_bytes(job: Dict[str, Any], raw: bytes, ext: str) -> None:
+    """Write a finished clip to disk + gallery and mark the job done. Shared
+    by the sd-server poller (b64 results) and the ComfyUI runner (raw bytes)."""
+    ext = str(ext or "webm").lower()
+    if ext not in ("webm", "mp4", "avi", "webp"):
+        ext = "webm"
 
     out_dir = Path(GENERATED_IMAGES_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)

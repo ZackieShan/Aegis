@@ -911,7 +911,120 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 IMAGE_MODEL_AUTODETECT = ("qwen-image", "gpt-image-1.5", "gpt-image-1", "dall-e-3")
 
 
-async def do_generate_image(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
+async def _sdcpp_native_image(
+    base_url: str,
+    model_id: str,
+    headers: dict,
+    *,
+    prompt: str,
+    negative_prompt: str,
+    width: int,
+    height: int,
+    seed: Optional[int],
+    steps: Optional[int],
+    cfg_scale: Optional[float],
+    budget_s: float = 600.0,
+) -> Dict:
+    """Generate one image on sd-server's native async API (submit + poll via
+    llama-swap's /upstream/ passthrough — the same surface video uses).
+
+    This exists because sd-server's OpenAI /v1/images/generations route
+    ignores seed/steps/cfg extras (and caches, so identical requests return
+    identical bytes); the native route honors them, reports progress, and the
+    2s polling keeps llama-swap's idle TTL from killing a long render.
+
+    Returns {"b64_json": ...} on success, {"error": ...} on a hard failure,
+    or {"fallback": True} when the native surface isn't available so the
+    caller can revert to the OpenAI route (minus the extras).
+    """
+    import time
+    import httpx
+    from src.video_generation import _MODEL_ID_RE
+
+    root = base_url[:-3].rstrip("/") if base_url.endswith("/v1") else base_url.rstrip("/")
+    if not _MODEL_ID_RE.fullmatch(model_id):
+        return {"fallback": True}
+
+    payload: Dict = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt or "",
+        "width": int(width),
+        "height": int(height),
+        "seed": int(seed) if seed is not None else -1,
+        "output_format": "png",
+    }
+    sample: Dict = {}
+    if steps:
+        sample["sample_steps"] = int(steps)
+    if cfg_scale is not None:
+        sample["guidance"] = {"txt_cfg": float(cfg_scale)}
+    if sample:
+        payload["sample_params"] = sample
+
+    submit_url = f"{root}/upstream/{model_id}/sdcpp/v1/img_gen"
+    # The submit response is fast, but llama-swap holds it while cold-loading
+    # the model — the read timeout must cover a 20GB load from disk.
+    timeout = httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(submit_url, json=payload, headers=headers)
+            if r.status_code == 404:
+                return {"fallback": True}
+            if r.status_code not in (200, 202):
+                return {"error": f"Image generation failed ({r.status_code}): {r.text[:300]}"}
+            try:
+                envelope = r.json()
+            except Exception:
+                return {"fallback": True}
+            remote_id = str(envelope.get("id") or "")
+            if not remote_id:
+                return {"fallback": True}
+            poll_path = str(envelope.get("poll_url") or f"/sdcpp/v1/jobs/{remote_id}")
+            if poll_path.startswith(("http://", "https://")):
+                # Poll through llama-swap, not sd-server's ephemeral port.
+                from urllib.parse import urlsplit
+                poll_path = urlsplit(poll_path).path or f"/sdcpp/v1/jobs/{remote_id}"
+            poll_url = f"{root}/upstream/{model_id}{poll_path}"
+
+            deadline = time.time() + budget_s
+            while time.time() < deadline:
+                pr = await client.get(poll_url, headers=headers)
+                if pr.status_code in (404, 410):
+                    # 410 = the server reaped a finished job; only reachable if
+                    # we somehow missed the completed poll window.
+                    return {"error": "Image job vanished on the server (model may have been swapped out mid-render)"}
+                if pr.status_code != 200:
+                    return {"error": f"Image poll failed ({pr.status_code})"}
+                remote = pr.json()
+                result = remote.get("result") or {}
+                # img_gen nests results as result.images[*].b64_json (vid_gen
+                # uses a flat result.b64_json — accept both).
+                first = (result.get("images") or [{}])[0] if isinstance(result.get("images"), list) else {}
+                b64 = result.get("b64_json") or first.get("b64_json")
+                if b64:
+                    return {"b64_json": b64}
+                status = str(remote.get("status") or "").lower()
+                if status in ("failed", "error", "canceled", "cancelled"):
+                    return {"error": str(remote.get("error") or f"Image generation {status}")}
+                if status == "completed":
+                    return {"error": "Image job completed without image data"}
+                await asyncio.sleep(2.0)
+            return {"error": f"Image generation exceeded {int(budget_s)}s — try a smaller size or fewer steps"}
+    except httpx.TimeoutException:
+        return {"error": "Image generation timed out — the model may still be loading; try again."}
+
+
+async def do_generate_image(
+    content: str,
+    session_id: Optional[str] = None,
+    owner: Optional[str] = None,
+    *,
+    seed: Optional[int] = None,
+    negative_prompt: Optional[str] = None,
+    steps: Optional[int] = None,
+    cfg_scale: Optional[float] = None,
+    style: Optional[str] = None,
+) -> Dict:
     """Generate an image using an image-capable model (e.g. gpt-image-1).
 
     Content format:
@@ -919,17 +1032,24 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
       Line 2: model name (optional, default auto-detects: prefers gpt-image-1.5 > gpt-image-1)
       Line 3: size (optional, defaults to 1024x1024)
       Line 4: quality (optional, defaults to medium — options: low, medium, high, auto)
+
+    Keyword args are the style-consistency knobs (driven by /image, the API
+    route and style presets): explicit values win, then the resolved style
+    preset fills gaps. seed/steps/cfg/negative only take effect on local
+    diffusion — sd-server's OpenAI route ignores them (verified), so that
+    backend goes through the native async /sdcpp/v1/img_gen API instead.
     """
     import base64
     import httpx
     import os
     from pathlib import Path
+    from src import style_presets
     from src.url_safety import check_outbound_url
 
     lines = content.strip().split("\n")
     prompt = lines[0].strip() if lines else ""
     model_spec = lines[1].strip() if len(lines) > 1 and lines[1].strip() else ""
-    size = lines[2].strip() if len(lines) > 2 and lines[2].strip() else "1024x1024"
+    size = lines[2].strip() if len(lines) > 2 and lines[2].strip() else ""
     quality = lines[3].strip() if len(lines) > 3 and lines[3].strip() else "medium"
 
     if not prompt:
@@ -941,6 +1061,25 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
         _settings = load_settings()
     except Exception:
         _settings = {}
+
+    # Style preset: explicit style= first, else the caller's active style.
+    # Precedence for every field: explicit call value > style > settings.
+    _style = style_presets.resolve_style(style, owner)
+    if _style:
+        if seed is None and _style.get("seed") is not None:
+            seed = _style["seed"]
+        if not negative_prompt and _style.get("negative_prompt"):
+            negative_prompt = _style["negative_prompt"]
+        if steps is None and _style.get("steps") is not None:
+            steps = _style["steps"]
+        if cfg_scale is None and _style.get("cfg_scale") is not None:
+            cfg_scale = _style["cfg_scale"]
+        if not size and _style.get("size"):
+            size = _style["size"]
+        if not model_spec and _style.get("image_model"):
+            model_spec = _style["image_model"]
+    if not size:
+        size = "1024x1024"
 
     # Use admin-configured model/quality if not specified by the tool call
     if not model_spec:
@@ -1044,6 +1183,10 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     elif is_dalle and size not in valid_dalle3_sizes:
         size = "1024x1024"
 
+    # Style affixes go on last — LoRA tags only for sd-server backends, which
+    # parse <lora:name:weight> out of the prompt.
+    prompt = style_presets.styled_prompt(_style, prompt, with_loras=is_local_diffusion)
+
     payload = {
         "model": model_id,
         "prompt": prompt,
@@ -1058,7 +1201,77 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
         else:
             payload["quality"] = "medium"
 
-    logger.info(f"Image generation: model={model_id}, size={size}, quality={quality}, prompt={prompt[:80]}")
+    logger.info(
+        f"Image generation: model={model_id}, size={size}, quality={quality}, "
+        f"style={(_style or {}).get('id') or '-'}, seed={seed if seed is not None else '-'}, "
+        f"prompt={prompt[:80]}"
+    )
+
+    _quality_str = payload.get("quality", "medium")
+
+    def _save_to_gallery(filename: str) -> str:
+        """Insert a GalleryImage row and return the new id (or '')."""
+        try:
+            from src.database import SessionLocal as _GallerySL, GalleryImage
+            new_id = str(uuid.uuid4())
+            _gdb = _GallerySL()
+            _gdb.add(GalleryImage(
+                id=new_id,
+                filename=filename,
+                prompt=prompt,
+                model=model_id,
+                size=size,
+                quality=_quality_str,
+                session_id=session_id,
+                owner=owner,
+            ))
+            _gdb.commit()
+            _gdb.close()
+            return new_id
+        except Exception as _ge:
+            logger.warning(f"Failed to save gallery record: {_ge}")
+            return ""
+
+    def _finish_b64(b64_data: str) -> Dict:
+        img_dir = Path(GENERATED_IMAGES_DIR)
+        img_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex[:12]}.png"
+        (img_dir / filename).write_bytes(base64.b64decode(b64_data))
+        result = {
+            "results": f"Generated image for: {prompt[:100]}{_fallback_note}",
+            "image_url": f"/api/generated-image/{filename}",
+            "image_id": _save_to_gallery(filename),
+            "image_prompt": prompt,
+            "image_model": model_id,
+            "image_size": size,
+            "image_quality": _quality_str,
+        }
+        if _style:
+            result["image_style"] = _style.get("id")
+        if seed is not None:
+            result["image_seed"] = seed
+        return result
+
+    # Local diffusion goes through sd-server's native async API so that
+    # seed/steps/cfg/negative (the style-consistency knobs) actually apply.
+    if is_local_diffusion:
+        try:
+            _w, _h = (int(x) for x in size.split("x"))
+        except (ValueError, TypeError):
+            _w = _h = 768
+        native = await _sdcpp_native_image(
+            base_url, model_id, headers or {},
+            prompt=prompt, negative_prompt=negative_prompt or "",
+            width=_w, height=_h, seed=seed, steps=steps, cfg_scale=cfg_scale,
+        )
+        if native.get("b64_json"):
+            try:
+                return _finish_b64(native["b64_json"])
+            except Exception as e:
+                return {"error": f"Image generation error: {e}"}
+        if native.get("error"):
+            return {"error": native["error"]}
+        logger.info("native sdcpp route unavailable for %s — using /images/generations (seed/steps/cfg dropped)", model_id)
 
     try:
         # Cloud GPT image models take 30-120s+; local diffusion at higher
@@ -1086,38 +1299,9 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
             image_url = None
             image_id = None
 
-            def _save_to_gallery(filename: str) -> str:
-                """Insert a GalleryImage row and return the new id (or '')."""
-                try:
-                    from src.database import SessionLocal as _GallerySL, GalleryImage
-                    new_id = str(uuid.uuid4())
-                    _gdb = _GallerySL()
-                    _gdb.add(GalleryImage(
-                        id=new_id,
-                        filename=filename,
-                        prompt=prompt,
-                        model=model_id,
-                        size=size,
-                        quality=payload.get("quality", "medium"),
-                        session_id=session_id,
-                        owner=owner,
-                    ))
-                    _gdb.commit()
-                    _gdb.close()
-                    return new_id
-                except Exception as _ge:
-                    logger.warning(f"Failed to save gallery record: {_ge}")
-                    return ""
-
             # GPT image models always return b64_json; DALL-E may return url
             if img.get("b64_json"):
-                img_dir = Path(GENERATED_IMAGES_DIR)
-                img_dir.mkdir(parents=True, exist_ok=True)
-                filename = f"{uuid.uuid4().hex[:12]}.png"
-                img_path = img_dir / filename
-                img_path.write_bytes(base64.b64decode(img.get("b64_json")))
-                image_url = f"/api/generated-image/{filename}"
-                image_id = _save_to_gallery(filename)
+                return _finish_b64(img["b64_json"])
 
             elif img.get("url"):
                 # Download external URL and save locally (DALL-E returns temp URLs)
@@ -1146,15 +1330,18 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
             else:
                 return {"error": "Image API returned unexpected format (no b64_json or url)"}
 
-            return {
+            result = {
                 "results": f"Generated image for: {prompt[:100]}{_fallback_note}",
                 "image_url": image_url,
                 "image_id": image_id,
                 "image_prompt": prompt,
                 "image_model": model_id,
                 "image_size": size,
-                "image_quality": payload.get("quality", "medium"),
+                "image_quality": _quality_str,
             }
+            if _style:
+                result["image_style"] = _style.get("id")
+            return result
 
     except httpx.TimeoutException:
         return {"error": f"Image generation timed out ({int(_read_timeout)}s). The model may be overloaded — "

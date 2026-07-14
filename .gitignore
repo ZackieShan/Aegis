@@ -115,3 +115,6 @@ _scratch/
 # Local model drop folder — weights are never committed, the README is.
 /models/*
 !/models/README.md
+!/models/loras/
+/models/loras/*
+!/models/loras/README.md

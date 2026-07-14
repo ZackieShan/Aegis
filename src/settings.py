@@ -271,7 +271,7 @@ def is_setting_overridden(key: str) -> bool:
 _PER_USER_KEYS = {
     "vision_model", "vision_enabled", "vision_model_fallbacks",
     "image_model", "image_gen_enabled", "image_quality",
-    "video_model",
+    "video_model", "media_style",
     # Default chat endpoint / model — without per-user resolution every new
     # account inherited whatever the most-recent admin picked, which then
     # got injected into the chat composer on first open.

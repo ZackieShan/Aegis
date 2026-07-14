@@ -1418,6 +1418,10 @@ function _openDetail(img) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         Edit
       </button>
+      ${_isVideoUrl(img.url) ? '' : `<button class="gallery-detail-back" id="gallery-animate-btn" title="Animate — turn this image into a short video clip" aria-label="Animate photo" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Animate
+      </button>`}
       <button class="gallery-detail-back" id="gallery-chat-photo-btn" title="${img.session_id ? 'Open source chat' : 'Start a new chat with this photo'}" aria-label="${img.session_id ? 'Open source chat' : 'Discuss photo'}" style="display:inline-flex;align-items:center;gap:4px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
         ${img.session_id ? 'Open chat' : 'Discuss'}
@@ -1789,6 +1793,33 @@ function _openDetail(img) {
   };
   document.getElementById('gallery-edit-btn')?.addEventListener('click', _openInEditor);
   document.getElementById('gallery-edit-direct-btn')?.addEventListener('click', _openInEditor);
+
+  // Animate — image-to-video on an i2v-capable engine model (LTX). Fire and
+  // forget: the render takes minutes and the finished clip lands in the
+  // gallery via the normal video-job path, so no in-panel progress needed.
+  document.getElementById('gallery-animate-btn')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const motion = window.prompt(
+      'Describe the motion for this clip:',
+      'subtle camera push-in, natural motion, cinematic'
+    );
+    if (motion === null) return;
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/video/generate', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_id: img.id, prompt: motion.trim() || 'natural motion, cinematic', duration: 3 }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+      if (uiModule?.showToast) uiModule.showToast(`Animating with ${d.model} (${d.duration_s}s clip) — it appears in the Gallery in a few minutes.`, 6000);
+    } catch (e) {
+      if (uiModule?.showError) uiModule.showError('Could not start the animation: ' + (e?.message || 'unknown'));
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   // Rotate — server-side image rotation. Forces a fresh URL afterwards
   // so the browser doesn't show the old cached version. Shows a

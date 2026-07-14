@@ -41,6 +41,7 @@ function initTabs() {
       document.body.classList.toggle('settings-appearance-open', tab === 'appearance');
       syncAppearanceOpacity(tab === 'appearance');
       if (tab === 'ai') refreshAiModelEndpoints();
+      if (tab === 'media') initMediaStudio();
     });
   });
 }
@@ -5773,6 +5774,268 @@ function syncAdminVisibility() {
 /* ═══════════════════════════════════════════
    PUBLIC API
    ═══════════════════════════════════════════ */
+/* ── Media Studio: style presets + tagged model library ── */
+let _mediaWired = false;
+
+function _mEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function _mChips(item) {
+  const wrap = _mEl('div');
+  (item.capabilities || []).forEach(t => wrap.appendChild(_mEl('span', 'media-chip', t)));
+  (item.best_for || []).forEach(t => wrap.appendChild(_mEl('span', 'media-chip best', t)));
+  return wrap;
+}
+
+async function _mediaFetchStyles() {
+  const r = await fetch('/api/styles', { credentials: 'same-origin' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function _mediaFetchRegistry() {
+  const r = await fetch('/api/models/registry', { credentials: 'same-origin' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+function _mediaStyleSummary(s) {
+  return [
+    s.image_model && ('img: ' + s.image_model),
+    s.video_model && ('vid: ' + s.video_model),
+    s.seed !== undefined && ('seed ' + s.seed),
+    s.size,
+    (s.loras || []).length && (s.loras.length + ' lora' + (s.loras.length > 1 ? 's' : '')),
+  ].filter(Boolean).join(' · ');
+}
+
+function _renderMediaStyles(data) {
+  const list = document.getElementById('media-styles-list');
+  if (!list) return;
+  list.replaceChildren();
+  const styles = data.styles || [];
+  if (!styles.length) {
+    list.appendChild(_mEl('div', 'media-model-sub', 'No styles yet — create one to lock a consistent look (model + prompt affixes + seed) across all your generations.'));
+    return;
+  }
+  styles.forEach(s => {
+    const isActive = data.active === s.id;
+    const row = _mEl('div', 'media-style-item' + (isActive ? ' active-style' : ''));
+    const info = _mEl('div');
+    info.style.flex = '1';
+    info.appendChild(_mEl('div', 'media-model-name', s.name + (isActive ? '  (active)' : '')));
+    const sum = _mediaStyleSummary(s);
+    if (sum) info.appendChild(_mEl('div', 'media-model-sub', sum));
+    if (s.description) info.appendChild(_mEl('div', 'media-model-sub', s.description));
+    if (s.prompt_prefix) info.appendChild(_mEl('div', 'media-model-sub', '“' + s.prompt_prefix + ' …' + (s.prompt_suffix ? ' ' + s.prompt_suffix : '') + '”'));
+    row.appendChild(info);
+    const useBtn = _mEl('button', 'memory-toolbar-btn', isActive ? 'Deactivate' : 'Use');
+    useBtn.type = 'button';
+    useBtn.title = isActive ? 'Stop applying this style' : 'Apply this style to every image/video generation';
+    useBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/styles/active', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: isActive ? '' : s.id }),
+        });
+        _reloadMediaStyles();
+      } catch (e) { console.warn('style activate failed', e); }
+    });
+    const editBtn = _mEl('button', 'memory-toolbar-btn', 'Edit');
+    editBtn.type = 'button';
+    editBtn.addEventListener('click', () => _mediaFillForm(s));
+    const delBtn = _mEl('button', 'memory-toolbar-btn danger', 'Delete');
+    delBtn.type = 'button';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`Delete style "${s.name}"?`)) return;
+      try {
+        await fetch('/api/styles/' + encodeURIComponent(s.id), { method: 'DELETE', credentials: 'same-origin' });
+        _reloadMediaStyles();
+      } catch (e) { console.warn('style delete failed', e); }
+    });
+    row.append(useBtn, editBtn, delBtn);
+    list.appendChild(row);
+  });
+}
+
+async function _reloadMediaStyles() {
+  try { _renderMediaStyles(await _mediaFetchStyles()); } catch (e) {
+    const list = document.getElementById('media-styles-list');
+    if (list) list.replaceChildren(_mEl('div', 'media-model-sub', 'Could not load styles: ' + e.message));
+  }
+}
+
+function _mediaFillForm(s) {
+  const g = id => document.getElementById(id);
+  g('media-style-form').hidden = false;
+  g('media-sf-name').value = s?.name || '';
+  g('media-sf-desc').value = s?.description || '';
+  g('media-sf-imodel').value = s?.image_model || '';
+  g('media-sf-vmodel').value = s?.video_model || '';
+  g('media-sf-prefix').value = s?.prompt_prefix || '';
+  g('media-sf-suffix').value = s?.prompt_suffix || '';
+  g('media-sf-negative').value = s?.negative_prompt || '';
+  g('media-sf-seed').value = s?.seed ?? '';
+  g('media-sf-steps').value = s?.steps ?? '';
+  g('media-sf-cfg').value = s?.cfg_scale ?? '';
+  g('media-sf-size').value = s?.size || '';
+  g('media-sf-loras').value = (s?.loras || []).map(l => `${l.name}:${l.weight}`).join(', ');
+  g('media-sf-msg').textContent = '';
+  g('media-sf-name').focus();
+}
+
+function _mediaFillModelSelects(reg) {
+  const img = document.getElementById('media-sf-imodel');
+  const vid = document.getElementById('media-sf-vmodel');
+  if (!img || !vid) return;
+  const keepI = img.value, keepV = vid.value;
+  img.replaceChildren(new Option('— keep default —', ''));
+  vid.replaceChildren(new Option('— keep default —', ''));
+  (reg.served || []).forEach(m => {
+    const caps = m.capabilities || [];
+    if (caps.includes('text-to-image') || caps.includes('image-to-image')) img.appendChild(new Option(m.model, m.model));
+    if (caps.includes('text-to-video') || caps.includes('image-to-video')) vid.appendChild(new Option(m.model, m.model));
+  });
+  img.value = keepI; vid.value = keepV;
+}
+
+function _mediaModelRow(name, subText, item, servedBadge) {
+  const row = _mEl('div', 'media-model-row');
+  const info = _mEl('div');
+  info.style.flex = '1';
+  const head = _mEl('div', 'media-model-name', name);
+  if (servedBadge) {
+    head.appendChild(document.createTextNode(' '));
+    head.appendChild(_mEl('span', 'media-badge-served', servedBadge));
+  }
+  info.appendChild(head);
+  if (subText) info.appendChild(_mEl('div', 'media-model-sub', subText));
+  info.appendChild(_mChips(item));
+  row.appendChild(info);
+  return row;
+}
+
+function _mediaMatches(item, name, needle) {
+  if (!needle) return true;
+  const hay = (name + ' ' + (item.endpoint || '') + ' ' + (item.capabilities || []).join(' ') + ' ' + (item.best_for || []).join(' ')).toLowerCase();
+  return needle.split(/\s+/).every(w => hay.includes(w));
+}
+
+function _renderMediaModels(reg) {
+  const list = document.getElementById('media-models-list');
+  if (!list) return;
+  const needle = (document.getElementById('media-model-filter')?.value || '').trim().toLowerCase();
+  list.replaceChildren();
+
+  const served = (reg.served || []).filter(m => _mediaMatches(m, m.model, needle));
+  const parts = [];
+  const unserved = [];
+  (reg.files || []).forEach(f => {
+    if (!_mediaMatches(f, f.file, needle)) return;
+    const caps = f.capabilities || [];
+    if (caps.includes('companion') || caps.includes('lora')) parts.push(f);
+    else if (!f.served) unserved.push(f);
+  });
+
+  if (served.length) {
+    list.appendChild(_mEl('div', 'media-group-title', `Served now (${served.length})`));
+    served.forEach(m => list.appendChild(_mediaModelRow(m.model, m.endpoint, m, 'served')));
+  }
+  if (unserved.length) {
+    list.appendChild(_mEl('div', 'media-group-title', `On disk — not served (${unserved.length})`));
+    unserved.forEach(f => {
+      const row = _mediaModelRow(f.file, f.size_gb + ' GB — add an engine config entry to serve it', f, null);
+      row.querySelector('div').appendChild(_mEl('span', 'media-chip warn-chip', 'not served'));
+      list.appendChild(row);
+    });
+  }
+  if (parts.length) {
+    const det = document.createElement('details');
+    det.appendChild(Object.assign(document.createElement('summary'), { textContent: `Components & LoRAs (${parts.length})`, className: 'media-group-title' }));
+    parts.forEach(f => det.appendChild(_mediaModelRow(f.file, f.size_gb + ' GB' + (f.served_as?.length ? ' — used by ' + f.served_as.join(', ') : ''), f, null)));
+    list.appendChild(det);
+  }
+  if (!served.length && !unserved.length && !parts.length) {
+    list.appendChild(_mEl('div', 'media-model-sub', needle ? 'Nothing matches that filter.' : 'No models found — drop GGUF/safetensors files into the models/ folder.'));
+  }
+}
+
+async function _reloadMediaRegistry() {
+  const list = document.getElementById('media-models-list');
+  try {
+    const reg = await _mediaFetchRegistry();
+    _mediaFillModelSelects(reg);
+    _renderMediaModels(reg);
+    window._mediaRegistryCache = reg;
+  } catch (e) {
+    if (list) list.replaceChildren(_mEl('div', 'media-model-sub', 'Could not load the model registry: ' + e.message));
+  }
+}
+
+function initMediaStudio() {
+  if (!_mediaWired) {
+    _mediaWired = true;
+    document.getElementById('media-style-new')?.addEventListener('click', () => _mediaFillForm(null));
+    document.getElementById('media-sf-cancel')?.addEventListener('click', () => {
+      document.getElementById('media-style-form').hidden = true;
+    });
+    document.getElementById('media-sf-save')?.addEventListener('click', async () => {
+      const g = id => document.getElementById(id);
+      const msg = g('media-sf-msg');
+      const name = g('media-sf-name').value.trim();
+      if (!name) { msg.textContent = 'Name is required.'; return; }
+      const body = {
+        name,
+        description: g('media-sf-desc').value.trim(),
+        image_model: g('media-sf-imodel').value,
+        video_model: g('media-sf-vmodel').value,
+        prompt_prefix: g('media-sf-prefix').value.trim(),
+        prompt_suffix: g('media-sf-suffix').value.trim(),
+        negative_prompt: g('media-sf-negative').value.trim(),
+        seed: g('media-sf-seed').value,
+        steps: g('media-sf-steps').value,
+        cfg_scale: g('media-sf-cfg').value,
+        size: g('media-sf-size').value.trim(),
+        loras: g('media-sf-loras').value.split(',').map(s => s.trim()).filter(Boolean),
+      };
+      try {
+        const r = await fetch('/api/styles', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { msg.textContent = d.detail || 'Save failed'; return; }
+        g('media-style-form').hidden = true;
+        _reloadMediaStyles();
+      } catch (e) { msg.textContent = 'Save failed: ' + e.message; }
+    });
+    document.getElementById('media-scan-btn')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = 'Scanning…';
+      try {
+        // Force the endpoint model-list re-probe (background), then re-read
+        // the registry twice so slow endpoints still land.
+        await fetch('/api/models?refresh=true&background=true', { credentials: 'same-origin' });
+      } catch (_) {}
+      setTimeout(_reloadMediaRegistry, 2500);
+      setTimeout(() => { _reloadMediaRegistry(); btn.disabled = false; btn.textContent = orig; }, 6000);
+      _reloadMediaRegistry();
+    });
+    document.getElementById('media-model-filter')?.addEventListener('input', () => {
+      if (window._mediaRegistryCache) _renderMediaModels(window._mediaRegistryCache);
+    });
+  }
+  _reloadMediaStyles();
+  _reloadMediaRegistry();
+}
+
 export function open(tab) {
   if (!initialized) initAll();
   syncAppearanceCheckboxes();
@@ -5794,6 +6057,7 @@ export function open(tab) {
   document.body.classList.toggle('settings-appearance-open', activeTab === 'appearance');
   syncAppearanceOpacity(activeTab === 'appearance');
   if (activeTab === 'ai') refreshAiModelEndpoints();
+  if (activeTab === 'media') initMediaStudio();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }
