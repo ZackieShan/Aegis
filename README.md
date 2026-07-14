@@ -26,9 +26,10 @@ all running on **your machine**. Nothing you do leaves your hardware unless you 
 send it.
 
 The premise is simple: the most capable AI tools shouldn't require renting someone else's
-computer and handing over your data to use them. If you have a GPU, you should be able to
-run a private assistant that browses, writes and runs code, researches, makes images, and
-talks with you — and **own the whole thing**.
+computer and handing over your data to use them. Whatever machine you have — an aging
+laptop or a multi-GPU workstation — you should be able to run a private assistant that
+browses, writes and runs code, researches, makes images, and talks with you — and **own
+the whole thing**, with models sized to your hardware.
 
 **What it unlocks**
 
@@ -36,6 +37,8 @@ talks with you — and **own the whole thing**.
   logged, or trained on by a third party.
 - **No ceiling** — run as much as your hardware allows. No usage caps, no per-token cost, no
   rate limits.
+- **No minimum spec** — model strength is your dial, not a requirement: pick sizes and
+  quantizations that fit whatever you're running (see below).
 - **One integrated loop** — models, agents, knowledge, memory, and media work *together*
   instead of scattered across a dozen apps, tabs, and subscriptions.
 - **Cloud-grade capability, self-owned** — the agent can browse the web, edit real code in a
@@ -45,6 +48,23 @@ talks with you — and **own the whole thing**.
 capability without surrendering privacy or control — extensible (MCP tools, visual workflows,
 skills), approachable (one dashboard, one-click "try it"), and honest about running on
 hardware you own. See the [roadmap](ROADMAP.md).
+
+## Runs on whatever you have
+
+Aegis doesn't demand a spec — **you choose how strong the models are**, and the app helps
+you fit them to your machine:
+
+- **Models are just files.** Drop any GGUF into `models/` — a 1–2 GB quantized model for a
+  laptop, a 20 GB coder or 15 GB video model for a big GPU, anything in between. Every
+  capability works the same regardless of which you pick; only speed and quality scale.
+- **Cookbook scans your hardware** and rates every model against it — perfect / good /
+  marginal fit plus an expected token speed — so you never have to guess what will run.
+- **The engine right-sizes itself.** `/engine` reads each model's real memory cost and your
+  free VRAM, then tunes every context window automatically — no YAML, no OOM roulette.
+- **CPU-only works.** llama.cpp and Ollama run smaller models with no GPU at all, and any
+  OpenAI-compatible endpoint can stand in where local horsepower runs out — your choice.
+- **Media scales too.** Image and video sizes, steps, and quantizations are all adjustable,
+  and Lightning LoRAs cut diffusion to 4–8 steps for modest cards.
 
 ## What you can do
 
