@@ -30,6 +30,10 @@ DEFAULT_PRIVILEGES = {
     "can_use_research": True,
     "can_generate_images": True,
     "can_manage_memory": True,
+    # Run canned Recipes (the workflow library). Authoring recipes stays
+    # admin-only — a recipe can call tools and shell — but running a vetted
+    # canned one is safe, so it's on by default.
+    "can_use_recipes": True,
     "max_messages_per_day": 0,
     "allowed_models": [],
     "allowed_models_restricted": False,

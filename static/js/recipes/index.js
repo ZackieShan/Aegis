@@ -30,6 +30,12 @@ let _recipeName = 'Untitled recipe';
 let _nodeSeq = 0;
 let _running = false;
 
+// Library state
+let _catalog = [];           // [{id,name,category,description,sample_input,expected_output,available,needs,preview,recipe}]
+let _libCategory = 'All';
+let _libSearch = '';
+let _canAuthor = false;      // admin — gets the editor + build affordances
+
 // ── DOM helpers ──────────────────────────────────────────────────────────────
 function _el(tag, cls, txt) {
   const e = document.createElement(tag);
@@ -156,6 +162,62 @@ function _injectStyles() {
     color: var(--fg, #eee); background: transparent; border: 0; border-radius: var(--radius-sm, 8px); padding: 6px 8px; }
   .recipe-menu button:hover { background: color-mix(in srgb, var(--fg, #eee) 9%, transparent); }
   .recipe-menu .menu-empty { padding: 6px 8px; font-size: 11px; opacity: 0.5; }
+
+  /* ── library front door ── */
+  /* The class/id display rules below beat the UA [hidden]{display:none}, so
+     make hidden win explicitly (buttons are inline-flex, views are flex). */
+  #recipe-library-view[hidden], #recipe-editor-view[hidden],
+  #recipe-run-panel[hidden], .recipe-btn[hidden] { display: none !important; }
+  #recipe-library-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .lib-head { display: flex; align-items: center; gap: 10px; padding: 11px 16px;
+    border-bottom: 1px solid var(--border, #333); flex-wrap: wrap; }
+  .lib-search { flex: 1; min-width: 160px; font: 13px/1.2 inherit; color: var(--fg, #eee);
+    background: var(--bg, #111); border: 1px solid var(--border, #333); border-radius: var(--radius-sm, 8px); padding: 8px 11px; }
+  .lib-search:focus { border-color: var(--accent, var(--red)); outline: none; }
+  .lib-cats { display: flex; gap: 6px; flex-wrap: wrap; }
+  .lib-cat { cursor: pointer; font: 500 12px/1 inherit; color: var(--fg, #eee);
+    background: transparent; border: 1px solid var(--border, #333); border-radius: 20px; padding: 6px 12px; }
+  .lib-cat:hover { border-color: var(--accent, var(--red)); }
+  .lib-cat.on { background: var(--accent, var(--red)); color: #fff; border-color: var(--accent, var(--red)); }
+  #recipe-lib-grid { flex: 1; overflow-y: auto; padding: 16px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(276px, 1fr)); gap: 12px; align-content: start; }
+  .lib-group { grid-column: 1 / -1; margin: 6px 0 -2px; font: 600 11px/1.2 inherit;
+    text-transform: uppercase; letter-spacing: 0.08em; color: color-mix(in srgb, var(--fg, #eee) 45%, transparent); }
+  .lib-group:first-child { margin-top: 0; }
+  .lib-card { display: flex; flex-direction: column; gap: 7px; padding: 14px;
+    background: var(--panel, #1b1b1b); border: 1px solid var(--border, #333); border-radius: var(--radius-md, 12px);
+    min-height: 132px; }
+  .lib-card.runnable { cursor: pointer; }
+  .lib-card.runnable:hover { border-color: var(--accent, var(--red)); transform: translateY(-1px); }
+  .lib-card h5 { margin: 0; font: 600 14px/1.25 inherit; color: var(--fg, #eee); }
+  .lib-card p { margin: 0; font-size: 12px; line-height: 1.5; color: color-mix(in srgb, var(--fg, #eee) 70%, transparent); flex: 1; }
+  .lib-card .card-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .lib-run-cta { font: 600 12px/1 inherit; color: var(--accent, var(--red)); display: inline-flex; align-items: center; gap: 4px; }
+  .lib-chip { font: 600 10px/1 inherit; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 3px 7px; border-radius: 5px; white-space: nowrap; }
+  .lib-chip.needs { background: color-mix(in srgb, var(--warn, #e0a050) 18%, transparent); color: var(--warn, #e0a050); }
+  .lib-chip.preview { background: color-mix(in srgb, var(--fg, #eee) 12%, transparent); color: color-mix(in srgb, var(--fg, #eee) 60%, transparent); }
+  .lib-card.gated, .lib-card.preview { opacity: 0.92; }
+  .lib-card.gated .card-foot, .lib-card.preview .card-foot { flex-wrap: wrap; }
+  .lib-enable { cursor: pointer; font: 600 11.5px/1 inherit; color: #fff;
+    background: var(--warn, #e0a050); border: 0; border-radius: var(--radius-sm, 8px); padding: 6px 10px; }
+  .lib-enable[disabled] { opacity: 0.6; pointer-events: none; }
+  .lib-note { font-size: 11px; opacity: 0.6; }
+
+  /* run panel (one-click canned run) */
+  #recipe-run-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 16px; gap: 12px; overflow-y: auto; }
+  .rp-back { align-self: flex-start; cursor: pointer; font: 500 12.5px/1 inherit; color: var(--fg, #eee);
+    background: transparent; border: 0; opacity: 0.7; padding: 4px 0; }
+  .rp-back:hover { opacity: 1; }
+  .rp-title { font: 700 17px/1.2 inherit; margin: 0; }
+  .rp-desc { font-size: 13px; line-height: 1.5; color: color-mix(in srgb, var(--fg, #eee) 70%, transparent); margin: 0; }
+  .rp-label { font: 600 11px/1 inherit; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
+  .rp-input { font: 13px/1.5 inherit; color: var(--fg, #eee); background: var(--bg, #111);
+    border: 1px solid var(--border, #333); border-radius: var(--radius-sm, 8px); padding: 10px 12px; resize: vertical; min-height: 60px; }
+  .rp-input:focus { border-color: var(--accent, var(--red)); outline: none; }
+  .rp-expect { font-size: 12px; opacity: 0.6; }
+  #recipe-run-panel .recipe-run { border-top: 0; padding: 0; background: transparent; max-height: none; }
+  .rp-header-btn { display: none; }
   `;
   const style = _el('style');
   style.id = 'recipes-styles';
@@ -176,40 +238,56 @@ function _build() {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="7" height="6" rx="1.5"/><rect x="2" y="14" width="7" height="6" rx="1.5"/><rect x="15" y="9" width="7" height="6" rx="1.5"/><path d="M9 7h3a2 2 0 0 1 2 2v1"/><path d="M9 17h3a2 2 0 0 0 2-2v-1"/></svg>
           Recipes
         </h4>
+        <button class="recipe-btn" id="recipe-to-library" hidden>← Library</button>
+        <button class="recipe-btn" id="recipe-to-build" hidden title="Build your own recipe in the node editor">+ Build your own</button>
         <button class="close-btn" aria-label="Close recipes">✖</button>
       </div>
-      <div class="recipe-toolbar">
-        <input class="recipe-name-input" id="recipe-name" value="${_esc(_recipeName)}" spellcheck="false" />
-        <button class="recipe-btn" id="recipe-new">New</button>
-        <button class="recipe-btn" id="recipe-starters" title="Install or load ready-made starter recipes built for what you have">✨ Starters</button>
-        <button class="recipe-btn" id="recipe-open">Open…</button>
-        <button class="recipe-btn" id="recipe-save">Save</button>
-        <span style="flex:1"></span>
-        <button class="recipe-btn" id="recipe-delete" title="Delete this recipe">Delete</button>
+
+      <!-- Library front door — the default view -->
+      <div id="recipe-library-view">
+        <div class="lib-head">
+          <input class="lib-search" id="recipe-lib-search" placeholder="Search recipes…" spellcheck="false" />
+          <div class="lib-cats" id="recipe-lib-cats"></div>
+        </div>
+        <div id="recipe-lib-grid"></div>
+        <div id="recipe-run-panel" hidden></div>
       </div>
-      <div class="recipe-body">
-        <div class="recipe-palette" id="recipe-palette"></div>
-        <div class="recipe-canvas-wrap">
-          <div id="recipe-canvas">
-            <svg id="recipe-edges"></svg>
-            <div class="recipe-empty-hint" id="recipe-empty-hint">
-              <div style="font-weight:600;margin-bottom:8px">Build a tool + model workflow</div>
-              <div style="text-align:left;display:inline-block;line-height:1.9;opacity:0.85">
-                1. Click a block in the left palette to drop a node.<br>
-                2. Drag from a node's right dot ● to another's left dot to wire them.<br>
-                3. Type a run input below and hit ▶ Run.
+
+      <!-- Editor — the authoring surface (admins) -->
+      <div id="recipe-editor-view" hidden>
+        <div class="recipe-toolbar">
+          <input class="recipe-name-input" id="recipe-name" value="${_esc(_recipeName)}" spellcheck="false" />
+          <button class="recipe-btn" id="recipe-new">New</button>
+          <button class="recipe-btn" id="recipe-starters" title="Install or load ready-made starter recipes built for what you have">✨ Starters</button>
+          <button class="recipe-btn" id="recipe-open">Open…</button>
+          <button class="recipe-btn" id="recipe-save">Save</button>
+          <span style="flex:1"></span>
+          <button class="recipe-btn" id="recipe-delete" title="Delete this recipe">Delete</button>
+        </div>
+        <div class="recipe-body">
+          <div class="recipe-palette" id="recipe-palette"></div>
+          <div class="recipe-canvas-wrap">
+            <div id="recipe-canvas">
+              <svg id="recipe-edges"></svg>
+              <div class="recipe-empty-hint" id="recipe-empty-hint">
+                <div style="font-weight:600;margin-bottom:8px">Build a tool + model workflow</div>
+                <div style="text-align:left;display:inline-block;line-height:1.9;opacity:0.85">
+                  1. Click a block in the left palette to drop a node.<br>
+                  2. Drag from a node's right dot ● to another's left dot to wire them.<br>
+                  3. Type a run input below and hit ▶ Run.
+                </div>
+                <div style="margin-top:12px;opacity:0.7">New here? Click <b>✨ Starters</b> up top to install ready-made recipes or load one to tweak.</div>
               </div>
-              <div style="margin-top:12px;opacity:0.7">New here? Click <b>✨ Starters</b> up top to install ready-made recipes or load one to tweak.</div>
             </div>
           </div>
         </div>
-      </div>
-      <div class="recipe-run">
-        <div class="recipe-run-top">
-          <input class="recipe-run-input" id="recipe-run-input" placeholder="Run input (available as {{input}} to every node)…" spellcheck="false" />
-          <button class="recipe-btn primary" id="recipe-run-btn">▶ Run</button>
+        <div class="recipe-run">
+          <div class="recipe-run-top">
+            <input class="recipe-run-input" id="recipe-run-input" placeholder="Run input (available as {{input}} to every node)…" spellcheck="false" />
+            <button class="recipe-btn primary" id="recipe-run-btn">▶ Run</button>
+          </div>
+          <div id="recipe-run-output"></div>
         </div>
-        <div id="recipe-run-output"></div>
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -224,6 +302,12 @@ function _build() {
   modal.querySelector('#recipe-save').addEventListener('click', _save);
   modal.querySelector('#recipe-delete').addEventListener('click', _deleteCurrent);
   modal.querySelector('#recipe-run-btn').addEventListener('click', _run);
+  // Library ↔ editor
+  modal.querySelector('#recipe-to-library').addEventListener('click', _showLibrary);
+  modal.querySelector('#recipe-to-build').addEventListener('click', () => _showEditor());
+  modal.querySelector('#recipe-lib-search').addEventListener('input', (e) => {
+    _libSearch = e.target.value.toLowerCase(); _renderLibrary();
+  });
 
   // Esc closes (only while this modal is the visible one)
   document.addEventListener('keydown', (e) => {
@@ -848,14 +932,239 @@ async function _loadBlocks() {
 }
 
 // ── Open / close ─────────────────────────────────────────────────────────────
-export async function open() {
-  _build();
-  await _loadBlocks();
+// ── library ────────────────────────────────────────────────────────────────
+function _libView() { return document.getElementById('recipe-library-view'); }
+function _editorView() { return document.getElementById('recipe-editor-view'); }
+function _runPanel() { return document.getElementById('recipe-run-panel'); }
+
+function _showLibrary() {
+  _libView().hidden = false;
+  _editorView().hidden = true;
+  _runPanel().hidden = true;
+  document.getElementById('recipe-lib-grid').style.display = '';
+  _modal().querySelector('#recipe-to-library').hidden = true;
+  _modal().querySelector('#recipe-to-build').hidden = !_canAuthor;
+}
+
+function _showEditor() {
+  _libView().hidden = true;
+  _editorView().hidden = false;
+  _modal().querySelector('#recipe-to-library').hidden = false;
+  _modal().querySelector('#recipe-to-build').hidden = true;
+  // Lazily render the editor the first time it's shown.
   _renderPalette();
-  // Re-render open nodes so freshly-loaded models/tools populate their selects.
   _nodes.forEach(_renderNode);
   _drawEdges();
   _syncEmptyHint();
+}
+
+async function _loadCatalog() {
+  try {
+    const r = await fetch(`${API}/api/recipes/catalog`, { credentials: 'same-origin' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    _catalog = d.recipes || [];
+    _canAuthor = !!d.can_author;
+  } catch (e) {
+    _catalog = [];
+    console.warn('recipes catalog load failed', e);
+  }
+}
+
+function _renderCats() {
+  const wrap = document.getElementById('recipe-lib-cats');
+  if (!wrap) return;
+  const cats = ['All', ...Array.from(new Set(_catalog.map(r => r.category)))];
+  wrap.replaceChildren();
+  cats.forEach(c => {
+    const b = _el('button', 'lib-cat' + (c === _libCategory ? ' on' : ''), c);
+    b.type = 'button';
+    b.addEventListener('click', () => { _libCategory = c; _renderLibrary(); });
+    wrap.appendChild(b);
+  });
+}
+
+function _matchesLib(r) {
+  if (_libCategory !== 'All' && r.category !== _libCategory) return false;
+  if (!_libSearch) return true;
+  return (r.name + ' ' + r.description + ' ' + r.category).toLowerCase().includes(_libSearch);
+}
+
+function _renderLibrary() {
+  _renderCats();
+  const grid = document.getElementById('recipe-lib-grid');
+  if (!grid) return;
+  grid.style.display = '';
+  _runPanel().hidden = true;
+  grid.replaceChildren();
+
+  const items = _catalog.filter(_matchesLib);
+  if (!items.length) {
+    grid.appendChild(_el('div', 'lib-note', _catalog.length
+      ? 'Nothing matches that search.'
+      : 'No recipes available — add a model in Settings first.'));
+    return;
+  }
+  // Group by category (only when showing All).
+  const groups = _libCategory === 'All'
+    ? Array.from(new Set(items.map(r => r.category))).map(c => [c, items.filter(r => r.category === c)])
+    : [[_libCategory, items]];
+
+  for (const [cat, list] of groups) {
+    if (_libCategory === 'All') grid.appendChild(_el('div', 'lib-group', cat));
+    list.forEach(r => grid.appendChild(_libCard(r)));
+  }
+}
+
+function _libCard(r) {
+  const gated = !r.available && !r.preview && r.needs && r.needs.length;
+  const card = _el('div', 'lib-card' + (r.available ? ' runnable' : (r.preview ? ' preview' : ' gated')));
+  card.appendChild(_el('h5', null, r.name));
+  card.appendChild(_el('p', null, r.description));
+  const foot = _el('div', 'card-foot');
+
+  if (r.available) {
+    const cta = _el('span', 'lib-run-cta', '▶ Run');
+    foot.appendChild(cta);
+    card.addEventListener('click', () => _openRunPanel(r));
+  } else if (r.preview) {
+    foot.appendChild(_el('span', 'lib-chip preview', 'Coming soon'));
+    if (r.preview_note) card.title = r.preview_note;
+    const note = _el('span', 'lib-note', r.preview_note || 'Arrives with Automations.');
+    foot.appendChild(note);
+  } else if (gated) {
+    const need = r.needs[0];
+    foot.appendChild(_el('span', 'lib-chip needs', 'Needs ' + need.label));
+    if (_canAuthor) {
+      const btn = _el('button', 'lib-enable', 'Enable ' + need.label + ' →');
+      btn.type = 'button';
+      btn.addEventListener('click', (e) => { e.stopPropagation(); _enableToolbox(need, btn); });
+      foot.appendChild(btn);
+    } else {
+      foot.appendChild(_el('span', 'lib-note', 'Ask an admin to enable these tools.'));
+    }
+  }
+  card.appendChild(foot);
+  return card;
+}
+
+async function _enableToolbox(need, btn) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Enabling…';
+  try {
+    const r = await fetch(`${API}/api/recipes/toolbox/enable`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toolbox: need.toolbox }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.ok) {
+      _toast(`${need.label} tools ready — ${d.tools} tools.`);
+      await _loadCatalog();
+      _renderLibrary();
+    } else {
+      btn.disabled = false; btn.textContent = orig;
+      _toast(d.message || d.detail || `Could not enable ${need.label}.`);
+    }
+  } catch (e) {
+    btn.disabled = false; btn.textContent = orig;
+    _toast('Enable failed: ' + e.message);
+  }
+}
+
+function _openRunPanel(r) {
+  const grid = document.getElementById('recipe-lib-grid');
+  const panel = _runPanel();
+  grid.style.display = 'none';
+  panel.hidden = false;
+  panel.replaceChildren();
+
+  const back = _el('button', 'rp-back', '← All recipes');
+  back.type = 'button';
+  back.addEventListener('click', _showLibrary);
+  panel.appendChild(back);
+  panel.appendChild(_el('h3', 'rp-title', r.name));
+  panel.appendChild(_el('p', 'rp-desc', r.description));
+
+  panel.appendChild(_el('div', 'rp-label', 'Input'));
+  const input = _el('textarea', 'rp-input');
+  input.value = '';
+  input.placeholder = r.sample_input || 'Type your input…';
+  panel.appendChild(input);
+  panel.appendChild(_el('div', 'rp-expect', 'You’ll get: ' + r.expected_output));
+
+  const runBtn = _el('button', 'recipe-btn primary', '▶ Run');
+  runBtn.type = 'button';
+  runBtn.style.alignSelf = 'flex-start';
+  panel.appendChild(runBtn);
+  const out = _el('div', 'recipe-run');
+  const outBody = _el('div');
+  out.appendChild(outBody);
+  panel.appendChild(out);
+
+  const doRun = () => _runCanned(r, input.value.trim() || (input.placeholder.startsWith('Type') ? '' : input.placeholder), runBtn, outBody);
+  runBtn.addEventListener('click', doRun);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) doRun(); });
+  setTimeout(() => input.focus(), 60);
+}
+
+async function _runCanned(r, runInput, btn, outBody) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Running…';
+  outBody.replaceChildren(_el('div', 'lib-note', 'Running ' + r.name + '…'));
+  try {
+    const res = await fetch(`${API}/api/recipes/catalog/${encodeURIComponent(r.id)}/run`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: runInput }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.status === 409 && d.detail && d.detail.error === 'toolbox_disabled') {
+      outBody.replaceChildren(_el('div', 'lib-note', d.detail.message + ' Enable it from the library.'));
+      btn.disabled = false; btn.textContent = orig;
+      return;
+    }
+    if (!res.ok || d.ok === false) {
+      outBody.replaceChildren(_el('div', 'lib-note', '✗ ' + (d.error || (d.detail && d.detail.message) || d.detail || 'Run failed')));
+      btn.disabled = false; btn.textContent = orig;
+      return;
+    }
+    _renderRunResult(d, outBody);
+  } catch (e) {
+    outBody.replaceChildren(_el('div', 'lib-note', '✗ ' + e.message));
+  }
+  btn.disabled = false; btn.textContent = orig;
+}
+
+function _renderRunResult(d, outBody) {
+  outBody.replaceChildren();
+  (d.steps || []).forEach(s => {
+    const step = _el('div', 'recipe-step');
+    const head = _el('div', 'step-head');
+    head.appendChild(_el('span', 'step-badge', s.type));
+    if (s.label) head.appendChild(_el('span', 'step-label', s.label));
+    step.appendChild(head);
+    const pre = _el('pre'); pre.textContent = s.output || '';
+    step.appendChild(pre);
+    outBody.appendChild(step);
+  });
+  if (d.final) {
+    const fin = _el('div', 'recipe-step recipe-final');
+    const head = _el('div', 'step-head');
+    head.appendChild(_el('span', 'step-badge', 'result'));
+    fin.appendChild(head);
+    const pre = _el('pre'); pre.textContent = d.final;
+    fin.appendChild(pre);
+    outBody.appendChild(fin);
+  }
+}
+
+export async function open() {
+  _build();
+  await _loadBlocks();
+  await _loadCatalog();
+  _renderLibrary();
+  _showLibrary();
   _modal().classList.remove('hidden');
   const panel = _modal().querySelector('.modal-content');
   if (_releaseFocus) _releaseFocus();
