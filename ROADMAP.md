@@ -11,8 +11,12 @@ The local-first foundation is in place:
 
 - **Local model engine** — llama.cpp + llama-swap hot-swapping GGUFs with reliable native
   tool calls, a zero-config `models/` drop folder, and a GPU-aware context auto-tuner.
-- **Agents** — Toolboxes (OSINT / market / troubleshoot / web), visual Recipes with
-  branch/loop logic, Deep Research, and Playwright browser automation.
+- **Agents** — Toolboxes (OSINT / market / troubleshoot / web), Deep Research, and
+  Playwright browser automation.
+- **Recipes — run, schedule, build** — a library of one-click workflows (summarize,
+  triage, stock bull/base/bear, inbox declutter…); turn any of them into an **automation**
+  that runs on a schedule or when new email arrives and delivers the result; and build
+  your own by **describing it** to a local model — no blank canvas.
 - **Software** — a git-aware coding agent (Aider), a Code Canvas (generate / edit / run),
   and repo → wiki.
 - **Media & voice** — local image generation (stable-diffusion.cpp), on-device Whisper

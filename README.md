@@ -76,7 +76,9 @@ you fit them to your machine:
 
 **Put agents to work**
 - **Toolboxes** — summon themed tool sets: OSINT recon, market analysis, network troubleshooting, web crawl.
-- **Recipes** — chain tools and models into visual workflows, with branch and loop logic.
+- **Recipes** — a library of one-click workflows you can also **schedule as automations**
+  (daily, or when new email arrives) and **build by describing them**; chains tools and
+  models with branch and loop logic.
 - **Deep Research** — multi-step web research with source reading and report generation.
 - **Browser automation** — the agent navigates, reads, and clicks real web pages.
 
@@ -218,12 +220,30 @@ runnable buffer you can edit with follow-up AI instructions:
 
 ![Code Canvas with generated Python](docs/media/code-canvas.png)
 
-**Recipes — visual multi-agent workflows.** Wire tools and models together on a node
-canvas, with branch and loop logic. This built-in starter feeds two market tools into
-three investor personas — value, growth, and contrarian — then a portfolio manager
-weighs their takes; every node runs on your local model:
+**Recipes — a workflow library you run, schedule, and build.** Recipes opens to a
+browsable library of one-click workflows — summarize, triage a message, stock
+bull/base/bear, inbox declutter, and more. Pick one, type an input, hit Run — no node
+wiring:
 
-![Recipes node editor with the analyst-debate starter](docs/media/recipes.png)
+![Recipes library of one-click workflows](docs/media/recipes-library.png)
+
+**Turn any recipe into an automation.** A recipe + a trigger — daily, every N hours, a
+cron, or *when new email arrives* — + a delivery (an in-app notification, or saved to a
+document) becomes a job that runs itself unattended and hands you the result:
+
+![Recipes automations — recipes on a schedule](docs/media/recipes-automations.png)
+
+**Build your own — by describing it.** The editor never starts blank: pick a template,
+or describe what you want and a local model drafts the node graph. An **Explain** button
+summarizes any workflow in plain English. Every node — tools and models — runs locally:
+
+![Recipes editor — start from a template or describe what you want](docs/media/recipes-editor.png)
+
+The whole loop — run a recipe, schedule it, then build one from a sentence:
+
+![Recipes walkthrough — run, schedule, build](docs/media/recipes-howto.gif)
+
+> Full walkthrough: the **[Recipes guide](docs/recipes.md)**.
 
 **Eighteen built-in themes** (plus a full customizer — colors, fonts, background
 effects). Aurora is the default; there's a Y2K "millennium core", a terminal green,
