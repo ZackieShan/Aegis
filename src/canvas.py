@@ -99,6 +99,14 @@ async def generate(prompt: str, language: str = "", model: str = "", owner: str 
         return {"ok": False, "error": "no model available — add one in Settings first."}
     lang_txt = f"{language} " if language else ""
     system = ("You are an expert programmer. Write complete, correct, runnable code. "
+              "The code runs IN A BROWSER: Python executes in Pyodide (stdlib only — no pip, "
+              "no display, no pygame/tkinter/turtle), JavaScript in a sandboxed iframe that "
+              "only captures console output, and HTML files render live with full interactivity. "
+              "Therefore, for anything visual or interactive — games, animations, simulations, "
+              "UIs, drawing — produce ONE self-contained HTML file (inline CSS/JS, a <canvas> "
+              "element and requestAnimationFrame for games) and fence it as ```html, even if "
+              "another language was suggested. Pure logic/computation may use the requested "
+              "language. "
               "Return EXACTLY ONE fenced code block containing the full file (no ellipses, "
               "no omitted sections), then a single short sentence describing it. No other prose.")
     user = f"Write a complete {lang_txt}program for:\n\n{prompt}"

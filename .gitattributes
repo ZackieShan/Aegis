@@ -25,3 +25,5 @@ docker/entrypoint.sh text eol=lf
 *.ico  binary
 *.woff binary
 *.woff2 binary
+*.wasm binary
+*.zip  binary

@@ -9,18 +9,26 @@ def _source(path):
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_html_code_runner_detaches_opener_before_document_write():
+def test_html_code_runner_serves_sandboxed_preview_not_document_write():
+    """runHTML now renders in a sandboxed iframe from the opaque-origin preview
+    endpoint (no window.open/document.write injection). The optional
+    open-in-window path must carry noopener so the run page can't reach back."""
     src = _source("static/js/codeRunner.js")
     match = re.search(
-        r"export function runHTML\(code, panel\) \{(?P<body>.*?)showOutput\(panel, 'Opened in new window'",
+        r"export async function runHTML\(code, panel\) \{(?P<body>.*?)\n\}",
         src,
         re.S,
     )
-
     assert match
     body = match.group("body")
-    assert "win.opener = null" in body
-    assert body.index("win.opener = null") < body.index("win.document.write(code)")
+    # no legacy document.write injection anywhere in the HTML runner
+    assert "document.write" not in body
+    # renders inline via the staged preview URL in a scripts-only sandbox
+    assert "stagePreview(code)" in body
+    assert "iframe.sandbox = 'allow-scripts allow-pointer-lock'" in body
+    assert "iframe.src = url" in body
+    # the escape-hatch window opens with noopener
+    assert "noopener" in body
 
 
 def test_compare_print_popup_detaches_opener_before_document_write():

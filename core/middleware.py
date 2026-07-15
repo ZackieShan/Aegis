@@ -69,6 +69,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Tool render endpoints
         is_tool_render = path.startswith("/api/tools/") and path.endswith("/render")
+        # Canvas run-preview: user code served into a sandboxed iframe. The CSP
+        # sandbox directive gives it an opaque origin with zero API/cookie
+        # access while still letting its inline scripts run (a nonce CSP would
+        # block them — srcdoc/blob iframes inherit the parent policy, which is
+        # why this is a real endpoint instead).
+        is_canvas_preview = path.startswith("/api/canvas/preview/")
+        # The Python-runner worker needs to COMPILE WebAssembly (Pyodide) — the
+        # app-wide script-src omits 'wasm-unsafe-eval', which silently blocks
+        # wasm and is why in-browser Python used to hang forever. A network-
+        # fetched worker uses its OWN response CSP (it does not inherit the
+        # page policy), so we grant the wasm capability to just this one script
+        # instead of loosening the whole app.
+        is_py_worker = path == "/static/js/pyRunner.worker.js"
         # Document library PDF preview endpoint
         is_document_pdf_preview = path.startswith("/api/document/") and path.endswith("/render-pdf")
         # Visual report pages are self-contained HTML — need inline scripts + external images
@@ -85,7 +98,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if is_https:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        if is_report:
+        if is_py_worker:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'wasm-unsafe-eval'; "
+                "connect-src 'self'"
+            )
+        elif is_canvas_preview:
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers["Content-Security-Policy"] = (
+                "sandbox allow-scripts allow-pointer-lock; "
+                "frame-ancestors 'self'"
+            )
+        elif is_report:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline'; "

@@ -6,9 +6,10 @@ import * as uiModule from './ui.js';
  * In-browser code runner for Python (Pyodide), JavaScript, and HTML
  */
 
-let pyodideInstance = null;
-let pyodideLoading = false;
-const pyodideQueue = [];
+// Python runs in a dedicated Web Worker (static/js/pyRunner.worker.js) with a
+// locally-vendored Pyodide — see runPython for why (freeze-proofing + CSP).
+let pyWorker = null;
+let pyRunSeq = 0;
 
 /**
  * Get or create an output panel below the <pre> element
@@ -139,110 +140,149 @@ function addCopyBtn_unused(panel, text) {
  */
 function addCloseBtn(_panel) { /* no-op */ }
 
-/**
- * Lazy-load Pyodide from CDN
- */
-function loadPyodide() {
-  if (pyodideInstance) return Promise.resolve(pyodideInstance);
-  if (pyodideLoading) {
-    return new Promise((resolve, reject) => {
-      pyodideQueue.push({ resolve, reject });
-    });
-  }
-  pyodideLoading = true;
-
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js';
-    script.onload = () => {
-      window.loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/' })
-        .then(py => {
-          pyodideInstance = py;
-          pyodideLoading = false;
-          pyodideQueue.forEach(q => q.resolve(py));
-          pyodideQueue.length = 0;
-          resolve(py);
-        })
-        .catch(err => {
-          pyodideLoading = false;
-          pyodideQueue.forEach(q => q.reject(err));
-          pyodideQueue.length = 0;
-          reject(err);
-        });
-    };
-    script.onerror = () => {
-      pyodideLoading = false;
-      const err = new Error('Failed to load Pyodide');
-      pyodideQueue.forEach(q => q.reject(err));
-      pyodideQueue.length = 0;
-      reject(err);
-    };
-    document.head.appendChild(script);
-  });
+function getPyWorker() {
+  if (!pyWorker) pyWorker = new Worker('/static/js/pyRunner.worker.js', { type: 'module' });
+  return pyWorker;
 }
 
-/**
- * Run Python code via Pyodide
- */
-export async function runPython(code, panel) {
-  showLoading(panel, 'Loading Python runtime (first time ~10 MB)...');
+function killPyWorker() {
+  if (pyWorker) {
+    try { pyWorker.terminate(); } catch (_) {}
+    pyWorker = null;
+  }
+}
 
-  let py;
-  try {
-    py = await loadPyodide();
-  } catch (e) {
-    showOutput(panel, 'Failed to load Python runtime: ' + e.message, true);
+// Display/GUI libraries that can't exist in the browser runtime — catch them
+// before the run so the user gets a pointer instead of a stack trace.
+const PY_GUI_RE = /^\s*(?:import|from)\s+(pygame|tkinter|turtle|kivy|PyQt\d*|PySide\d*)\b/m;
+
+const PY_TIMEOUT_MS = 30000;
+
+/**
+ * Run Python code via Pyodide in a Web Worker.
+ *
+ * The worker (with a locally-vendored Pyodide — the app CSP is
+ * connect-src 'self', and offline installs must still run code) keeps long
+ * or infinite loops off the UI thread: the tab stays responsive, the
+ * timeout actually fires, and Stop can terminate() a runaway script cold.
+ */
+export function runPython(code, panel) {
+  const gui = code.match(PY_GUI_RE);
+  if (gui) {
+    showOutput(panel,
+      `This program needs a display (${gui[1]}), and the in-browser Python runtime has none.\n` +
+      'For games and UIs, regenerate as a single self-contained HTML file (set the language to HTML) — ' +
+      'those render and run right in the panel.', true);
     addCloseBtn(panel);
     return;
   }
 
-  showLoading(panel, 'Running...');
+  panel.innerHTML = '';
+  const status = document.createElement('div');
+  status.className = 'code-runner-loading';
+  status.textContent = pyWorker ? 'Running…' : 'Loading Python runtime (~13 MB, served locally, first run only)…';
+  const stopBtn = document.createElement('button');
+  stopBtn.type = 'button';
+  stopBtn.className = 'code-runner-copy-inline';
+  stopBtn.textContent = '■ Stop';
+  panel.append(status, stopBtn);
 
-  const wrapper = `
-import sys, io
-_stdout = io.StringIO()
-_stderr = io.StringIO()
-sys.stdout = _stdout
-sys.stderr = _stderr
-try:
-    exec(${JSON.stringify(code)})
-except Exception as _e:
-    _stderr.write(str(_e))
-finally:
-    sys.stdout = sys.__stdout__
-    sys.stderr = sys.__stderr__
-(_stdout.getvalue(), _stderr.getvalue())
-`;
+  const worker = getPyWorker();
+  const id = ++pyRunSeq;
+  let settled = false;
+  let timer = null;
 
-  try {
-    const result = await Promise.race([
-      py.runPythonAsync(wrapper),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Execution timed out (10 s)')), 10000))
-    ]);
+  const finish = (fn) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    worker.removeEventListener('message', onMsg);
+    worker.removeEventListener('error', onErr);
+    fn();
+    addCloseBtn(panel);
+  };
 
-    const stdout = result.toJs ? result.toJs()[0] : (result[0] || '');
-    const stderr = result.toJs ? result.toJs()[1] : (result[1] || '');
-    if (result.destroy) result.destroy();
+  timer = setTimeout(() => finish(() => {
+    killPyWorker();
+    showOutput(panel,
+      `Execution timed out (${PY_TIMEOUT_MS / 1000} s) — the Python worker was stopped; the app is unaffected.\n` +
+      "Infinite game/render loops can't run here: for games, regenerate as an HTML file instead.", true);
+  }), PY_TIMEOUT_MS);
 
-    panel.innerHTML = '';
-    if (stderr) {
-      showOutput(panel, stderr, true);
-    } else if (stdout) {
-      showOutput(panel, stdout, false);
-    } else {
-      showOutput(panel, '(no output)', false);
-    }
-  } catch (e) {
-    showOutput(panel, e.message, true);
-  }
-  addCloseBtn(panel);
+  stopBtn.addEventListener('click', () => finish(() => {
+    killPyWorker();
+    showOutput(panel, 'Stopped.', true);
+  }));
+
+  const onMsg = (e) => {
+    const d = e.data || {};
+    if (d.id !== id) return;
+    if (d.status === 'running') { status.textContent = 'Running…'; return; }
+    finish(() => {
+      if (d.error) showOutput(panel, d.error, true);
+      else if (d.stderr) showOutput(panel, d.stderr, true);
+      else showOutput(panel, d.stdout || '(no output)', false);
+    });
+  };
+  const onErr = (e) => finish(() => {
+    killPyWorker();
+    showOutput(panel, 'Python runtime error: ' + ((e && e.message) || 'worker failed to start'), true);
+  });
+
+  worker.addEventListener('message', onMsg);
+  worker.addEventListener('error', onErr);
+  worker.postMessage({ id, code });
 }
 
 /**
- * Run JavaScript code in a sandboxed iframe
+ * Stage HTML on the server for the sandboxed run iframe. A srcdoc/blob
+ * iframe inherits the app's nonce CSP (which blocks the generated page's
+ * inline scripts), so run content is served from /api/canvas/preview/{token},
+ * where the middleware applies a CSP `sandbox` policy instead: opaque
+ * origin, scripts allowed, no cookies or API reach.
  */
-export function runJavaScript(code, panel) {
+async function stagePreview(html) {
+  const r = await fetch('/api/canvas/preview', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: html }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.url) throw new Error(d.detail || ('HTTP ' + r.status));
+  return d.url;
+}
+
+/**
+ * Run JavaScript code in a hidden sandboxed iframe, console output captured.
+ */
+export async function runJavaScript(code, panel) {
   showLoading(panel, 'Running...');
+
+  const wrappedCode = `
+<!DOCTYPE html><html><body><script>
+var _logs = [];
+console.log = function() { _logs.push([].map.call(arguments, function(a) { try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch(e) { return String(a); } }).join(' ')); };
+console.warn = function() { _logs.push('[warn] ' + [].map.call(arguments, String).join(' ')); };
+console.error = function() { _logs.push('[error] ' + [].map.call(arguments, String).join(' ')); };
+try {
+  var _timer = setTimeout(function() { parent.postMessage({error:'Execution timed out (10 s)'},'*'); }, 10000);
+  ${code.replace(/<\/script>/gi, '<\\/script>')}
+  clearTimeout(_timer);
+  parent.postMessage({logs: _logs}, '*');
+} catch(e) {
+  parent.postMessage({error: e.toString()}, '*');
+}
+<\/script></body></html>`;
+
+  let url;
+  try {
+    url = await stagePreview(wrappedCode);
+  } catch (e) {
+    showOutput(panel, 'Could not stage the run: ' + e.message, true);
+    addCloseBtn(panel);
+    return;
+  }
 
   const iframe = document.createElement('iframe');
   iframe.style.display = 'none';
@@ -284,25 +324,7 @@ export function runJavaScript(code, panel) {
   };
 
   window.addEventListener('message', onMessage);
-
-  const wrappedCode = `
-<!DOCTYPE html><html><body><script>
-var _logs = [];
-var _origLog = console.log;
-console.log = function() { _logs.push([].map.call(arguments, function(a) { try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch(e) { return String(a); } }).join(' ')); };
-console.warn = function() { _logs.push('[warn] ' + [].map.call(arguments, String).join(' ')); };
-console.error = function() { _logs.push('[error] ' + [].map.call(arguments, String).join(' ')); };
-try {
-  var _timer = setTimeout(function() { parent.postMessage({error:'Execution timed out (10 s)'},'*'); }, 10000);
-  ${code.replace(/<\/script>/gi, '<\\/script>')}
-  clearTimeout(_timer);
-  parent.postMessage({logs: _logs}, '*');
-} catch(e) {
-  parent.postMessage({error: e.toString()}, '*');
-}
-<\/script></body></html>`;
-
-  iframe.srcdoc = wrappedCode;
+  iframe.src = url;
 }
 
 /**
@@ -355,24 +377,47 @@ export async function runServer(code, panel, lang) {
 }
 
 /**
- * Run HTML code in its own popup window
+ * Run HTML live in a visible sandboxed iframe inside the output panel —
+ * games and UIs play right where the code is, with an "open in window"
+ * escape hatch for more room. The page is served from the canvas preview
+ * endpoint (opaque-origin CSP sandbox), so its scripts run but it can't
+ * touch cookies or the API.
  */
-export function runHTML(code, panel) {
-  panel.innerHTML = '';
+export async function runHTML(code, panel) {
+  showLoading(panel, 'Preparing preview…');
 
-  const win = window.open('', '_blank', 'width=800,height=600,menubar=no,toolbar=no,location=no,status=no');
-  if (!win) {
-    showOutput(panel, 'Popup blocked — please allow popups for this site.', true);
+  let url;
+  try {
+    url = await stagePreview(code);
+  } catch (e) {
+    showOutput(panel, 'Could not stage the preview: ' + e.message, true);
     addCloseBtn(panel);
     return;
   }
-  try { win.opener = null; } catch (_) {}
-  win.document.open();
-  win.document.write(code);
-  win.document.close();
 
-  showOutput(panel, 'Opened in new window', false);
+  panel.innerHTML = '';
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'code-runner-copy-inline';
+  openBtn.textContent = 'Open in window ↗';
+  openBtn.title = 'Run in a bigger separate window';
+  openBtn.addEventListener('click', () => {
+    // noopener severs window.opener so the run page can't reach back into the
+    // app (belt-and-suspenders — the preview is already served opaque-origin).
+    const win = window.open(url, '_blank', 'noopener,width=920,height=720,menubar=no,toolbar=no,location=no,status=no');
+    if (!win && uiModule.showToast) uiModule.showToast('Popup blocked — allow popups for this site.');
+  });
+
+  const iframe = document.createElement('iframe');
+  iframe.className = 'code-runner-frame';
+  iframe.sandbox = 'allow-scripts allow-pointer-lock';
+  iframe.src = url;
+  iframe.style.cssText = 'width:100%;height:480px;border:1px solid rgba(128,128,128,0.3);border-radius:10px;background:#fff;display:block;';
+  panel.append(iframe, openBtn);
   addCloseBtn(panel);
+  // Click-to-focus so keyboard games work without a hint; autofocus attempt
+  // is best-effort (sandboxed cross-origin content controls its own focus).
+  setTimeout(() => { try { iframe.focus(); } catch (_) {} }, 250);
 }
 
 /**
