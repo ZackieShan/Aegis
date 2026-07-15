@@ -1200,9 +1200,27 @@ def setup_chat_routes(
             except Exception:
                 _fallback_candidates = []
 
+            # A render fills the GPU, and llama-swap frees VRAM by evicting —
+            # so answering this turn on a GPU model would stop the render dead.
+            # Route to the CPU model instead while the card is busy. Returns None
+            # (the common case) whenever there's nothing to protect.
+            try:
+                from src import gpu_guard as _gpu_guard_mod
+                _busy_swap = _gpu_guard_mod.busy_swap(sess.model, sess.endpoint_url, owner=_user)
+            except Exception:
+                logger.debug("GPU busy-swap check failed", exc_info=True)
+                _gpu_guard_mod, _busy_swap = None, None
+            _turn_model = _busy_swap["model"] if _busy_swap else sess.model
+
             # Send model name early so the frontend can show it during streaming
             _model_suffix = "Research" if effective_do_research else None
-            _model_info = {"type": "model_info", "model": sess.model}
+            _model_info = {"type": "model_info", "model": _turn_model}
+            if _busy_swap:
+                # Be visible about the downgrade rather than silently answering
+                # on a 3B — and tell them how to switch it off.
+                _model_info["notice"] = _busy_swap["notice"]
+                _model_info["busy_fallback"] = True
+                _model_info["original_model"] = _busy_swap["original_model"]
             if _model_suffix:
                 _model_info["suffix"] = _model_suffix
             if ctx.preset.character_name:
@@ -1255,7 +1273,9 @@ def setup_chat_routes(
                 _actual_model = None
                 # ── Chat mode: call stream_llm directly, NO tools, NO document access ──
                 try:
-                    _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
+                    # _turn_model is sess.model unless a render holds the GPU, in
+                    # which case it's the CPU model so this turn can't evict it.
+                    _chat_candidates = [(sess.endpoint_url, _turn_model, sess.headers)] + _fallback_candidates
                     async for chunk in stream_llm_with_fallback(
                         _chat_candidates,
                         messages,
@@ -1422,7 +1442,10 @@ def setup_chat_routes(
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
-                        sess.model,
+                        # _turn_model is sess.model unless a render holds the
+                        # GPU, in which case it's the CPU model — otherwise this
+                        # turn would evict sd-server and kill the render.
+                        _turn_model,
                         messages,
                         headers=sess.headers,
                         temperature=ctx.preset.temperature,
@@ -1430,7 +1453,12 @@ def setup_chat_routes(
                         prompt_type=preset_id,
                         max_tool_calls=_tool_budget,
                         max_rounds=_max_rounds,
-                        context_length=ctx.context_length,
+                        # ctx.context_length is sized for sess.model; when we've
+                        # swapped, clamp to the CPU model's smaller window.
+                        context_length=(
+                            _gpu_guard_mod.clamp_context(ctx.context_length, _busy_swap)
+                            if (_gpu_guard_mod and _busy_swap) else ctx.context_length
+                        ),
                         active_document=active_doc,
                         active_email=active_email_ctx,
                         session_id=session,

@@ -20,6 +20,8 @@ import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
+from src import job_queue
+
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 3.0
@@ -88,8 +90,20 @@ async def start_video_job(
         raise ValueError(f"ComfyUI returned no prompt id: {str(envelope)[:200]}")
 
     job_id = uuid.uuid4().hex[:12]
+    # ComfyUI builds its job here rather than via submit_video_job, so it must
+    # register with the queue itself — a ComfyUI render that skipped this would
+    # be invisible to gpu_busy(), and chat would evict it mid-render.
+    queue_id = job_queue.add(
+        "video",
+        prompt or "video",
+        owner=owner,
+        session_id=session_id,
+        external_id=job_id,
+        meta={"model": model, "engine": "comfyui", "width": int(width), "height": int(height)},
+    )
     video_generation._JOBS[job_id] = {
         "id": job_id,
+        "queue_id": queue_id,
         "status": "queued",
         "prompt": prompt,
         "model": model,
@@ -183,6 +197,11 @@ async def _poll_job(job_id: str, remote_id: str) -> None:
         logger.exception("ComfyUI job %s poller crashed", job_id)
         job["error"] = f"Video job failed: {e}"
         job["status"] = "error"
+    finally:
+        # Same reasoning as the sd-server poller: mirror on every exit path so a
+        # finished ComfyUI render can never leave the queue thinking the GPU is
+        # still occupied.
+        video_generation._mirror_queue(job)
 
 
 async def render_image(

@@ -50,3 +50,61 @@ models:
   #     --listen-port ${PORT}
   #   checkEndpoint: /v1/models
   #   ttl: 300
+
+  # ---- Recommended: a CPU-only chat model, so chat can't kill your renders ---
+  # THE PROBLEM: a diffusion model fills the card during a render, and llama-swap
+  # resolves contention by EVICTING — so sending a chat message mid-render stops
+  # the image/video server and your render dies with no explanation. There is no
+  # VRAM left to share, so the only fix is a chat model that needs none.
+  #
+  # `--device none` pins it to the CPU and guarantees zero VRAM (not even a CUDA
+  # context — a render can leave under 1GB free). Aegis routes chat here
+  # automatically while a render is in flight, tells you it did, and switches
+  # back afterwards. Any small instruct GGUF works (1–4B is plenty).
+  #
+  # Uncomment BOTH this block and the `cpu` group below, and point -m at a real
+  # file. Leave it commented if you have no such model: Aegis then logs a warning
+  # and leaves chat alone rather than routing you to a model that can't load.
+  # Keep -c in sync with gpu_guard.FALLBACK_CONTEXT (default 32768) — agent mode
+  # spends thousands of tokens on tool schemas before your message even lands.
+  #
+  # NB: never put a '#' comment inside a `cmd: |` block — YAML keeps it, and the
+  # line gets handed to llama-server as arguments.
+  # "chat-lite-cpu":
+  #   cmd: |
+  #     "C:/path/to/engine/llamacpp/llama-server.exe"
+  #     -m "C:/path/to/aegis/models/small-instruct.gguf"
+  #     --host 127.0.0.1 --port ${PORT}
+  #     --device none -ngl 0 -c 32768 -fa on --jinja --no-webui
+  #   ttl: 1800
+
+# ---- Groups: who may share the GPU -----------------------------------------
+# Without a `groups:` section every model lands in one implicit group where ANY
+# load evicts whatever is loaded — including stopping an in-flight render. These
+# groups are what let the CPU fallback coexist with a render instead of killing
+# it. (Verified on llama-swap v238: no groups => the second load evicts the
+# first; with these => both stay up, in either order.)
+#
+# Uncomment alongside chat-lite-cpu above, and list YOUR model names as members.
+#
+# groups:
+#   # Everything that wants the GPU. Each fills most of the card, so: one at a
+#   # time (swap), and it may evict its peers (exclusive). This is already how
+#   # llama-swap behaves by default — naming it changes nothing for these.
+#   gpu:
+#     swap: true
+#     exclusive: true
+#     members:
+#       - my-model
+#       - my-vision
+#       - my-image
+#   # The CPU fallback.
+#   #   exclusive: false -> loading it never evicts a live render.
+#   #   persistent: true -> a render loading never evicts it.
+#   # Both are required; either alone still breaks in one direction.
+#   cpu:
+#     swap: false
+#     exclusive: false
+#     persistent: true
+#     members:
+#       - chat-lite-cpu

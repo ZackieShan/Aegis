@@ -925,6 +925,55 @@ async def _sdcpp_native_image(
     cfg_scale: Optional[float],
     budget_s: float = 600.0,
 ) -> Dict:
+    """Queue-registering wrapper around the native sd-server image render.
+
+    This path is unambiguously local GPU work, so it registers with the unified
+    queue — that entry is what stops a chat message from evicting the render.
+    (do_generate_image as a whole can't register: it may resolve to a remote API,
+    which touches no VRAM, and marking that busy would push chat onto the CPU
+    model for no reason.)
+    """
+    from src import job_queue
+
+    qid = job_queue.add("image", prompt or "image", meta={"model": model_id})
+    job_queue.start(qid)
+    try:
+        result = await _sdcpp_native_image_inner(
+            base_url, model_id, headers,
+            prompt=prompt, negative_prompt=negative_prompt,
+            width=width, height=height, seed=seed, steps=steps,
+            cfg_scale=cfg_scale, budget_s=budget_s,
+        )
+    except Exception as e:
+        job_queue.finish(qid, "error", error=str(e))
+        raise
+
+    if not isinstance(result, dict):
+        job_queue.finish(qid, "done")
+    elif result.get("fallback"):
+        # Never reached the GPU — drop it rather than leave a phantom entry.
+        job_queue.drop(qid)
+    elif result.get("error"):
+        job_queue.finish(qid, "error", error=str(result.get("error")))
+    else:
+        job_queue.finish(qid, "done")
+    return result
+
+
+async def _sdcpp_native_image_inner(
+    base_url: str,
+    model_id: str,
+    headers: dict,
+    *,
+    prompt: str,
+    negative_prompt: str,
+    width: int,
+    height: int,
+    seed: Optional[int],
+    steps: Optional[int],
+    cfg_scale: Optional[float],
+    budget_s: float = 600.0,
+) -> Dict:
     """Generate one image on sd-server's native async API (submit + poll via
     llama-swap's /upstream/ passthrough — the same surface video uses).
 

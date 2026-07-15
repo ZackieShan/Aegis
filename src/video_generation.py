@@ -24,6 +24,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src import job_queue
 from src.constants import GENERATED_IMAGES_DIR
 
 logger = logging.getLogger(__name__)
@@ -163,8 +164,20 @@ async def start_video_job(
         poll_path = urlsplit(poll_path).path or f"/sdcpp/v1/jobs/{remote_id}"
 
     job_id = uuid.uuid4().hex[:12]
+    # Register with the unified queue before anything can fail: this entry is
+    # what tells chat the GPU is taken, and a render that never registers is a
+    # render that chat will happily evict.
+    queue_id = job_queue.add(
+        "video",
+        prompt or "video",
+        owner=owner,
+        session_id=session_id,
+        external_id=job_id,
+        meta={"model": model_id, "width": int(width), "height": int(height)},
+    )
     _JOBS[job_id] = {
         "id": job_id,
+        "queue_id": queue_id,
         "status": "queued",
         "prompt": prompt,
         "model": model_id,
@@ -190,6 +203,38 @@ async def start_video_job(
     asyncio.create_task(_poll_job(job_id, poll_url, headers))
     logger.info("Video job %s submitted (model=%s, %sx%s, %s frames)", job_id, model_id, width, height, video_frames)
     return job_id
+
+
+def _mirror_queue(job: Dict[str, Any]) -> None:
+    """Mirror a video job's state onto its unified-queue entry.
+
+    Best-effort by design: the queue is a view, so a mirroring failure must never
+    take down a real render.
+    """
+    qid = job.get("queue_id")
+    if not qid:
+        return
+    try:
+        progress = job.get("progress")
+        if isinstance(progress, (int, float)) and progress > 1:
+            # sd-server reports percent on some builds and a 0..1 fraction on
+            # others; normalise, or every render would pin at 100%.
+            progress = float(progress) / 100.0
+
+        status = str(job.get("status") or "")
+        if status == "done":
+            job_queue.finish(qid, "done", result_url=job.get("video_url"))
+        elif status == "error":
+            job_queue.finish(qid, "error", error=job.get("error"))
+        elif status in ("canceled", "cancelled"):
+            job_queue.finish(qid, "cancelled")
+        elif status == "running":
+            job_queue.start(qid)
+            job_queue.update(qid, progress=progress)
+        else:
+            job_queue.update(qid, progress=progress)
+    except Exception:
+        logger.debug("Queue mirror failed for video job %s", job.get("id"), exc_info=True)
 
 
 async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
@@ -244,6 +289,7 @@ async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
                     return
                 if not job.get("cancel_requested"):
                     job["status"] = "running" if status in ("running", "processing", "in_progress", "generating") else (job["status"] if job["status"] == "running" else "queued")
+                _mirror_queue(job)
                 await asyncio.sleep(_POLL_INTERVAL_S)
         job["error"] = f"Video generation exceeded the {_JOB_DEADLINE_S // 60}-minute cap"
         job["status"] = "error"
@@ -251,6 +297,12 @@ async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
         logger.exception("Video job %s poller crashed", job_id)
         job["error"] = f"Video job failed: {e}"
         job["status"] = "error"
+    finally:
+        # Every exit from this poller is terminal for the job — cancel, error,
+        # timeout, or success. Mirroring here (rather than at each return) is
+        # what guarantees the queue can't be left believing a render is still
+        # live, which would strand chat on the CPU model indefinitely.
+        _mirror_queue(job)
 
 
 def _finish_job(job: Dict[str, Any], result: Dict[str, Any]) -> None:
