@@ -50,6 +50,9 @@ RECIPES_DIR = os.path.join(DATA_DIR, "recipes")
 # Style presets = saved image/video generation styles (model + prompt affixes +
 # seed/steps/cfg + LoRA tags), one JSON each — the "same look across prompts" store.
 STYLES_DIR = os.path.join(DATA_DIR, "styles")
+# Automations = a recipe + a trigger (manual/schedule) + an output action, one
+# JSON each — the "run this workflow on a schedule" store.
+JOBS_DIR = os.path.join(DATA_DIR, "jobs")
 DEEP_RESEARCH_DIR = os.path.join(DATA_DIR, "deep_research")
 MCP_OAUTH_DIR = os.path.join(DATA_DIR, "mcp_oauth")
 GENERATED_IMAGES_DIR = os.path.join(DATA_DIR, "generated_images")

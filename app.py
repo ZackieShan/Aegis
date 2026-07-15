@@ -792,6 +792,11 @@ app.include_router(setup_compare_routes(session_manager))
 # Recipes — visual tool + model orchestration workflows
 from routes.recipes_routes import setup_recipes_routes
 app.include_router(setup_recipes_routes())
+
+# Automations — recipes that run on a trigger and deliver their result
+from routes.jobs_routes import setup_jobs_routes
+app.include_router(setup_jobs_routes())
+logger.info("Automations (jobs) routes initialized")
 logger.info("Recipes routes initialized")
 
 # Doctor — capability self-check + guarded (permission-gated) self-heal
@@ -1249,6 +1254,14 @@ async def _startup_event():
     _tasks_inprocess = os.environ.get("AEGIS_INPROCESS_TASKS", "1").strip().lower()
     if _tasks_inprocess not in ("0", "false", "no", "off", ""):
         await task_scheduler.start()
+        # Automations (recipe jobs) run on a small sibling poll loop, gated by
+        # the same in-process switch so an external-worker deployment can drive
+        # them elsewhere.
+        try:
+            from src import jobs as _jobs
+            _jobs.start_scheduler()
+        except Exception as _je:
+            logger.warning("automations scheduler failed to start: %s", _je)
     else:
         logger.info(
             "In-process task scheduler disabled (AEGIS_INPROCESS_TASKS=0); "

@@ -218,6 +218,45 @@ function _injectStyles() {
   .rp-expect { font-size: 12px; opacity: 0.6; }
   #recipe-run-panel .recipe-run { border-top: 0; padding: 0; background: transparent; max-height: none; }
   .rp-header-btn { display: none; }
+
+  /* automate form (schedule a recipe) */
+  .rp-automate { border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 40%, var(--border, #333));
+    border-radius: var(--radius-md, 12px); padding: 14px; display: flex; flex-direction: column; gap: 11px;
+    background: color-mix(in srgb, var(--accent, var(--red)) 5%, transparent); }
+  .rp-automate h4 { margin: 0; font: 700 14px/1.2 inherit; }
+  .rp-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .rp-row > label { font: 600 11px/1 inherit; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.6; min-width: 62px; }
+  .rp-automate select, .rp-automate input { font: 12.5px/1.2 inherit; color: var(--fg, #eee);
+    background: var(--bg, #111); border: 1px solid var(--border, #333); border-radius: var(--radius-sm, 8px); padding: 7px 9px; }
+  .rp-automate input[type=text] { flex: 1; min-width: 120px; }
+
+  /* jobs list */
+  #recipe-jobs-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #recipe-jobs-list { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .job-card { border: 1px solid var(--border, #333); border-radius: var(--radius-md, 12px); padding: 13px 15px;
+    background: var(--panel, #1b1b1b); display: flex; flex-direction: column; gap: 6px; }
+  .job-card.off { opacity: 0.62; }
+  .job-top { display: flex; align-items: center; gap: 10px; }
+  .job-name { font: 600 14px/1.2 inherit; }
+  .job-meta { font-size: 11.5px; opacity: 0.65; display: flex; gap: 12px; flex-wrap: wrap; }
+  .job-meta .ok { color: var(--ok, #4caf7d); }
+  .job-meta .bad { color: var(--color-error, #f66); }
+  .job-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .job-btn { cursor: pointer; font: 500 11.5px/1 inherit; color: var(--fg, #eee); background: transparent;
+    border: 1px solid var(--border, #333); border-radius: var(--radius-sm, 8px); padding: 5px 9px; }
+  .job-btn:hover { border-color: var(--accent, var(--red)); }
+  .job-btn.danger:hover { border-color: var(--color-error, #f66); color: var(--color-error, #f66); }
+  .job-switch { position: relative; width: 34px; height: 19px; flex-shrink: 0; cursor: pointer; }
+  .job-switch input { opacity: 0; width: 0; height: 0; }
+  .job-slider { position: absolute; inset: 0; border-radius: 20px; background: var(--border, #444); transition: 0.15s; }
+  .job-slider::before { content: ""; position: absolute; width: 15px; height: 15px; left: 2px; top: 2px;
+    border-radius: 50%; background: #fff; transition: 0.15s; }
+  .job-switch input:checked + .job-slider { background: var(--accent, var(--red)); }
+  .job-switch input:checked + .job-slider::before { transform: translateX(15px); }
+  .job-hist { margin-top: 4px; font-size: 11px; }
+  .job-hist summary { cursor: pointer; opacity: 0.6; }
+  .job-hist pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow: auto;
+    font: 11px/1.45 var(--mono, ui-monospace, monospace); opacity: 0.85; background: var(--bg, #111); padding: 8px; border-radius: 6px; }
   `;
   const style = _el('style');
   style.id = 'recipes-styles';
@@ -239,6 +278,7 @@ function _build() {
           Recipes
         </h4>
         <button class="recipe-btn" id="recipe-to-library" hidden>← Library</button>
+        <button class="recipe-btn" id="recipe-to-jobs" hidden title="Your scheduled automations">⏰ Automations</button>
         <button class="recipe-btn" id="recipe-to-build" hidden title="Build your own recipe in the node editor">+ Build your own</button>
         <button class="close-btn" aria-label="Close recipes">✖</button>
       </div>
@@ -251,6 +291,15 @@ function _build() {
         </div>
         <div id="recipe-lib-grid"></div>
         <div id="recipe-run-panel" hidden></div>
+      </div>
+
+      <!-- Automations — recipes on a schedule -->
+      <div id="recipe-jobs-view" hidden>
+        <div class="lib-head">
+          <div style="font-weight:600;font-size:14px;margin-right:auto">Automations</div>
+          <div class="lib-note">Recipes that run on a schedule and deliver the result.</div>
+        </div>
+        <div id="recipe-jobs-list"></div>
       </div>
 
       <!-- Editor — the authoring surface (admins) -->
@@ -304,6 +353,7 @@ function _build() {
   modal.querySelector('#recipe-run-btn').addEventListener('click', _run);
   // Library ↔ editor
   modal.querySelector('#recipe-to-library').addEventListener('click', _showLibrary);
+  modal.querySelector('#recipe-to-jobs').addEventListener('click', _showJobs);
   modal.querySelector('#recipe-to-build').addEventListener('click', () => _showEditor());
   modal.querySelector('#recipe-lib-search').addEventListener('input', (e) => {
     _libSearch = e.target.value.toLowerCase(); _renderLibrary();
@@ -937,25 +987,213 @@ function _libView() { return document.getElementById('recipe-library-view'); }
 function _editorView() { return document.getElementById('recipe-editor-view'); }
 function _runPanel() { return document.getElementById('recipe-run-panel'); }
 
+function _jobsView() { return document.getElementById('recipe-jobs-view'); }
+
 function _showLibrary() {
   _libView().hidden = false;
   _editorView().hidden = true;
+  _jobsView().hidden = true;
   _runPanel().hidden = true;
   document.getElementById('recipe-lib-grid').style.display = '';
   _modal().querySelector('#recipe-to-library').hidden = true;
+  _modal().querySelector('#recipe-to-jobs').hidden = false;
   _modal().querySelector('#recipe-to-build').hidden = !_canAuthor;
 }
 
 function _showEditor() {
   _libView().hidden = true;
+  _jobsView().hidden = true;
   _editorView().hidden = false;
   _modal().querySelector('#recipe-to-library').hidden = false;
+  _modal().querySelector('#recipe-to-jobs').hidden = true;
   _modal().querySelector('#recipe-to-build').hidden = true;
   // Lazily render the editor the first time it's shown.
   _renderPalette();
   _nodes.forEach(_renderNode);
   _drawEdges();
   _syncEmptyHint();
+}
+
+async function _showJobs() {
+  _libView().hidden = true;
+  _editorView().hidden = true;
+  _jobsView().hidden = false;
+  _modal().querySelector('#recipe-to-library').hidden = false;
+  _modal().querySelector('#recipe-to-jobs').hidden = true;
+  _modal().querySelector('#recipe-to-build').hidden = true;
+  await _renderJobs();
+}
+
+// ── automations (jobs) ──────────────────────────────────────────────────────
+async function _renderJobs() {
+  const list = document.getElementById('recipe-jobs-list');
+  list.replaceChildren(_el('div', 'lib-note', 'Loading…'));
+  let jobs = [];
+  try {
+    const r = await fetch(`${API}/api/jobs`, { credentials: 'same-origin' });
+    jobs = (await r.json()).jobs || [];
+  } catch (e) { list.replaceChildren(_el('div', 'lib-note', 'Could not load automations: ' + e.message)); return; }
+  list.replaceChildren();
+  if (!jobs.length) {
+    list.appendChild(_el('div', 'lib-note', 'No automations yet. Run a recipe from the library, then hit “⏰ Automate” to schedule it.'));
+    return;
+  }
+  jobs.forEach(j => list.appendChild(_jobCard(j)));
+}
+
+function _fmtWhen(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000), now = Date.now(), diff = d.getTime() - now;
+  const abs = Math.abs(diff), mins = Math.round(abs / 60000), hrs = Math.round(abs / 3600000);
+  const rel = mins < 60 ? `${mins}m` : hrs < 48 ? `${hrs}h` : `${Math.round(hrs / 24)}d`;
+  return (diff < 0 ? rel + ' ago' : 'in ' + rel);
+}
+
+function _fmtTrigger(t) {
+  if (!t || t.kind !== 'schedule') return 'Manual';
+  const s = t.schedule || {};
+  if (s.kind === 'interval') { const h = s.interval_seconds / 3600; return h >= 1 ? `Every ${h % 1 ? h.toFixed(1) : h}h` : `Every ${Math.round(s.interval_seconds / 60)}m`; }
+  if (s.kind === 'cron') return `Cron: ${s.cron}`;
+  return 'Scheduled';
+}
+
+function _jobCard(j) {
+  const card = _el('div', 'job-card' + (j.enabled ? '' : ' off'));
+  const top = _el('div', 'job-top');
+  // toggle
+  const sw = _el('label', 'job-switch');
+  const cb = _el('input'); cb.type = 'checkbox'; cb.checked = !!j.enabled;
+  cb.addEventListener('change', () => _toggleJob(j.id, cb.checked));
+  sw.append(cb, _el('span', 'job-slider'));
+  top.appendChild(sw);
+  top.appendChild(_el('div', 'job-name', j.name));
+  const actions = _el('div', 'job-actions');
+  const runBtn = _el('button', 'job-btn', '▶ Run now'); runBtn.type = 'button';
+  runBtn.addEventListener('click', () => _runJobNow(j.id, runBtn));
+  const delBtn = _el('button', 'job-btn danger', 'Delete'); delBtn.type = 'button';
+  delBtn.addEventListener('click', () => _deleteJob(j.id));
+  actions.append(runBtn, delBtn);
+  top.appendChild(actions);
+  card.appendChild(top);
+
+  const meta = _el('div', 'job-meta');
+  meta.appendChild(_el('span', null, _fmtTrigger(j.trigger)));
+  const outLabel = { notify: 'Notify', document: 'Save to document', note: 'Save to note', email: 'Email draft' }[(j.output || {}).kind] || 'Notify';
+  meta.appendChild(_el('span', null, '→ ' + outLabel));
+  if (j.enabled && j.next_run) meta.appendChild(_el('span', null, 'Next ' + _fmtWhen(j.next_run)));
+  if (j.last_run) {
+    const lr = _el('span', j.last_run.ok ? 'ok' : 'bad', (j.last_run.ok ? '✓ ran ' : '✗ failed ') + _fmtWhen(j.last_run.at));
+    meta.appendChild(lr);
+  }
+  card.appendChild(meta);
+
+  if (j.last_run && (j.last_run.summary || j.last_run.error)) {
+    const det = document.createElement('details'); det.className = 'job-hist';
+    det.appendChild(Object.assign(document.createElement('summary'), { textContent: 'Last result' }));
+    const pre = _el('pre'); pre.textContent = j.last_run.error || j.last_run.summary || '';
+    det.appendChild(pre);
+    card.appendChild(det);
+  }
+  return card;
+}
+
+async function _toggleJob(id, enabled) {
+  try {
+    await fetch(`${API}/api/jobs/${encodeURIComponent(id)}/toggle`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+    });
+    _renderJobs();
+  } catch (e) { _toast('Toggle failed: ' + e.message); }
+}
+
+async function _runJobNow(id, btn) {
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Running…';
+  try {
+    const r = await fetch(`${API}/api/jobs/${encodeURIComponent(id)}/run`, { method: 'POST', credentials: 'same-origin' });
+    const d = await r.json().catch(() => ({}));
+    _toast(d.ok ? 'Ran — result delivered.' : ('✗ ' + (d.error || 'run failed')));
+  } catch (e) { _toast('Run failed: ' + e.message); }
+  btn.disabled = false; btn.textContent = orig;
+  _renderJobs();
+}
+
+async function _deleteJob(id) {
+  if (!confirm('Delete this automation?')) return;
+  try {
+    await fetch(`${API}/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' });
+    _renderJobs();
+  } catch (e) { _toast('Delete failed: ' + e.message); }
+}
+
+function _openAutomateForm(recipe, inputEl, container) {
+  // Toggle: if the form's already open, close it.
+  const existing = container.querySelector('.rp-automate');
+  if (existing) { existing.remove(); return; }
+  const form = _el('div', 'rp-automate');
+  form.appendChild(Object.assign(_el('h4'), { textContent: '⏰ Automate “' + recipe.name + '”' }));
+
+  const nameRow = _el('div', 'rp-row');
+  nameRow.appendChild(Object.assign(_el('label'), { textContent: 'Name' }));
+  const nameIn = _el('input'); nameIn.type = 'text'; nameIn.value = recipe.name;
+  nameRow.appendChild(nameIn);
+  form.appendChild(nameRow);
+
+  const whenRow = _el('div', 'rp-row');
+  whenRow.appendChild(Object.assign(_el('label'), { textContent: 'Run' }));
+  const kind = _el('select');
+  [['daily', 'Daily at'], ['hours', 'Every N hours'], ['cron', 'Custom cron']].forEach(([v, t]) => kind.appendChild(new Option(t, v)));
+  whenRow.appendChild(kind);
+  const timeIn = _el('input'); timeIn.type = 'time'; timeIn.value = '07:00';
+  const hoursIn = _el('input'); hoursIn.type = 'number'; hoursIn.value = '6'; hoursIn.min = '1'; hoursIn.style.width = '64px'; hoursIn.hidden = true;
+  const cronIn = _el('input'); cronIn.type = 'text'; cronIn.placeholder = '0 7 * * *'; cronIn.hidden = true;
+  whenRow.append(timeIn, hoursIn, cronIn);
+  kind.addEventListener('change', () => {
+    timeIn.hidden = kind.value !== 'daily';
+    hoursIn.hidden = kind.value !== 'hours';
+    cronIn.hidden = kind.value !== 'cron';
+  });
+  form.appendChild(whenRow);
+
+  const outRow = _el('div', 'rp-row');
+  outRow.appendChild(Object.assign(_el('label'), { textContent: 'Deliver' }));
+  const outSel = _el('select');
+  [['notify', 'In-app notification'], ['document', 'Save to a document'], ['note', 'Save to a note']].forEach(([v, t]) => outSel.appendChild(new Option(t, v)));
+  outRow.appendChild(outSel);
+  form.appendChild(outRow);
+
+  const actions = _el('div', 'rp-row');
+  const save = _el('button', 'recipe-btn primary', 'Create automation'); save.type = 'button';
+  const cancel = _el('button', 'recipe-btn', 'Cancel'); cancel.type = 'button';
+  cancel.addEventListener('click', () => form.remove());
+  actions.append(save, cancel);
+  form.appendChild(actions);
+
+  save.addEventListener('click', async () => {
+    const trigger = { kind: 'schedule' };
+    if (kind.value === 'daily') { const [h, m] = timeIn.value.split(':'); trigger.cron = `${parseInt(m, 10)} ${parseInt(h, 10)} * * *`; }
+    else if (kind.value === 'hours') { trigger.interval_seconds = Math.max(1, parseInt(hoursIn.value, 10) || 6) * 3600; }
+    else { trigger.cron = cronIn.value.trim(); }
+    const body = {
+      name: nameIn.value.trim() || recipe.name,
+      source: { kind: 'canned', template_id: recipe.id },
+      input: inputEl.value.trim() || (inputEl.placeholder.startsWith('Type') ? '' : inputEl.placeholder),
+      trigger, output: { kind: outSel.value },
+    };
+    save.disabled = true;
+    try {
+      const r = await fetch(`${API}/api/jobs`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { _toast('✗ ' + (d.detail || 'could not create')); save.disabled = false; return; }
+      _toast('Automation created — see ⏰ Automations.');
+      form.remove();
+    } catch (e) { _toast('✗ ' + e.message); save.disabled = false; }
+  });
+
+  container.appendChild(form);
 }
 
 async function _loadCatalog() {
@@ -1093,10 +1331,14 @@ function _openRunPanel(r) {
   panel.appendChild(input);
   panel.appendChild(_el('div', 'rp-expect', 'You’ll get: ' + r.expected_output));
 
+  const btnRow = _el('div', 'rp-row');
   const runBtn = _el('button', 'recipe-btn primary', '▶ Run');
   runBtn.type = 'button';
-  runBtn.style.alignSelf = 'flex-start';
-  panel.appendChild(runBtn);
+  const autoBtn = _el('button', 'recipe-btn', '⏰ Automate');
+  autoBtn.type = 'button';
+  autoBtn.title = 'Run this on a schedule';
+  btnRow.append(runBtn, autoBtn);
+  panel.appendChild(btnRow);
   const out = _el('div', 'recipe-run');
   const outBody = _el('div');
   out.appendChild(outBody);
@@ -1104,6 +1346,7 @@ function _openRunPanel(r) {
 
   const doRun = () => _runCanned(r, input.value.trim() || (input.placeholder.startsWith('Type') ? '' : input.placeholder), runBtn, outBody);
   runBtn.addEventListener('click', doRun);
+  autoBtn.addEventListener('click', () => _openAutomateForm(r, input, panel));
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) doRun(); });
   setTimeout(() => input.focus(), 60);
 }
