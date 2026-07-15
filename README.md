@@ -88,8 +88,10 @@ you fit them to your machine:
 - **Repo → Wiki** (`/wiki`) — turn any local repo into a structured Overview / Architecture / module guide.
 
 **Create & converse**
-- **Studio** (`/studio`) — one home for generated media: photos, albums, the image editor,
-  the movie maker, style presets, and the tagged model library.
+- **Studio** (`/studio`) — one home for generated media: photos, albums, a **Create** panel
+  (prompt, model, style, duration — with a ✨ button that rewrites rough intent into a
+  diffusion-ready scene using a local model), the image editor, the movie maker, style
+  presets, and the tagged model library. Video renders are stored as MP4.
 - **Image generation** (`/image`) — fully local diffusion with seeds, steps, and negative prompts.
 - **Video generation** (`/video`) — local clips up to ~10s, with audio on LTX-2 models; **animate
   any Studio still** into a clip (`/video image=last` or the Studio's Animate button).

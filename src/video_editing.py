@@ -157,6 +157,50 @@ def probe(path: os.PathLike | str) -> Dict[str, Any]:
     }
 
 
+def transcode_to_mp4(data: bytes, src_ext: str = "webm") -> Optional[bytes]:
+    """Re-encode a finished clip to browser-and-everything-else-friendly MP4.
+
+    sd-server emits .webm; it plays in browsers but travels badly — phones,
+    editors and messengers all prefer H.264 MP4. Called on the render-finish
+    path, so failure must never lose the clip: returns None and the caller
+    keeps the original bytes.
+    """
+    import os
+    import tempfile
+
+    src = dst = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{src_ext}", delete=False) as f:
+            f.write(data)
+            src = Path(f.name)
+        # Pre-create the output with mkstemp so it gets 0600 on POSIX — ffmpeg
+        # opens with O_TRUNC and keeps existing permissions, whereas letting it
+        # create the file would apply the umask (world-readable in shared /tmp).
+        fd, dst_name = tempfile.mkstemp(suffix=".out.mp4")
+        os.close(fd)
+        dst = Path(dst_name)
+        proc = _run([
+            ffmpeg_exe(), "-hide_banner", "-y", "-i", str(src),
+            *_VCODEC, *_ACODEC,
+            "-movflags", "+faststart", str(dst),
+        ], timeout=600.0)
+        if proc.returncode != 0 or not dst.exists() or dst.stat().st_size == 0:
+            tail = "\n".join((proc.stderr or "").strip().splitlines()[-3:])
+            logger.warning("mp4 transcode failed, keeping %s: %s", src_ext, tail)
+            return None
+        return dst.read_bytes()
+    except Exception as e:
+        logger.warning("mp4 transcode failed, keeping %s: %s", src_ext, e)
+        return None
+    finally:
+        for p in (src, dst):
+            try:
+                if p is not None and p.exists():
+                    p.unlink()
+            except OSError:
+                pass
+
+
 def _even(n: int) -> int:
     """libx264 needs even dimensions."""
     return n if n % 2 == 0 else n + 1

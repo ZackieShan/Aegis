@@ -1,8 +1,9 @@
 # Studio — generate, edit, stitch
 
-The Studio is where generated media lives: your photos and clips, the image
-editor, the movie maker, your style presets, the model library, and a queue that
-tells you what the machine is busy with.
+The Studio is where generated media lives — and where it gets made: your photos
+and clips, a Create panel for new generations, the image editor, the movie
+maker, your style presets, the model library, and a queue that tells you what
+the machine is busy with.
 
 Open it from the sidebar, with `/studio`, or `/open Studio`. (It used to be called
 the Gallery — `/gallery` still works.)
@@ -22,6 +23,31 @@ driven by a served edit model. Any still also grows an **Animate** button that
 turns it into a video clip starting on that exact frame.
 
 ---
+
+## Create
+
+Generate images and clips without leaving the Studio: prompt, model, style,
+duration (video) or size (image), seed — one panel. Videos hand off to the
+**Queue** tab; images resolve in place. Everything lands in Photos, where the
+Movie tab can pick it up. All video is stored as **MP4** (renders that come out
+of the engine as webm are transcoded automatically — smaller files, and they
+play everywhere).
+
+Two things that make results dramatically better:
+
+- **Describe the scene, not the task.** Diffusion models depict; they don't
+  obey. Ask for *"a movie trailer in the style of Studio Ghibli"* and the model
+  will literally draw an ornate screen with a blurry movie playing on it
+  (observed). Ask instead for what the camera sees: *"a lone rider crossing a
+  red-rock desert at dusk, long shadows, slow tracking shot, hand-painted anime
+  style."* The **✨ Enhance prompt** button does this rewrite for you with the
+  local utility model.
+- **A "trailer" is several shots, not one clip.** Generate each shot in Create
+  (with one style preset active so they match), watch them land in Photos, then
+  assemble them in the Movie tab.
+
+Duration goes up to ~10s on LTX models (24fps) and ~16s on Wan (16fps) — the
+engine caps at 257 frames either way.
 
 ## Movie
 

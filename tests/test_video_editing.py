@@ -172,7 +172,11 @@ def test_build_movie_rejects_empty_and_oversized_lists(tmp_path):
 def _real():
     if not REAL_CLIPS.is_dir():
         return []
-    return sorted(REAL_CLIPS.glob("*.webm"))[:2]
+    # Both extensions: renders made before the mp4-transcode change are .webm,
+    # everything after is .mp4 — a fresh install only ever accumulates .mp4,
+    # and a webm-only glob would skip these tests there forever.
+    clips = sorted(REAL_CLIPS.glob("*.webm")) + sorted(REAL_CLIPS.glob("*.mp4"))
+    return clips[:2]
 
 
 @pytest.mark.skipif(not _real(), reason="no generated clips on this machine")
@@ -192,6 +196,31 @@ def test_build_a_real_movie_end_to_end(tmp_path):
     assert out.exists() and out.stat().st_size > 0
     assert res["clips"] == 2
     assert abs(res["duration"] - want) < 0.5  # concatenated, not overlaid
+
+
+@pytest.mark.skipif(not _real(), reason="no generated clips on this machine")
+def test_transcode_webm_to_mp4_preserves_the_clip():
+    """Renders are stored as MP4 now — the transcode must keep duration and
+    audio, and must return None (not raise) on garbage so a failed transcode
+    can never lose a finished render."""
+    src = _real()[0]
+    raw = src.read_bytes()
+    out = ve.transcode_to_mp4(raw, src.suffix.lstrip("."))
+    assert out, "transcode returned nothing for a healthy clip"
+    import tempfile, os
+    fd, tmp = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    try:
+        Path(tmp).write_bytes(out)
+        before, after = ve.probe(src), ve.probe(tmp)
+        assert abs(after["duration"] - before["duration"]) < 0.3
+        assert after["has_audio"] == before["has_audio"]
+    finally:
+        os.unlink(tmp)
+
+
+def test_transcode_garbage_returns_none_not_raise():
+    assert ve.transcode_to_mp4(b"this is not a video", "webm") is None
 
 
 @pytest.mark.skipif(not _real(), reason="no generated clips on this machine")

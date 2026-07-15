@@ -13,6 +13,7 @@ import fileHandlerModule from './fileHandler.js';
 import settingsModule from './settings.js';
 import { renderMovieTab, stopMovieTab } from './movieMaker.js';
 import { renderQueueTab, stopQueueTab } from './jobQueue.js';
+import { renderCreateTab } from './studioCreate.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -2081,6 +2082,10 @@ export function openGallery() {
           <span class="gallery-tab-label">Edit</span>
           <span class="gallery-tab-close" id="gallery-editor-tab-close" title="Close edit" aria-label="Close edit">×</span>
         </button>
+        <button class="gallery-tab" data-tab="create">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>
+          <span class="gallery-tab-label">Create</span>
+        </button>
         <button class="gallery-tab" data-tab="queue">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
           <span class="gallery-tab-label">Queue</span>
@@ -2139,6 +2144,7 @@ export function openGallery() {
         <div class="gallery-albums-container" id="gallery-albums-container" style="display:none;"></div>
         <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
         <div class="gallery-movie-container" id="gallery-movie-container" style="display:none;"></div>
+        <div class="gallery-create-container" id="gallery-create-container" style="display:none;"></div>
         <div class="gallery-queue-container" id="gallery-queue-container" style="display:none;"></div>
         <div class="gallery-styles-container" id="gallery-styles-container" style="display:none;">
           <div class="admin-card">
@@ -2304,6 +2310,7 @@ export function openGallery() {
       const albumsContainer = document.getElementById('gallery-albums-container');
       const editorContainer = document.getElementById('gallery-editor-container');
       const movieContainer = document.getElementById('gallery-movie-container');
+      const createContainer = document.getElementById('gallery-create-container');
       const queueContainer = document.getElementById('gallery-queue-container');
       const stylesContainer = document.getElementById('gallery-styles-container');
       const settingsContainer = document.getElementById('gallery-settings-container');
@@ -2311,6 +2318,7 @@ export function openGallery() {
       if (albumsContainer) albumsContainer.style.display = target === 'albums' ? '' : 'none';
       if (editorContainer) editorContainer.style.display = target === 'editor' ? 'flex' : 'none';
       if (movieContainer) movieContainer.style.display = target === 'movie' ? '' : 'none';
+      if (createContainer) createContainer.style.display = target === 'create' ? '' : 'none';
       if (queueContainer) queueContainer.style.display = target === 'queue' ? '' : 'none';
       if (stylesContainer) stylesContainer.style.display = target === 'styles' ? '' : 'none';
       if (settingsContainer) settingsContainer.style.display = target === 'settings' ? '' : 'none';
@@ -2329,6 +2337,8 @@ export function openGallery() {
         if (!isEditorOpen()) _renderEditorLanding();
       } else if (target === 'movie') {
         renderMovieTab(document.getElementById('gallery-movie-container'));
+      } else if (target === 'create') {
+        renderCreateTab(document.getElementById('gallery-create-container'));
       } else if (target === 'queue') {
         renderQueueTab(document.getElementById('gallery-queue-container'));
       } else if (target === 'styles' || target === 'settings') {
@@ -2982,14 +2992,26 @@ function _showImagesTab() {
   if (!modal) return;
   modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
   modal.querySelector('.gallery-tab[data-tab="images"]')?.classList.add('active');
-  const imagesContainer = document.getElementById('gallery-images-container');
-  const albumsContainer = document.getElementById('gallery-albums-container');
-  const editorContainer = document.getElementById('gallery-editor-container');
-  const settingsContainer = document.getElementById('gallery-settings-container');
-  if (imagesContainer) imagesContainer.style.display = '';
-  if (albumsContainer) albumsContainer.style.display = 'none';
-  if (editorContainer) editorContainer.style.display = 'none';
-  if (settingsContainer) settingsContainer.style.display = 'none';
+  // Hide EVERY other container, not just the original three — this runs on the
+  // programmatic path (chat image click → openGalleryImage) which bypasses the
+  // tab-click handler, so anything missed here renders stacked under Photos.
+  const show = {
+    'gallery-images-container': '',
+    'gallery-albums-container': 'none',
+    'gallery-editor-container': 'none',
+    'gallery-create-container': 'none',
+    'gallery-queue-container': 'none',
+    'gallery-movie-container': 'none',
+    'gallery-styles-container': 'none',
+    'gallery-settings-container': 'none',
+  };
+  for (const [id, disp] of Object.entries(show)) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = disp;
+  }
+  // And stop the pollers those tabs may have left running.
+  stopMovieTab();
+  stopQueueTab();
 }
 
 export async function openGalleryImage(imageId) {

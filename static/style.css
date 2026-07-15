@@ -25628,6 +25628,54 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   overflow-y: auto;
 }
 
+/* ── Studio → Create: generate images and clips in place ── */
+.gallery-create-container {
+  padding: 8px 4px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+.create-pills { display: flex; gap: 6px; margin: 10px 0; }
+.create-pill {
+  padding: 4px 14px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.create-pill.active {
+  border-color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
+}
+.create-prompt {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.create-row { margin-top: 6px; }
+.create-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.create-opt { display: flex; flex-direction: column; gap: 3px; min-width: 140px; flex: 1; }
+.create-opt-label { font-size: 10px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; }
+.create-result {
+  display: block;
+  max-width: min(420px, 100%);
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
 /* ── Studio → Queue: what's running, what's next ── */
 .gallery-queue-container {
   padding: 8px 4px;

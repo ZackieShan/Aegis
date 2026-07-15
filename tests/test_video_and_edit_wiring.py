@@ -122,6 +122,12 @@ def test_finish_job_writes_video_and_marks_done(tmp_path, monkeypatch):
     import src.database as sdb
     monkeypatch.setattr(sdb, "SessionLocal", lambda: _FakeDb())
 
+    # Renders are stored as MP4 now: finish_job_bytes transcodes webm/avi via
+    # ffmpeg. Mock the transcode — the real binary on garbage bytes would make
+    # this "unit" test pass only via the failure fallback, proving nothing.
+    import src.video_editing as ve
+    monkeypatch.setattr(ve, "transcode_to_mp4", lambda raw, ext: b"mp4-bytes-out")
+
     job = {
         "id": "j1", "status": "running", "prompt": "a cat", "model": "wan2.2-t2v",
         "owner": "me", "session_id": None, "width": 832, "height": 480,
@@ -132,6 +138,41 @@ def test_finish_job_writes_video_and_marks_done(tmp_path, monkeypatch):
 
     assert job["status"] == "done"
     assert job["video_url"].startswith("/api/generated-image/")
+    fname = job["video_url"].rsplit("/", 1)[-1]
+    assert fname.endswith(".mp4"), "a webm render must be stored as mp4"
+    assert (tmp_path / fname).read_bytes() == b"mp4-bytes-out"
+
+
+def test_finish_job_keeps_webm_when_transcode_fails(tmp_path, monkeypatch):
+    """A failed transcode must never lose the render — original bytes, .webm."""
+    import src.video_generation as vg
+    import src.video_editing as ve
+
+    monkeypatch.setattr(vg, "GENERATED_IMAGES_DIR", str(tmp_path))
+    monkeypatch.setattr(ve, "transcode_to_mp4", lambda raw, ext: None)
+
+    class _FakeDb:
+        def add(self, row):
+            pass
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    import src.database as sdb
+    monkeypatch.setattr(sdb, "SessionLocal", lambda: _FakeDb())
+
+    job = {
+        "id": "j2", "status": "running", "prompt": "a dog", "model": "wan2.2-t2v",
+        "owner": "me", "session_id": None, "width": 832, "height": 480,
+        "video_frames": 33, "fps": 16,
+    }
+    payload = b"\x1aE\xdf\xa3fake-webm-bytes"
+    vg._finish_job(job, {"output_format": "webm", "b64_json": base64.b64encode(payload).decode()})
+
+    assert job["status"] == "done"
     fname = job["video_url"].rsplit("/", 1)[-1]
     assert fname.endswith(".webm")
     assert (tmp_path / fname).read_bytes() == payload

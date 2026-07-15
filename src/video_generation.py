@@ -323,6 +323,17 @@ def finish_job_bytes(job: Dict[str, Any], raw: bytes, ext: str) -> None:
     if ext not in ("webm", "mp4", "avi", "webp"):
         ext = "webm"
 
+    # Store MP4, not webm/avi: browsers play both, but phones, editors and
+    # messengers want H.264 MP4 — and the movie maker's inputs stay uniform.
+    # webp is an animated image, not a video container — leave it alone.
+    # Best-effort: a failed transcode keeps the original bytes, never loses
+    # the render. (This runs in a worker thread on both engine paths.)
+    if ext in ("webm", "avi"):
+        from src import video_editing
+        converted = video_editing.transcode_to_mp4(raw, ext)
+        if converted:
+            raw, ext = converted, "mp4"
+
     out_dir = Path(GENERATED_IMAGES_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid.uuid4().hex[:12]}.{ext}"

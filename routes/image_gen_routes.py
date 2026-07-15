@@ -130,6 +130,63 @@ def setup_image_gen_routes() -> APIRouter:
         user = get_current_user(request)
         return {"models": list_image_models(user) + await _comfy_image_models()}
 
+    @router.post("/api/image/enhance-prompt")
+    async def enhance_prompt(request: Request):
+        """Rewrite rough intent into a diffusion-ready scene description.
+
+        Diffusion models depict, they don't obey: "generate a movie trailer in
+        the style of Ghibli" produces a painting OF a screen playing a movie
+        (observed, literally). This turns intent into what the model actually
+        needs — subject, setting, light, camera, motion — using the local
+        utility model, so the Studio's ✨ button costs no cloud call.
+        """
+        user = require_privilege(request, "can_generate_images")
+        body = await request.json()
+        rough = str(body.get("prompt") or "").strip()
+        if not rough:
+            raise HTTPException(400, "Prompt is required")
+        # The rewrite targets 40-80 words; anything past a couple thousand chars
+        # is pasted noise that only pads the utility model's context.
+        rough = rough[:2000]
+        kind = "video" if str(body.get("kind") or "").lower() == "video" else "image"
+
+        from src.endpoint_resolver import resolve_endpoint
+        url, model, headers = resolve_endpoint("utility", owner=user or None)
+        if not url or not model:
+            url, model, headers = resolve_endpoint("default", owner=user or None)
+        if not url or not model:
+            return {"ok": False, "error": "No utility model configured"}
+
+        motion = (
+            " Describe the motion: what moves, how fast, and how the camera moves."
+            if kind == "video" else ""
+        )
+        system = (
+            "You write prompts for local diffusion models. Rewrite the user's rough "
+            "idea into ONE vivid scene description: concrete subject, setting, "
+            "lighting, mood, camera framing, and art style." + motion + " Never use "
+            "instruction words (generate, create, make, show me) or meta terms like "
+            "'movie trailer', 'poster', or 'screenshot' — the model draws those "
+            "literally instead of obeying them. 40-80 words. Output ONLY the prompt "
+            "text, no quotes, no preamble."
+        )
+        try:
+            from src.llm_core import llm_call_async
+            text = await llm_call_async(
+                url, model,
+                [{"role": "system", "content": system},
+                 {"role": "user", "content": rough}],
+                headers=headers, temperature=0.7, max_tokens=220, timeout=60,
+            )
+        except Exception as e:
+            logger.warning("Prompt enhance failed: %s", e)
+            return {"ok": False, "error": f"Enhance failed: {e}"}
+
+        cleaned = str(text or "").strip().strip('"').strip()
+        if not cleaned:
+            return {"ok": False, "error": "The model returned nothing"}
+        return {"ok": True, "prompt": cleaned, "model": model}
+
     @router.post("/api/image/generate")
     async def image_generate(request: Request):
         user = require_privilege(request, "can_generate_images")

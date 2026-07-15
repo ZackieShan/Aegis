@@ -423,7 +423,9 @@ function _slashFooter(msgEl) {
 // compose their replies in markdown (bold, `code`, newlines) go through
 // this so the markup actually renders.
 function slashReplyMd(text) {
-  slashReply(markdownModule.processWithThinking(markdownModule.squashOutsideCode(String(text ?? ''))));
+  // Must propagate the bubble: /video and /image hold onto it ({el, body}) to
+  // append their live status line and the finished media inline.
+  return slashReply(markdownModule.processWithThinking(markdownModule.squashOutsideCode(String(text ?? ''))));
 }
 
 function typewriterReply(text, options = {}) {
@@ -1840,7 +1842,7 @@ async function _cmdEngine(args) {
 
 // Local video generation on a served Wan/LTX model. Submits an async job to
 // /api/video/generate (sd-server vid_gen behind llama-swap) and polls until
-// the finished webm lands in the Studio, then plays it inline.
+// the finished clip lands in the Studio (stored as mp4), then plays it inline.
 //   /video <prompt>              generate (auto-picks a served video model)
 //   /video model=<id> <prompt>   pick the model; also frames=/fps=/size=WxH/seed=
 //   /video models                list served video models
