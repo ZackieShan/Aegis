@@ -80,7 +80,7 @@ function _injectStyles() {
   .recipe-btn.primary { background: var(--accent, var(--red)); color: #fff; border-color: var(--accent, var(--red)); font-weight: 600; }
   .recipe-btn.primary:hover { filter: brightness(1.08); }
   .recipe-btn[disabled] { opacity: 0.5; pointer-events: none; }
-  .recipe-body { flex: 1; display: flex; min-height: 0; }
+  .recipe-body { flex: 1; display: flex; min-height: 0; position: relative; }
   .recipe-palette {
     width: 190px; flex-shrink: 0; border-right: 1px solid var(--border, #333);
     padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
@@ -154,8 +154,34 @@ function _injectStyles() {
   .recipe-step pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 11px/1.45 var(--mono, ui-monospace, monospace);
     max-height: 160px; overflow: auto; opacity: 0.92; }
   .recipe-final { border-color: var(--accent, var(--red)); }
-  .recipe-empty-hint { position: absolute; top: 42%; left: 0; right: 0; text-align: center;
-    opacity: 0.4; font-size: 13px; pointer-events: none; z-index: 0; }
+  .recipe-empty-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 5; width: min(440px, 86%); }
+  .recipe-empty-hint:empty { display: none; }
+  .rc-start { background: var(--panel, #1b1b1b); border: 1px solid var(--border, #333);
+    border-radius: var(--radius-md, 12px); padding: 18px; box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.4));
+    display: flex; flex-direction: column; gap: 12px; }
+  .rc-start h4 { margin: 0; font: 700 15px/1.2 inherit; }
+  .rc-start .rc-sub { font-size: 12px; opacity: 0.6; margin-top: -6px; }
+  .rc-start label { font: 600 10.5px/1 inherit; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.6; }
+  .rc-start select, .rc-start textarea { width: 100%; box-sizing: border-box; font: 12.5px/1.4 inherit;
+    color: var(--fg, #eee); background: var(--bg, #111); border: 1px solid var(--border, #333);
+    border-radius: var(--radius-sm, 8px); padding: 8px 10px; }
+  .rc-start textarea { resize: vertical; min-height: 56px; }
+  .rc-start .rc-block { display: flex; flex-direction: column; gap: 6px; }
+  .rc-start .rc-actions { display: flex; gap: 8px; align-items: center; }
+  .rc-or { text-align: center; font-size: 11px; opacity: 0.4; text-transform: uppercase; letter-spacing: 0.1em; }
+  .rc-blank { background: transparent; border: 0; color: var(--fg, #eee); opacity: 0.6; cursor: pointer;
+    font: 12px/1 inherit; text-decoration: underline; padding: 2px; align-self: center; }
+  .rc-blank:hover { opacity: 1; }
+  .rc-msg { font-size: 11.5px; opacity: 0.7; min-height: 14px; }
+  .recipe-explain-box { position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 6; width: min(560px, 90%); background: var(--panel, #1b1b1b); border: 1px solid var(--accent, var(--red));
+    border-radius: var(--radius-md, 12px); padding: 13px 15px; box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.4));
+    font-size: 13px; line-height: 1.55; }
+  .recipe-explain-box .rx-close { float: right; cursor: pointer; opacity: 0.5; font-size: 15px; line-height: 1; }
+  .recipe-explain-box .rx-close:hover { opacity: 1; }
+  .recipe-explain-box .rx-label { font: 600 10px/1 inherit; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--accent, var(--red)); margin-bottom: 5px; }
   .recipe-menu { position: absolute; z-index: 40; background: var(--panel, #1b1b1b); border: 1px solid var(--border, #333);
     border-radius: var(--radius-md, 12px); box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.4)); padding: 5px; min-width: 200px; max-height: 320px; overflow-y: auto; }
   .recipe-menu button { display: block; width: 100%; text-align: left; cursor: pointer; font: 12px/1.3 inherit;
@@ -166,8 +192,12 @@ function _injectStyles() {
   /* ── library front door ── */
   /* The class/id display rules below beat the UA [hidden]{display:none}, so
      make hidden win explicitly (buttons are inline-flex, views are flex). */
-  #recipe-library-view[hidden], #recipe-editor-view[hidden],
+  #recipe-library-view[hidden], #recipe-editor-view[hidden], #recipe-jobs-view[hidden],
   #recipe-run-panel[hidden], .recipe-btn[hidden] { display: none !important; }
+  /* Editor fills the modal + constrains the canvas so its overflow scrolls
+     (without this the 1600px canvas stretches the body and the centered start
+     chooser lands off-screen). */
+  #recipe-editor-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #recipe-library-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .lib-head { display: flex; align-items: center; gap: 10px; padding: 11px 16px;
     border-bottom: 1px solid var(--border, #333); flex-wrap: wrap; }
@@ -310,6 +340,7 @@ function _build() {
           <button class="recipe-btn" id="recipe-starters" title="Install or load ready-made starter recipes built for what you have">✨ Starters</button>
           <button class="recipe-btn" id="recipe-open">Open…</button>
           <button class="recipe-btn" id="recipe-save">Save</button>
+          <button class="recipe-btn" id="recipe-explain" title="Plain-English summary of this workflow">Explain</button>
           <span style="flex:1"></span>
           <button class="recipe-btn" id="recipe-delete" title="Delete this recipe">Delete</button>
         </div>
@@ -318,21 +349,13 @@ function _build() {
           <div class="recipe-canvas-wrap">
             <div id="recipe-canvas">
               <svg id="recipe-edges"></svg>
-              <div class="recipe-empty-hint" id="recipe-empty-hint">
-                <div style="font-weight:600;margin-bottom:8px">Build a tool + model workflow</div>
-                <div style="text-align:left;display:inline-block;line-height:1.9;opacity:0.85">
-                  1. Click a block in the left palette to drop a node.<br>
-                  2. Drag from a node's right dot ● to another's left dot to wire them.<br>
-                  3. Type a run input below and hit ▶ Run.
-                </div>
-                <div style="margin-top:12px;opacity:0.7">New here? Click <b>✨ Starters</b> up top to install ready-made recipes or load one to tweak.</div>
-              </div>
             </div>
           </div>
+          <div class="recipe-empty-hint" id="recipe-empty-hint"></div>
         </div>
         <div class="recipe-run">
           <div class="recipe-run-top">
-            <input class="recipe-run-input" id="recipe-run-input" placeholder="Run input (available as {{input}} to every node)…" spellcheck="false" />
+            <input class="recipe-run-input" id="recipe-run-input" placeholder="Type an input and hit Run — it flows into the first step…" spellcheck="false" />
             <button class="recipe-btn primary" id="recipe-run-btn">▶ Run</button>
           </div>
           <div id="recipe-run-output"></div>
@@ -349,6 +372,7 @@ function _build() {
   modal.querySelector('#recipe-starters').addEventListener('click', _startersMenu);
   modal.querySelector('#recipe-open').addEventListener('click', _openMenu);
   modal.querySelector('#recipe-save').addEventListener('click', _save);
+  modal.querySelector('#recipe-explain').addEventListener('click', _explainCurrent);
   modal.querySelector('#recipe-delete').addEventListener('click', _deleteCurrent);
   modal.querySelector('#recipe-run-btn').addEventListener('click', _run);
   // Library ↔ editor
@@ -735,7 +759,96 @@ function _drawEdges() {
 
 function _syncEmptyHint() {
   const hint = document.getElementById('recipe-empty-hint');
-  if (hint) hint.style.display = _nodes.length ? 'none' : '';
+  if (!hint) return;
+  if (_nodes.length) { hint.replaceChildren(); return; }
+  if (!hint.querySelector('.rc-start')) _renderStartChooser(hint);
+}
+
+// Never a blank canvas: offer "start from a template" or "describe it" (generate
+// the graph with a model), or fall through to hand-wiring.
+function _renderStartChooser(hint) {
+  hint.replaceChildren();
+  const box = _el('div', 'rc-start');
+  box.appendChild(Object.assign(_el('h4'), { textContent: 'Start a new recipe' }));
+  box.appendChild(Object.assign(_el('div', 'rc-sub'),
+    { textContent: 'Pick a starting point — you can edit everything after.' }));
+
+  // From a template (the runnable catalog recipes).
+  const tBlock = _el('div', 'rc-block');
+  tBlock.appendChild(Object.assign(_el('label'), { textContent: 'From a template' }));
+  const sel = _el('select');
+  sel.appendChild(new Option('Choose a recipe to start from…', ''));
+  (_catalog || []).filter(r => r.recipe).forEach(r => sel.appendChild(new Option(r.name, r.id)));
+  sel.addEventListener('change', () => {
+    const r = (_catalog || []).find(x => x.id === sel.value);
+    if (r && r.recipe) _loadGraph({ name: r.name, nodes: r.recipe.nodes, edges: r.recipe.edges });
+  });
+  tBlock.appendChild(sel);
+  box.appendChild(tBlock);
+
+  box.appendChild(Object.assign(_el('div', 'rc-or'), { textContent: 'or' }));
+
+  // Describe it → generate.
+  const dBlock = _el('div', 'rc-block');
+  dBlock.appendChild(Object.assign(_el('label'), { textContent: 'Describe what you want' }));
+  const ta = _el('textarea');
+  ta.placeholder = 'e.g. Take a support email, classify it, and if it’s a complaint draft an apology.';
+  dBlock.appendChild(ta);
+  const actions = _el('div', 'rc-actions');
+  const gen = _el('button', 'recipe-btn primary', 'Generate'); gen.type = 'button';
+  const msg = _el('span', 'rc-msg');
+  actions.append(gen, msg);
+  dBlock.appendChild(actions);
+  box.appendChild(dBlock);
+
+  const blank = _el('button', 'rc-blank', 'or start from a blank canvas');
+  blank.type = 'button';
+  blank.addEventListener('click', () => hint.replaceChildren());
+  box.appendChild(blank);
+
+  gen.addEventListener('click', () => _generateFromDescription(ta.value.trim(), gen, msg));
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) gen.click(); });
+  hint.appendChild(box);
+}
+
+async function _generateFromDescription(description, btn, msg) {
+  if (!description) { msg.textContent = 'Describe what the recipe should do.'; return; }
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Generating…';
+  msg.textContent = 'Designing your workflow…';
+  try {
+    const r = await fetch(`${API}/api/recipes/generate`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) { msg.textContent = '✗ ' + (d.error || d.detail || 'generation failed'); btn.disabled = false; btn.textContent = orig; return; }
+    _loadGraph(d.recipe);
+    _toast('Generated — tweak it, then Save or Run.');
+  } catch (e) { msg.textContent = '✗ ' + e.message; btn.disabled = false; btn.textContent = orig; }
+}
+
+async function _explainCurrent() {
+  if (!_nodes.length) { _toast('Nothing to explain yet — add or generate a recipe first.'); return; }
+  document.querySelectorAll('.recipe-explain-box').forEach(b => b.remove());
+  // Anchor to the visible body, not the scrollable canvas (which is 2400px wide).
+  const canvas = document.querySelector('#recipe-editor-view .recipe-body') || _canvas();
+  const box = _el('div', 'recipe-explain-box');
+  const close = _el('span', 'rx-close', '✕');
+  close.addEventListener('click', () => box.remove());
+  box.appendChild(close);
+  box.appendChild(_el('div', 'rx-label', 'What this workflow does'));
+  const body = _el('div'); body.textContent = 'Reading the graph…';
+  box.appendChild(body);
+  canvas.appendChild(box);
+  try {
+    const r = await fetch(`${API}/api/recipes/explain`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipe: { name: _recipeName, nodes: _nodes, edges: _edges } }),
+    });
+    const d = await r.json().catch(() => ({}));
+    body.textContent = (d.ok && d.explanation) ? d.explanation : ('Could not explain: ' + (d.error || d.detail || 'unknown'));
+  } catch (e) { body.textContent = 'Could not explain: ' + e.message; }
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────

@@ -256,6 +256,27 @@ def setup_recipes_routes() -> APIRouter:
             raise HTTPException(404, "recipe not found")
         return {"ok": True}
 
+    @router.post("/generate")
+    async def generate_recipe(request: Request):
+        """Draft a recipe graph from a plain-English description (admin)."""
+        require_admin(request)
+        from src import recipe_authoring
+        body = await request.json()
+        blocks = _building_blocks()
+        return await recipe_authoring.generate_recipe(
+            str(body.get("description") or ""), blocks["models"], blocks["tools"],
+            owner=_owner(request) or "")
+
+    @router.post("/explain")
+    async def explain_recipe(request: Request):
+        """Plain-English summary of a recipe graph (admin)."""
+        require_admin(request)
+        from src import recipe_authoring
+        body = await request.json()
+        recipe = body.get("recipe") or body
+        blocks = _building_blocks()
+        return await recipe_authoring.explain_recipe(recipe, blocks["models"], owner=_owner(request) or "")
+
     @router.post("/run")
     async def run_unsaved(request: Request):
         require_admin(request)
