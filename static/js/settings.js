@@ -41,7 +41,6 @@ function initTabs() {
       document.body.classList.toggle('settings-appearance-open', tab === 'appearance');
       syncAppearanceOpacity(tab === 'appearance');
       if (tab === 'ai') refreshAiModelEndpoints();
-      if (tab === 'media') initMediaStudio();
     });
   });
 }
@@ -1946,7 +1945,7 @@ const SHORTCUT_LABELS = {
   open_compare:   'Open Compare',
   open_cookbook:  'Open Cookbook',
   open_research:  'Open Deep Research',
-  open_gallery:   'Open Gallery',
+  open_gallery:   'Open Studio',
   open_library:   'Open Library',
   open_memory:    'Open Memory',
   open_notes:     'Open Notes',
@@ -5775,7 +5774,17 @@ function syncAdminVisibility() {
    PUBLIC API
    ═══════════════════════════════════════════ */
 /* ── Media Studio: style presets + tagged model library ── */
-let _mediaWired = false;
+
+// This panel lives inside the Studio modal, which is destroyed and rebuilt on
+// every close/open — so a module-level "already wired" flag would leave the
+// second open's buttons dead. Mark the element itself instead: a rebuilt
+// element arrives without the marker and gets wired again.
+function _mediaWire(id, event, handler) {
+  const el = document.getElementById(id);
+  if (!el || el.dataset.mediaWired) return;
+  el.dataset.mediaWired = '1';
+  el.addEventListener(event, handler);
+}
 
 function _mEl(tag, cls, text) {
   const e = document.createElement(tag);
@@ -5977,61 +5986,58 @@ async function _reloadMediaRegistry() {
   }
 }
 
-function initMediaStudio() {
-  if (!_mediaWired) {
-    _mediaWired = true;
-    document.getElementById('media-style-new')?.addEventListener('click', () => _mediaFillForm(null));
-    document.getElementById('media-sf-cancel')?.addEventListener('click', () => {
-      document.getElementById('media-style-form').hidden = true;
-    });
-    document.getElementById('media-sf-save')?.addEventListener('click', async () => {
-      const g = id => document.getElementById(id);
-      const msg = g('media-sf-msg');
-      const name = g('media-sf-name').value.trim();
-      if (!name) { msg.textContent = 'Name is required.'; return; }
-      const body = {
-        name,
-        description: g('media-sf-desc').value.trim(),
-        image_model: g('media-sf-imodel').value,
-        video_model: g('media-sf-vmodel').value,
-        prompt_prefix: g('media-sf-prefix').value.trim(),
-        prompt_suffix: g('media-sf-suffix').value.trim(),
-        negative_prompt: g('media-sf-negative').value.trim(),
-        seed: g('media-sf-seed').value,
-        steps: g('media-sf-steps').value,
-        cfg_scale: g('media-sf-cfg').value,
-        size: g('media-sf-size').value.trim(),
-        loras: g('media-sf-loras').value.split(',').map(s => s.trim()).filter(Boolean),
-      };
-      try {
-        const r = await fetch('/api/styles', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok) { msg.textContent = d.detail || 'Save failed'; return; }
-        g('media-style-form').hidden = true;
-        _reloadMediaStyles();
-      } catch (e) { msg.textContent = 'Save failed: ' + e.message; }
-    });
-    document.getElementById('media-scan-btn')?.addEventListener('click', async (ev) => {
-      const btn = ev.currentTarget;
-      btn.disabled = true;
-      const orig = btn.textContent;
-      btn.textContent = 'Scanning…';
-      try {
-        // Force the endpoint model-list re-probe (background), then re-read
-        // the registry twice so slow endpoints still land.
-        await fetch('/api/models?refresh=true&background=true', { credentials: 'same-origin' });
-      } catch (_) {}
-      setTimeout(_reloadMediaRegistry, 2500);
-      setTimeout(() => { _reloadMediaRegistry(); btn.disabled = false; btn.textContent = orig; }, 6000);
-      _reloadMediaRegistry();
-    });
-    document.getElementById('media-model-filter')?.addEventListener('input', () => {
-      if (window._mediaRegistryCache) _renderMediaModels(window._mediaRegistryCache);
-    });
-  }
+export function initMediaStudio() {
+  _mediaWire('media-style-new', 'click', () => _mediaFillForm(null));
+  _mediaWire('media-sf-cancel', 'click', () => {
+    document.getElementById('media-style-form').hidden = true;
+  });
+  _mediaWire('media-sf-save', 'click', async () => {
+    const g = id => document.getElementById(id);
+    const msg = g('media-sf-msg');
+    const name = g('media-sf-name').value.trim();
+    if (!name) { msg.textContent = 'Name is required.'; return; }
+    const body = {
+      name,
+      description: g('media-sf-desc').value.trim(),
+      image_model: g('media-sf-imodel').value,
+      video_model: g('media-sf-vmodel').value,
+      prompt_prefix: g('media-sf-prefix').value.trim(),
+      prompt_suffix: g('media-sf-suffix').value.trim(),
+      negative_prompt: g('media-sf-negative').value.trim(),
+      seed: g('media-sf-seed').value,
+      steps: g('media-sf-steps').value,
+      cfg_scale: g('media-sf-cfg').value,
+      size: g('media-sf-size').value.trim(),
+      loras: g('media-sf-loras').value.split(',').map(s => s.trim()).filter(Boolean),
+    };
+    try {
+      const r = await fetch('/api/styles', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { msg.textContent = d.detail || 'Save failed'; return; }
+      g('media-style-form').hidden = true;
+      _reloadMediaStyles();
+    } catch (e) { msg.textContent = 'Save failed: ' + e.message; }
+  });
+  _mediaWire('media-scan-btn', 'click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = 'Scanning…';
+    try {
+      // Force the endpoint model-list re-probe (background), then re-read
+      // the registry twice so slow endpoints still land.
+      await fetch('/api/models?refresh=true&background=true', { credentials: 'same-origin' });
+    } catch (_) {}
+    setTimeout(_reloadMediaRegistry, 2500);
+    setTimeout(() => { _reloadMediaRegistry(); btn.disabled = false; btn.textContent = orig; }, 6000);
+    _reloadMediaRegistry();
+  });
+  _mediaWire('media-model-filter', 'input', () => {
+    if (window._mediaRegistryCache) _renderMediaModels(window._mediaRegistryCache);
+  });
   _reloadMediaStyles();
   _reloadMediaRegistry();
 }
@@ -6057,7 +6063,6 @@ export function open(tab) {
   document.body.classList.toggle('settings-appearance-open', activeTab === 'appearance');
   syncAppearanceOpacity(activeTab === 'appearance');
   if (activeTab === 'ai') refreshAiModelEndpoints();
-  if (activeTab === 'media') initMediaStudio();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }
@@ -6116,7 +6121,7 @@ export function close() {
   _tryOpen();
 })();
 
-const settingsModule = { open, close, initIntegrations, initUnifiedIntegrations, syncAdminVisibility, refreshAiModelEndpoints };
+const settingsModule = { open, close, initIntegrations, initUnifiedIntegrations, syncAdminVisibility, refreshAiModelEndpoints, initMediaStudio };
 
 
 export default settingsModule;

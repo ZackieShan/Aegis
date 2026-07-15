@@ -21,14 +21,20 @@ The local-first foundation is in place:
   and repo → wiki.
 - **Media & voice** — local image generation (stable-diffusion.cpp), on-device Whisper
   speech-to-text + text-to-speech with a hands-free Voice Mode, and a local vision model.
-- **Media studio** — local video generation up to ~10s (Wan 2.2, LTX-2 with audio),
-  image-to-video from any gallery still, style presets (one locked look — model + prompt
-  affixes + seed + LoRAs — across every generation), an `/image` command with real
-  seeds/steps/negative prompts, and a model library that auto-tags everything on disk by
-  capability and best use.
+- **Studio** — one home for generated media: local video up to ~10s (Wan 2.2, LTX-2 with
+  audio), image-to-video from any still, a **movie maker** that stitches clips into one film
+  (reorder, trim, auto-matching mismatched sizes/framerates and ragged audio), style presets
+  (one locked look — model + prompt affixes + seed + LoRAs — across every generation and every
+  shot in a film), an `/image` command with real seeds/steps/negative prompts, and a model
+  library that auto-tags everything on disk by capability and best use.
 - **Two media engines** — stable-diffusion.cpp for speed and **ComfyUI** as a sibling
   engine for what it can't run (GGUF video merges, FLUX.2-klein, Lightning LoRAs), with
   VRAM handed back after every job so both share one GPU.
+- **One queue, and chat that survives your renders** — every long job (renders, films,
+  automations, research) in one list with progress, position, and cancel. And because a
+  diffusion model fills the card while llama-swap resolves contention by *evicting*, a chat
+  message used to kill an in-flight render: chat now falls back to a CPU-pinned model until
+  the GPU is free, says so, and switches back.
 - **Knowledge & operability** — knowledge-graph memory, local call tracing, a Control
   Center dashboard, and a Doctor self-check with guarded one-click fixes.
 
@@ -58,10 +64,12 @@ The local-first foundation is in place:
   fast merges can animate stills too, not just the sd.cpp path.
 - **Two-stage LTX upscaling** — render small, latent-upscale 2x, refine; the upscaler
   models are already part of the standard companion set.
-- **One-click serve** — the Media Studio library already shows which models on disk aren't
+- **One-click serve** — the Studio's model library already shows which models on disk aren't
   served; add a button that writes the engine config entry for you.
-- **Video editing steps** — trim, frame-interpolate, and ESRGAN-upscale clips from the
-  Gallery, reusing the upscalers the library already tags.
+- **More editing steps** — the movie maker does reorder/trim/concat; frame-interpolation and
+  ESRGAN upscaling are the natural next ones, reusing the upscalers the library already tags.
+  Transitions (crossfades) and a music/voiceover track are the obvious follow-ups — the
+  bundled ffmpeg already has `xfade`, and TTS is already local.
 
 ### Deepen the loop
 - **Code Canvas everywhere** — "open in canvas" on chat code blocks, and auto-open when the

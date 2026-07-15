@@ -68,3 +68,10 @@ httpx2
 # dark. `ddgs` uses DDG's proper API endpoints and is far more reliable.
 # Alternatives (keyed) still work via Settings → Search: Brave, Tavily, Serper.
 ddgs
+
+# Bundled static ffmpeg for the Studio's movie maker (stitching generated clips
+# into one film: concat, trim, re-encode). Ships its own binary, so there's no
+# system ffmpeg install to chase — and unlike Playwright's stripped-down build
+# (the only ffmpeg otherwise on disk), this one actually has libx264 and the
+# concat/trim/scale filters.
+imageio-ffmpeg

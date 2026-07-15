@@ -5,7 +5,7 @@
  *   #ge-import-topbar    topbar "+ Import" button
  *   #ge-import-file      File button in the Import section
  *   #ge-import-paste     Clipboard button (uses async clipboard API)
- *   #ge-import-gallery   Gallery picker — fetches /api/gallery/library
+ *   #ge-import-gallery   Studio picker — fetches /api/gallery/library
  *                        and shows a thumbnail grid overlay
  *
  * Plus the shared `handleImportedImage(img)` sink — scales to canvas,
@@ -101,7 +101,7 @@ export function wireImport({ container, saveState, createLayer, composite, rende
     }
   });
 
-  // Import from Gallery — fetch /api/gallery/library and show a
+  // Import from Studio — fetch /api/gallery/library and show a
   // thumbnail-grid picker overlay.
   document.getElementById('ge-import-gallery')?.addEventListener('click', async () => {
     try {
@@ -115,7 +115,7 @@ export function wireImport({ container, saveState, createLayer, composite, rende
       overlay.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;';
       const panel = document.createElement('div');
       panel.style.cssText = 'background:var(--panel,#1e1e1e);border-radius:12px;padding:16px;max-width:500px;max-height:70vh;overflow-y:auto;width:90%;';
-      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="font-size:13px;font-weight:600;">Pick from Gallery</span><button id="ge-gallery-close" style="background:none;border:none;color:var(--fg);cursor:pointer;font-size:18px;">✕</button></div>';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="font-size:13px;font-weight:600;">Pick from Studio</span><button id="ge-gallery-close" style="background:none;border:none;color:var(--fg);cursor:pointer;font-size:18px;">✕</button></div>';
       const grid = document.createElement('div');
       grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:6px;';
       for (const item of items) {

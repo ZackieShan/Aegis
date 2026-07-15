@@ -16,7 +16,8 @@ sys.path.insert(0, BASE_DIR)
 from src.constants import (
     DATA_DIR, AUTH_FILE, UPLOAD_DIR, PERSONAL_DIR, PERSONAL_UPLOADS_DIR,
     TTS_CACHE_DIR, GENERATED_IMAGES_DIR, DEEP_RESEARCH_DIR, CHROMA_DIR,
-    RAG_DIR, MEMORY_VECTORS_DIR, RECIPES_DIR, PASSWORD_MIN_LENGTH,
+    RAG_DIR, MEMORY_VECTORS_DIR, RECIPES_DIR, STYLES_DIR, JOBS_DIR,
+    PASSWORD_MIN_LENGTH,
 )
 from core.auth import RESERVED_USERNAMES
 
@@ -32,6 +33,8 @@ DIRS = [
     RAG_DIR,
     MEMORY_VECTORS_DIR,
     RECIPES_DIR,
+    STYLES_DIR,   # Studio style presets
+    JOBS_DIR,     # scheduled automations
     os.path.join(BASE_DIR, "logs"),
 ]
 

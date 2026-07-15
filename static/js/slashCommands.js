@@ -1346,7 +1346,7 @@ async function _cmdToggleSidebar(args, ctx) {
 async function _cmdOpen(args, ctx) {
   const target = (args[0] || '').trim().toLowerCase();
   if (!target) {
-    slashReply('Open what? Try /open Cookbook, /open Settings, /open Gallery, /open Notes, /open Tasks, /open Library, /open Research, or /open Compare.');
+    slashReply('Open what? Try /open Cookbook, /open Settings, /open Studio, /open Notes, /open Tasks, /open Library, /open Research, or /open Compare.');
     return true;
   }
   const clickFirst = (...ids) => {
@@ -1368,7 +1368,8 @@ async function _cmdOpen(args, ctx) {
       return true;
     }
     const targets = {
-      gallery: ['tool-gallery-btn', 'rail-gallery'],
+      studio: ['tool-gallery-btn', 'rail-gallery'],
+      gallery: ['tool-gallery-btn', 'rail-gallery'],  // pre-rename name, kept for muscle memory
       notes: ['tool-notes-btn', 'rail-notes'],
       tasks: ['tool-tasks-btn', 'rail-tasks'],
       library: ['tool-library-btn', 'rail-archive'],
@@ -1839,7 +1840,7 @@ async function _cmdEngine(args) {
 
 // Local video generation on a served Wan/LTX model. Submits an async job to
 // /api/video/generate (sd-server vid_gen behind llama-swap) and polls until
-// the finished webm lands in the Gallery, then plays it inline.
+// the finished webm lands in the Studio, then plays it inline.
 //   /video <prompt>              generate (auto-picks a served video model)
 //   /video model=<id> <prompt>   pick the model; also frames=/fps=/size=WxH/seed=
 //   /video models                list served video models
@@ -1858,7 +1859,7 @@ async function _cmdVideo(args) {
       '`/video models` — list served video models',
       '',
       'LTX renders at 24fps with audio; Wan at 16fps. Render time grows with length —',
-      'keep long clips at modest sizes (e.g. 512x288). Saved to the Gallery automatically.',
+      'keep long clips at modest sizes (e.g. 512x288). Saved to the Studio automatically.',
     ].join('\n'));
     return true;
   }
@@ -1909,7 +1910,7 @@ async function _cmdVideo(args) {
     if (d.animating_image) clipInfo += ' · from your image';
   } catch (e) { slashReplyMd('Video start failed: ' + e.message); return true; }
 
-  const rep = slashReplyMd(`🎬 Generating video with \`${model}\`${clipInfo} — longer clips take longer to render (the first run also loads the model). It lands here and in the Gallery.`);
+  const rep = slashReplyMd(`🎬 Generating video with \`${model}\`${clipInfo} — longer clips take longer to render (the first run also loads the model). It lands here and in the Studio.`);
   const status = document.createElement('div');
   status.className = 'generated-image-caption';
   status.textContent = 'Queued…';
@@ -1919,12 +1920,12 @@ async function _cmdVideo(args) {
   let pollFails = 0;
   const timer = setInterval(async () => {
     // The bubble is gone after a session switch or /clear — stop polling;
-    // the finished clip still lands in the Gallery server-side.
+    // the finished clip still lands in the Studio server-side.
     if (!document.contains(rep.el)) { clearInterval(timer); return; }
     const elapsedS = Math.round((Date.now() - t0) / 1000);
     if (elapsedS > 35 * 60) {
       clearInterval(timer);
-      status.textContent = '✗ Gave up waiting after 35 minutes — check the Gallery later or the engine logs.';
+      status.textContent = '✗ Gave up waiting after 35 minutes — check the Studio later or the engine logs.';
       return;
     }
     let d;
@@ -1939,7 +1940,7 @@ async function _cmdVideo(args) {
       pollFails += 1;
       if (pollFails < 4) { status.textContent = `Still rendering… (status check failed, retrying ${pollFails}/3)`; return; }
       clearInterval(timer);
-      status.textContent = '✗ Lost track of the job: ' + e.message + ' — if it finishes anyway, the clip appears in the Gallery.';
+      status.textContent = '✗ Lost track of the job: ' + e.message + ' — if it finishes anyway, the clip appears in the Studio.';
       return;
     }
     if (d.status === 'done' && d.video_url) {
@@ -1954,12 +1955,12 @@ async function _cmdVideo(args) {
       rep.body.appendChild(vid);
       const cap = document.createElement('div');
       cap.className = 'generated-image-caption';
-      cap.textContent = prompt + ' — saved to Gallery';
+      cap.textContent = prompt + ' — saved to Studio';
       rep.body.appendChild(cap);
       uiModule.scrollHistory();
       // The bubble's initial persist only captured the placeholder — record
       // the outcome so a reloaded transcript isn't stuck on "Generating…".
-      _persistMsg('assistant', `🎬 Video ready: ${d.video_url} — "${prompt}" (saved to Gallery)`, { source: 'slash' });
+      _persistMsg('assistant', `🎬 Video ready: ${d.video_url} — "${prompt}" (saved to Studio)`, { source: 'slash' });
     } else if (d.status === 'error' || d.status === 'canceled') {
       clearInterval(timer);
       status.textContent = '✗ ' + (d.error || 'Video generation failed');
@@ -1989,7 +1990,7 @@ async function _cmdImage(args) {
       '`/image models` — list served image models',
       '',
       'Same `seed=` + same prompt + same model reproduces an image exactly; keep the seed',
-      'and vary the prompt to hold one look across shots. Saved to the Gallery automatically.',
+      'and vary the prompt to hold one look across shots. Saved to the Studio automatically.',
     ].join('\n'));
     return true;
   }
@@ -2065,12 +2066,12 @@ async function _cmdImage(args) {
   ].filter(Boolean).join(' · ');
   const cap = document.createElement('div');
   cap.className = 'generated-image-caption';
-  cap.textContent = `${prompt} — ${bits} — saved to Gallery`;
+  cap.textContent = `${prompt} — ${bits} — saved to Studio`;
   rep.body.appendChild(cap);
   uiModule.scrollHistory();
   // The bubble's initial persist only captured the placeholder — record the
   // outcome so a reloaded transcript shows the image, not "Rendering…".
-  _persistMsg('assistant', `![${prompt.replace(/[\[\]]/g, '')}](${d.image_url})\n\n${bits} — saved to Gallery`, { source: 'slash' });
+  _persistMsg('assistant', `![${prompt.replace(/[\[\]]/g, '')}](${d.image_url})\n\n${bits} — saved to Studio`, { source: 'slash' });
   return true;
 }
 
@@ -4299,7 +4300,7 @@ async function _cmdTourSettings(args, ctx) {
   return true;
 }
 
-// ── Gallery tour ──
+// ── Studio tour ──
 async function _cmdTourGallery(args, ctx) {
   // Clear the chat input so "/tour-gallery" doesn't linger.
   const _msgEl = document.getElementById('message');
@@ -4346,7 +4347,7 @@ async function _cmdTourGallery(args, ctx) {
     }
   }
   if (!modal || modal.classList.contains('hidden')) {
-    slashReply('Could not open Gallery. Try clicking the Gallery tool first.');
+    slashReply('Could not open Studio. Try clicking the Studio tool first.');
     return true;
   }
 
@@ -4478,7 +4479,7 @@ async function _cmdTourGallery(args, ctx) {
 
   const steps = [
     { sel: '#gallery-modal .modal-content',
-      text: '<b>Welcome to Gallery.</b> Photos and albums live here.',
+      text: '<b>Welcome to Studio.</b> Photos and albums live here.',
       placement: 'center-above',
       before: () => _clickTab('images') },
     { sel: '#gallery-modal .gallery-tab[data-tab="images"]',
@@ -4510,7 +4511,7 @@ async function _cmdTourGallery(args, ctx) {
   // Land on Photos so the user has a familiar starting point.
   _clickTab('images');
   _clear();
-  await typewriterReply('That\'s Gallery. Editor is rough — feedback welcome.');
+  await typewriterReply('That\'s Studio. Editor is rough — feedback welcome.');
   return true;
 }
 
@@ -6819,7 +6820,7 @@ const COMMANDS = {
   'tour-gallery': {
     alias: ['gallery-tour'],
     category: 'Tours',
-    help: 'Gallery tour: photos, albums, editor',
+    help: 'Studio tour: photos, albums, editor',
     handler: _cmdTourGallery,
     usage: '/tour-gallery'
   },
@@ -7013,12 +7014,12 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('library', args, ctx),
     usage: '/library'
   },
-  gallery: {
-    alias: ['photos'],
+  studio: {
+    alias: ['gallery', 'photos'],
     category: 'Tools',
-    help: 'Open Gallery',
+    help: 'Open Studio',
     handler: (args, ctx) => _cmdToolPanel('gallery', args, ctx),
-    usage: '/gallery'
+    usage: '/studio'
   },
   research: {
     alias: [],

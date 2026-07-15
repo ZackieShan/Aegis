@@ -25622,6 +25622,227 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   max-height: 72vh;
   overflow-y: auto;
 }
+.gallery-styles-container {
+  padding: 8px 4px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+/* ── Studio → Queue: what's running, what's next ── */
+.gallery-queue-container {
+  padding: 8px 4px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+.q-head h2 { margin: 0 0 4px; font-size: 15px; }
+.q-empty {
+  padding: 18px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.6;
+  border: 1px dashed color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 8px;
+  margin-top: 10px;
+}
+.q-gpu-note {
+  margin-top: 10px;
+  padding: 7px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm, var(--red)) 45%, transparent);
+  background: color-mix(in srgb, var(--accent-warm, var(--red)) 10%, transparent);
+}
+.q-list { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
+.q-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.q-row.q-done, .q-row.q-cancelled { opacity: 0.55; }
+.q-row.q-error { border-color: color-mix(in srgb, var(--red) 55%, transparent); }
+.q-kind {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  opacity: 0.7;
+  flex-shrink: 0;
+  min-width: 62px;
+  text-align: center;
+}
+/* GPU work is the kind that blocks other renders — worth spotting at a glance. */
+.q-kind-gpu {
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);
+  opacity: 0.95;
+}
+.q-mid { flex: 1; min-width: 0; }
+.q-title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.q-sub { font-size: 10px; opacity: 0.6; margin-top: 1px; }
+.q-bar {
+  margin-top: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.q-bar-fill {
+  height: 100%;
+  background: var(--accent, var(--red));
+  transition: width 0.3s;
+}
+.q-acts { display: flex; gap: 5px; align-items: center; flex-shrink: 0; }
+.q-link { font-size: 11px; }
+.q-cancel {
+  font-size: 10px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.q-cancel:hover { border-color: var(--red); color: var(--red); }
+.q-past-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 2px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* ── Studio → Movie: stitch generated clips into one film ── */
+.gallery-movie-container {
+  padding: 8px 4px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+.movie-head h2 { margin: 0 0 4px; font-size: 15px; }
+.movie-sub { margin: 18px 0 8px; font-size: 13px; opacity: 0.75; }
+.movie-empty {
+  padding: 18px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.6;
+  border: 1px dashed color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 8px;
+}
+.movie-timeline { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.movie-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  cursor: grab;
+}
+.movie-row.dragging { opacity: 0.45; }
+.movie-row.drop-target { border-color: var(--accent, var(--red)); }
+.movie-row-num {
+  min-width: 18px;
+  font-size: 11px;
+  opacity: 0.55;
+  text-align: center;
+}
+.movie-row-thumb {
+  width: 76px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #000;
+  flex-shrink: 0;
+}
+.movie-row-mid { flex: 1; min-width: 0; }
+.movie-row-title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.movie-row-meta { font-size: 10px; opacity: 0.55; margin-top: 2px; }
+.movie-row-trim { display: flex; gap: 4px; flex-shrink: 0; }
+.movie-trim-input {
+  width: 62px;
+  padding: 3px 5px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.movie-row-acts { display: flex; gap: 2px; flex-shrink: 0; }
+.movie-icon-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.movie-icon-btn:disabled { opacity: 0.3; cursor: default; }
+.movie-icon-btn:not(:disabled):hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.movie-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.movie-bar .grow { flex: 1; }
+.movie-total { font-size: 11px; opacity: 0.7; }
+.movie-bar .media-input { max-width: 220px; }
+.movie-status { margin-top: 8px; font-size: 11px; min-height: 14px; opacity: 0.8; }
+.movie-status-err { color: var(--red); opacity: 1; }
+.movie-status-ok { color: var(--green, #4ca); opacity: 1; }
+.movie-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+}
+.movie-pick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+}
+.movie-pick-card:hover { border-color: var(--accent, var(--red)); }
+.movie-pick-card video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #000;
+  display: block;
+}
+.movie-pick-label {
+  font-size: 10px;
+  opacity: 0.7;
+  padding: 0 6px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
 .gallery-albums-container.gallery-dragover {
   border-color: var(--red);
   background: color-mix(in srgb, var(--red) 5%, transparent);

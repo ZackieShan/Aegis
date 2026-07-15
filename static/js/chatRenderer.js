@@ -232,7 +232,7 @@ export function updateMessageAttachments(msgWrap, attachments) {
 }
 
 // Quick full-size preview when the user taps a chat photo thumbnail. Just an
-// overlay with the original image centered — no Gallery panel, no editor.
+// overlay with the original image centered — no Studio panel, no editor.
 function _openImageLightbox(att) {
   if (!att?.id) return;
   const overlay = document.createElement('div');
@@ -1366,7 +1366,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
         import('./gallery.js'),
         import('./galleryEditor.js'),
       ]);
-      // Ensure the Gallery modal is open so the editor has a container
+      // Ensure the Studio modal is open so the editor has a container
       // to render into; switch its tabs to the Edit tab.
       galleryMod.default.openGallery();
       const modal = document.getElementById('gallery-modal');

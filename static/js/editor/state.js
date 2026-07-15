@@ -204,7 +204,7 @@ export const state = {
   // Document dimensions in canvas pixels.
   imgWidth: 0,
   imgHeight: 0,
-  // Gallery image id this editor session is editing, or null for
+  // Studio image id this editor session is editing, or null for
   // blank-canvas drafts.
   imageId: null,
   // Original file extension so save-over-original re-encodes in the

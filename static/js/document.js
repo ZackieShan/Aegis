@@ -3162,7 +3162,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
   function _aegisAttachLabel(item, kind) {
     if (kind === 'gallery') {
-      return item.caption || item.prompt || item.filename || 'Gallery image';
+      return item.caption || item.prompt || item.filename || 'Studio image';
     }
     return item.title || 'Untitled document';
   }
@@ -3372,7 +3372,7 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
         </button>
         <button type="button" data-ody-attach-kind="gallery">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-          <span>Gallery</span>
+          <span>Studio</span>
         </button>
       </div>
       <label class="email-aegis-attach-search-wrap">

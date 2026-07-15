@@ -291,7 +291,7 @@ export function controlsHTML({ color, brushSize, wandTolerance }) {
       <div class="ge-control-row ge-actions">
         <button class="ge-btn" id="ge-import-file">File</button>
         <button class="ge-btn" id="ge-import-paste">Clipboard</button>
-        <button class="ge-btn" id="ge-import-gallery">Gallery</button>
+        <button class="ge-btn" id="ge-import-gallery">Studio</button>
       </div>
     </div>
     <div class="ge-harmonize-section" id="ge-harmonize-section" style="display:none;">

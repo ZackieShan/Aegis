@@ -1,5 +1,5 @@
 /**
- * Gallery Editor — canvas-based image editor with layers, brush, eraser, text, crop, inpaint mask.
+ * Studio Editor — canvas-based image editor with layers, brush, eraser, text, crop, inpaint mask.
  */
 
 import uiModule from './ui.js';
@@ -2961,7 +2961,7 @@ function _buildEditor(container) {
     uiModule,
   });
 
-  // Image import (topbar / panel File / Clipboard / Gallery picker) —
+  // Image import (topbar / panel File / Clipboard / Studio picker) —
   // full implementation in editor/wire-import.js. Returns the shared
   // handleImportedImage sink so drag-drop wires through the same path.
   const { handleImportedImage: _handleImportedImage } = wireImport({
@@ -3050,8 +3050,8 @@ function _buildEditor(container) {
       return;
     }
     if (e.key !== 'Escape') return;
-    // Escape is disabled inside Gallery Edit. It must not close the
-    // editor, close Gallery, or cancel active editor state.
+    // Escape is disabled inside Studio Edit. It must not close the
+    // editor, close Studio, or cancel active editor state.
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();

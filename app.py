@@ -837,6 +837,10 @@ logger.info("Control Center routes initialized")
 # Video generation — async jobs on a served Wan/LTX model (sd-server vid_gen)
 from routes.video_routes import setup_video_routes
 app.include_router(setup_video_routes())
+
+# Movie maker (stitch clips into one film) + the unified job queue.
+from routes.movie_routes import setup_movie_routes
+app.include_router(setup_movie_routes())
 logger.info("Video generation routes initialized")
 
 # Style presets — saved generation styles shared by the image + video paths

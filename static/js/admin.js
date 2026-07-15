@@ -2685,7 +2685,7 @@ function initWebhookForm() {
 const featureLabels = {
   web_search: 'Web Search', deep_research: 'Deep Research',
   memory: 'Memory', document_editor: 'Document Editor', rag: 'RAG Knowledge Base', sensitive_filter: 'Sensitive Info Filter',
-  gallery: 'Gallery'
+  gallery: 'Studio'
 };
 
 async function loadFeatures() {

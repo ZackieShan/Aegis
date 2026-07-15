@@ -88,21 +88,31 @@ you fit them to your machine:
 - **Repo → Wiki** (`/wiki`) — turn any local repo into a structured Overview / Architecture / module guide.
 
 **Create & converse**
+- **Studio** (`/studio`) — one home for generated media: photos, albums, the image editor,
+  the movie maker, style presets, and the tagged model library.
 - **Image generation** (`/image`) — fully local diffusion with seeds, steps, and negative prompts.
 - **Video generation** (`/video`) — local clips up to ~10s, with audio on LTX-2 models; **animate
-  any gallery still** into a clip (`/video image=last` or the Gallery's Animate button).
+  any Studio still** into a clip (`/video image=last` or the Studio's Animate button).
+- **Movie maker** — stitch your clips into one film: drag to reorder, trim heads and tails,
+  render. Clips of different sizes/framerates are matched automatically, and clips without
+  audio are padded with silence so a mixed set still concatenates cleanly.
 - **Style presets** (`/style`) — lock a model + prompt affixes + seed + LoRAs into a named
-  look that applies to every image and video generation.
-- **Media Studio** — every model on disk auto-tagged by capability and best use, with rescan.
+  look that applies to every image and video generation — and holds across every shot in a film.
+- **Model library** — every model on disk auto-tagged by capability and best use, with rescan.
 - **Two media engines** — stable-diffusion.cpp for speed, **ComfyUI** for workflows it can't
   run (GGUF video merges, FLUX.2-klein, Lightning LoRAs); VRAM is handed back after every job.
+- **A queue that tells the truth** — Studio → Queue lists every long job (renders, films,
+  automations, research): what's running, how far along, what's next, and a cancel button.
+- **Chat survives your renders** — a diffusion model fills the card, and the model server frees
+  VRAM by *evicting*, so a chat message would otherwise kill an in-flight render. Aegis routes
+  chat to a small CPU model until the GPU is free, tells you it did, and switches back after.
 - **Voice** — on-device speech-to-text + text-to-speech, plus a hands-free **Voice Mode**:
   speak, the agent acts, it reads the reply back.
 - **Vision** — a local vision model for images and screenshots.
 
 **Stay organized**
 - AI-assisted **Documents**, **Email** (IMAP/SMTP triage + drafts), **Notes / Tasks / Calendar**
-  (reminders, scheduled agent tasks, CalDAV), a **gallery / image editor**, and **web search**.
+  (reminders, scheduled agent tasks, CalDAV), the **Studio / image editor**, and **web search**.
 
 **Own the operation**
 - **Control Center** — one dashboard with every capability's live status and a one-click "try it."
@@ -143,10 +153,10 @@ restart; llama-swap hot-reloads the change:
 
 ![The /engine command showing per-model context recommendations](docs/media/engine.png)
 
-**Image generation and gallery.** Generated media lands in the Gallery next to your
+**Image generation and Studio.** Generated media lands in the Studio next to your
 own photos (this lighthouse came out of a served Qwen-Image model in 8 steps):
 
-![Gallery with generated image and video](docs/media/gallery.png)
+![Studio with generated image and video](docs/media/gallery.png)
 
 ![Photo detail view](docs/media/image-detail.png)
 
@@ -161,7 +171,7 @@ video generation matches. Different prompts, same preset, below — nothing else
 
 ![Two different prompts rendered with one locked style preset](docs/media/style-presets.png)
 
-**Image-to-video.** Any still in the Gallery grows an **Animate** button (or
+**Image-to-video.** Any still in the Studio grows an **Animate** button (or
 `/video image=last <motion prompt>` from chat) — the clip starts on your exact
 image, first frame pixel-for-pixel:
 
@@ -169,14 +179,17 @@ image, first frame pixel-for-pixel:
   <img src="docs/media/image-to-video.gif" alt="A generated still animated into a video clip — she lowers the umbrella as rain falls" width="400">
 </p>
 
-**Media Studio.** Every served model plus every file in the drop folder,
+**Studio → Settings: the model library.** Every served model plus every file in the drop folder,
 auto-tagged by capability and what it's best used for — with a rescan button and a
-filter that searches the tags (try "extraction" or "translation"). Style presets are
-managed in the same panel:
+filter that searches the tags (try "extraction" or "translation"). Style presets live
+next door in Studio → Styles:
 
-![Media Studio model library with capability tags](docs/media/media-studio.png)
+![Studio model library with capability tags](docs/media/media-studio.png)
 
-![Media Studio style preset editor](docs/media/media-studio-styles.png)
+![Studio style preset editor](docs/media/media-studio-styles.png)
+
+> Full walkthrough: the **[Studio guide](docs/studio.md)** — movie maker, styles,
+> the queue, and why chat drops to a CPU model while the GPU is rendering.
 
 **A second engine: ComfyUI.** Aegis drives ComfyUI workflows over its local API as
 a sibling to llama-swap — GGUF video models via custom nodes, joint audio+video

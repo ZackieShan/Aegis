@@ -5322,7 +5322,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     }
   }
 
-  // Open a chat attachment in the right place: images → Gallery editor; PDFs &
+  // Open a chat attachment in the right place: images → Studio editor; PDFs &
   // text/code/markdown → Documents viewer; anything else → raw file. A given
   // upload's imported document is reused (cached by upload id) so clicking it
   // again re-opens the same doc instead of making duplicates.
@@ -5342,7 +5342,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     const id = att.id, name = att.name || '', mime = att.mime || '';
     const url = `${API_BASE}/api/upload/${id}`;
 
-    // Images → Gallery editor.
+    // Images → Studio editor.
     if (isImage) {
       try {
         const gx = await import('./galleryEditor.js');

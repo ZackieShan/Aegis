@@ -55,7 +55,7 @@ installs `faster-whisper` + `gguf` into the app venv, and writes a starter
 | Aider (isolated venv) | the `/code` coding agent | `/code status` |
 | faster-whisper | Voice input (local Whisper) | `/doctor` → Voice input |
 | gguf (pip) | context auto-tuner metadata | `/engine` recommendations |
-| stable-diffusion.cpp | local image generation | Gallery / "generate an image" |
+| stable-diffusion.cpp | local image generation | Studio / "generate an image" |
 
 ## Adding models
 

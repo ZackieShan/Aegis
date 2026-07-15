@@ -1,5 +1,5 @@
 /**
- * Gallery Module — photo backup + AI-generated image library.
+ * Studio Module — photo backup + AI-generated image library.
  */
 
 import uiModule from './ui.js';
@@ -10,6 +10,9 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 import { topPortalZ } from './toolWindowZOrder.js';
 import sessionModule from './sessions.js';
 import fileHandlerModule from './fileHandler.js';
+import settingsModule from './settings.js';
+import { renderMovieTab, stopMovieTab } from './movieMaker.js';
+import { renderQueueTab, stopQueueTab } from './jobQueue.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -127,7 +130,7 @@ async function _fetchLibrary(append) {
     _renderModels(data.models || []);
     _renderStats();
   } catch (e) {
-    console.error('Gallery fetch error:', e);
+    console.error('Studio fetch error:', e);
   }
 }
 
@@ -154,12 +157,12 @@ async function _patchImage(id, patch) {
       body: JSON.stringify(patch),
     });
     if (!r.ok) {
-      console.warn('Gallery patch returned', r.status);
+      console.warn('Studio patch returned', r.status);
       return false;
     }
     return true;
   } catch (e) {
-    console.error('Gallery patch error:', e);
+    console.error('Studio patch error:', e);
     return false;
   }
 }
@@ -171,12 +174,12 @@ async function _deleteImage(id) {
       credentials: 'same-origin',
     });
     if (!r.ok) {
-      console.warn('Gallery delete returned', r.status);
+      console.warn('Studio delete returned', r.status);
       return false;
     }
     return true;
   } catch (e) {
-    console.error('Gallery delete error:', e);
+    console.error('Studio delete error:', e);
     return false;
   }
 }
@@ -1813,7 +1816,7 @@ function _openDetail(img) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      if (uiModule?.showToast) uiModule.showToast(`Animating with ${d.model} (${d.duration_s}s clip) — it appears in the Gallery in a few minutes.`, 6000);
+      if (uiModule?.showToast) uiModule.showToast(`Animating with ${d.model} (${d.duration_s}s clip) — it appears in the Studio in a few minutes.`, 6000);
     } catch (e) {
       if (uiModule?.showError) uiModule.showError('Could not start the animation: ' + (e?.message || 'unknown'));
     } finally {
@@ -2061,7 +2064,7 @@ export function openGallery() {
   modal.innerHTML = `
     <div class="modal-content gallery-modal-content">
       <div class="modal-header">
-        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>Gallery <span id="gallery-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal;margin-left:8px"></span></h4>
+        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>Studio <span id="gallery-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal;margin-left:8px"></span></h4>
         <button class="modal-close" id="gallery-close">&times;</button>
       </div>
       <div class="gallery-tabs">
@@ -2077,6 +2080,18 @@ export function openGallery() {
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>
           <span class="gallery-tab-label">Edit</span>
           <span class="gallery-tab-close" id="gallery-editor-tab-close" title="Close edit" aria-label="Close edit">×</span>
+        </button>
+        <button class="gallery-tab" data-tab="queue">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+          <span class="gallery-tab-label">Queue</span>
+        </button>
+        <button class="gallery-tab" data-tab="movie">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg></span>
+          <span class="gallery-tab-label">Movie</span>
+        </button>
+        <button class="gallery-tab" data-tab="styles">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 4.8L20 8l-4 3.9.9 5.6L12 15l-4.9 2.5.9-5.6L4 8l5.6-1.2z"/></svg></span>
+          <span class="gallery-tab-label">Styles</span>
         </button>
         <button class="gallery-tab" data-tab="settings">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
@@ -2123,6 +2138,39 @@ export function openGallery() {
         </div>
         <div class="gallery-albums-container" id="gallery-albums-container" style="display:none;"></div>
         <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
+        <div class="gallery-movie-container" id="gallery-movie-container" style="display:none;"></div>
+        <div class="gallery-queue-container" id="gallery-queue-container" style="display:none;"></div>
+        <div class="gallery-styles-container" id="gallery-styles-container" style="display:none;">
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M12 2l2.4 4.8L20 8l-4 3.9.9 5.6L12 15l-4.9 2.5.9-5.6L4 8l5.6-1.2z"/></svg>Style Presets
+              <span style="flex:1"></span>
+              <button type="button" id="media-style-new" class="memory-toolbar-btn" title="Create a new style preset">+ New style</button>
+            </h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">One saved look — model, prompt affixes, locked seed, LoRAs — applied to every image and video generation while active. Also drivable as <code>/style</code> in chat.</div>
+            <div id="media-styles-list"></div>
+            <div id="media-style-form" class="settings-col" hidden style="margin-top:10px;border-top:1px solid color-mix(in srgb, var(--fg) 12%, transparent);padding-top:10px;">
+              <div class="settings-row"><label class="settings-label">Name</label><input type="text" id="media-sf-name" class="media-input" placeholder="e.g. neon-noir"></div>
+              <div class="settings-row"><label class="settings-label">Description</label><input type="text" id="media-sf-desc" class="media-input" placeholder="optional"></div>
+              <div class="settings-row"><label class="settings-label">Image model</label><select id="media-sf-imodel" class="settings-select"><option value="">— keep default —</option></select></div>
+              <div class="settings-row"><label class="settings-label">Video model</label><select id="media-sf-vmodel" class="settings-select"><option value="">— keep default —</option></select></div>
+              <div class="settings-row"><label class="settings-label">Prompt prefix</label><input type="text" id="media-sf-prefix" class="media-input" placeholder="neon noir film still, teal and magenta palette"></div>
+              <div class="settings-row"><label class="settings-label">Prompt suffix</label><input type="text" id="media-sf-suffix" class="media-input" placeholder="appended after every prompt"></div>
+              <div class="settings-row"><label class="settings-label">Negative</label><input type="text" id="media-sf-negative" class="media-input" placeholder="blurry, low quality"></div>
+              <div class="settings-row">
+                <label class="settings-label">Seed</label><input type="number" id="media-sf-seed" class="media-input" style="max-width:110px" placeholder="random" title="Lock a seed to keep one consistent look across prompts">
+                <label class="settings-label" style="width:auto">Steps</label><input type="number" id="media-sf-steps" class="media-input" style="max-width:70px" placeholder="auto">
+                <label class="settings-label" style="width:auto">CFG</label><input type="number" step="0.1" id="media-sf-cfg" class="media-input" style="max-width:70px" placeholder="auto">
+              </div>
+              <div class="settings-row"><label class="settings-label">Size</label><input type="text" id="media-sf-size" class="media-input" style="max-width:110px" placeholder="768x768"></div>
+              <div class="settings-row"><label class="settings-label">LoRAs</label><input type="text" id="media-sf-loras" class="media-input" placeholder="file-stem:0.8, other-lora:1 (files in models/loras)"></div>
+              <div class="settings-row">
+                <button type="button" id="media-sf-save" class="confirm-btn confirm-btn-primary">Save style</button>
+                <button type="button" id="media-sf-cancel" class="memory-toolbar-btn">Cancel</button>
+                <span id="media-sf-msg" style="font-size:11px;opacity:0.7"></span>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="gallery-settings-container" id="gallery-settings-container" style="display:none;">
           <div class="admin-card">
             <h2>AI Tagging <span id="gallery-tag-count" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal;"></span></h2>
@@ -2143,6 +2191,15 @@ export function openGallery() {
                 Start AI tag
               </button>
             </div>
+          </div>
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg>Model Library
+              <span style="flex:1"></span>
+              <button type="button" id="media-scan-btn" class="memory-toolbar-btn" title="Re-scan the models folder and re-probe endpoints">⟳ Rescan</button>
+            </h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Everything served by your endpoints plus every model file in the <code>models/</code> drop folder, auto-tagged by capability and what it's best used for. Files marked "not served" need an engine config entry before they can run.</div>
+            <input type="text" id="media-model-filter" class="media-input" placeholder="Filter by name or tag (e.g. video, translation, extraction)…" style="width:100%;margin-bottom:8px">
+            <div id="media-models-list"><div style="opacity:0.6;font-size:12px">Loading…</div></div>
           </div>
         </div>
       </div>
@@ -2165,7 +2222,7 @@ export function openGallery() {
   document.getElementById('gallery-close').addEventListener('click', async () => {
     if (isEditorOpen()) {
       const ok = await uiModule.styledConfirm(
-        'Close Gallery and the active edit?',
+        'Close Studio and the active edit?',
         { confirmText: 'Close', danger: true },
       );
       if (!ok) return;
@@ -2246,11 +2303,21 @@ export function openGallery() {
       const imagesContainer = document.getElementById('gallery-images-container');
       const albumsContainer = document.getElementById('gallery-albums-container');
       const editorContainer = document.getElementById('gallery-editor-container');
+      const movieContainer = document.getElementById('gallery-movie-container');
+      const queueContainer = document.getElementById('gallery-queue-container');
+      const stylesContainer = document.getElementById('gallery-styles-container');
       const settingsContainer = document.getElementById('gallery-settings-container');
       if (imagesContainer) imagesContainer.style.display = target === 'images' ? '' : 'none';
       if (albumsContainer) albumsContainer.style.display = target === 'albums' ? '' : 'none';
       if (editorContainer) editorContainer.style.display = target === 'editor' ? 'flex' : 'none';
+      if (movieContainer) movieContainer.style.display = target === 'movie' ? '' : 'none';
+      if (queueContainer) queueContainer.style.display = target === 'queue' ? '' : 'none';
+      if (stylesContainer) stylesContainer.style.display = target === 'styles' ? '' : 'none';
       if (settingsContainer) settingsContainer.style.display = target === 'settings' ? '' : 'none';
+      // Leaving a polling tab: tear its timer down, or a closed tab keeps
+      // hitting /api/queue forever.
+      if (target !== 'movie') stopMovieTab();
+      if (target !== 'queue') stopQueueTab();
       if (target === 'images') {
         // Keep active edits alive when leaving the Edit tab. The edit
         // session is only torn down by the explicit Edit-tab close.
@@ -2260,6 +2327,14 @@ export function openGallery() {
         // If the editor isn't already holding an image, render a chooser so the
         // tab does something useful instead of opening an empty grey pane.
         if (!isEditorOpen()) _renderEditorLanding();
+      } else if (target === 'movie') {
+        renderMovieTab(document.getElementById('gallery-movie-container'));
+      } else if (target === 'queue') {
+        renderQueueTab(document.getElementById('gallery-queue-container'));
+      } else if (target === 'styles' || target === 'settings') {
+        // Style presets and the model library are rendered by the settings
+        // module — this modal is rebuilt on every open, so re-init each time.
+        settingsModule?.initMediaStudio?.();
       }
     });
   });
@@ -2633,7 +2708,7 @@ export function openGallery() {
     imagesContainer.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); grid.classList.remove('gallery-dragover'); });
   });
   imagesContainer.addEventListener('drop', (e) => {
-    _handleGalleryDrop(e).catch(err => console.error('Gallery drop error:', err));
+    _handleGalleryDrop(e).catch(err => console.error('Studio drop error:', err));
   });
 
   // Same drop handling on the Albums tab: dropped folders become new albums,
@@ -2655,7 +2730,7 @@ export function openGallery() {
     albumsContainer.addEventListener('drop', (e) => {
       _handleGalleryDrop(e)
         .then(() => _renderAlbumsTab())
-        .catch(err => console.error('Gallery drop error:', err));
+        .catch(err => console.error('Studio drop error:', err));
     });
   }
 
@@ -2973,6 +3048,10 @@ function _doCloseGallery() {
   }
   _open = false;
   clearTimeout(_searchDebounce);
+  // The Movie and Queue tabs poll on a timer; closing the modal removes their
+  // DOM but would leave the intervals running and hitting the API forever.
+  stopMovieTab();
+  stopQueueTab();
   if (_galleryResizeHandler) {
     window.removeEventListener('resize', _galleryResizeHandler);
     _galleryResizeHandler = null;
