@@ -17881,21 +17881,15 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 
 .gallery-modal-content {
   width: min(820px, 94vw);
-  max-height: 92vh;
-  font-size: 12px;
-}
-/* While the Edit tab is active the editor needs a *definite* height so
-   the right-side tool panel (`.ge-right-panel { overflow-y:auto }`)
-   scrolls INTERNALLY. Without this the modal only has `max-height`, so
-   `.gallery-editor { height:100% }` can't resolve — the editor grows to
-   its full content height, overflows the modal body, and the modal-body
-   scrollbar that appears can't be wheel-scrolled because the editor's
-   `overscroll-behavior:contain` blocks the chain. Pinning a real height
-   here makes the panel bounded and scrollable as designed. Scoped to
-   the editor view (matched via the container's inline `display:flex`)
-   so the Photos/Albums views keep sizing to their content. */
-.gallery-modal-content:has(#gallery-editor-container[style*="flex"]) {
+  /* A real height, not max-height: the Studio's tabs differ wildly in content
+     height (Photos grid vs the short Create form), and a shrink-wrapped modal
+     re-sizes on every tab switch — disorienting. A fixed frame also gives the
+     Edit tab the *definite* height its right-side tool panel needs to scroll
+     internally (`.gallery-editor { height:100% }` can't resolve against
+     max-height, and its overscroll-behavior:contain would block the modal's
+     fallback scrollbar from wheel-scrolling). */
   height: 92vh;
+  font-size: 12px;
 }
 /* Photo-detail view sizing (issue #314).
    The detail view is rendered as a `position:absolute; inset:0` overlay
@@ -25619,20 +25613,14 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
 }
 .gallery-settings-container {
   padding: 8px 4px;
-  max-height: 72vh;
-  overflow-y: auto;
 }
 .gallery-styles-container {
   padding: 8px 4px;
-  max-height: 72vh;
-  overflow-y: auto;
 }
 
 /* ── Studio → Create: generate images and clips in place ── */
 .gallery-create-container {
   padding: 8px 4px;
-  max-height: 72vh;
-  overflow-y: auto;
 }
 .create-pills { display: flex; gap: 6px; margin: 10px 0; }
 .create-pill {
@@ -25679,8 +25667,6 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
 /* ── Studio → Queue: what's running, what's next ── */
 .gallery-queue-container {
   padding: 8px 4px;
-  max-height: 72vh;
-  overflow-y: auto;
 }
 .q-head h2 { margin: 0 0 4px; font-size: 15px; }
 .q-empty {
@@ -25772,8 +25758,6 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
 /* ── Studio → Movie: stitch generated clips into one film ── */
 .gallery-movie-container {
   padding: 8px 4px;
-  max-height: 72vh;
-  overflow-y: auto;
 }
 .movie-head h2 { margin: 0 0 4px; font-size: 15px; }
 .movie-sub { margin: 18px 0 8px; font-size: 13px; opacity: 0.75; }
