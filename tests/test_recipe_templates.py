@@ -63,11 +63,21 @@ def test_stock_is_the_renamed_bull_base_bear():
 
 def test_preview_entries_present_but_not_runnable():
     cat = _by_id(rt.catalog(["qwen"], ALL_TB))
-    for rid in ("inbox_declutter", "morning_brief"):
-        assert cat[rid]["preview"] is True
-        assert cat[rid]["available"] is False
-        assert cat[rid]["recipe"] is None
-        assert cat[rid].get("preview_note")
+    # morning_brief stays a preview until it has an input/config path
+    assert cat["morning_brief"]["preview"] is True
+    assert cat["morning_brief"]["available"] is False
+    assert cat["morning_brief"]["recipe"] is None
+    assert cat["morning_brief"].get("preview_note")
+
+
+def test_inbox_declutter_is_real_and_uses_the_email_tool():
+    cat = _by_id(rt.catalog(["qwen3-coder-30b"], set()))
+    ib = cat["inbox_declutter"]
+    assert ib["preview"] is False and ib["available"] is True
+    assert ib["needs_email"] is True
+    tools = [n["config"]["tool"] for n in ib["recipe"]["nodes"] if n["type"] == "tool"]
+    assert tools == ["email_recent"]
+    assert validate_recipe(ib["recipe"]) is None
 
 
 def test_every_runnable_graph_validates():
@@ -94,7 +104,7 @@ def test_catalog_entries_carry_human_metadata():
 
 def test_build_graph_runnable_and_gated():
     assert rt.build_graph("stock", "qwen3-coder-30b")["name"].startswith("Stock analysis")
-    assert rt.build_graph("inbox_declutter", "qwen") is None   # preview
+    assert rt.build_graph("morning_brief", "qwen") is None      # preview
     assert rt.build_graph("nope", "qwen") is None               # unknown
     assert rt.build_graph("summarize", "") is None              # no model
 

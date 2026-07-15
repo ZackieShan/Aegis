@@ -256,6 +256,30 @@ def _b_web_brief(model: str) -> Dict[str, Any]:
         "action items or links worth following.")
 
 
+def _b_inbox_declutter(model: str) -> Dict[str, Any]:
+    """input(days) → email_recent (built-in, owner-scoped) → model digest.
+
+    The model PROPOSES unsubscribes; it never acts. The email_recent tool
+    returns senders + unsubscribe links, and the model turns that into a
+    review-and-decide digest."""
+    nodes = [
+        _node("n1", "input", 60, 160, label="Days back (default 7)"),
+        _node("n2", "tool", 340, 160, tool="email_recent", args={"days": "{{input}}"}),
+        _node("n3", "model", 640, 160, model=model,
+              prompt="Below is the user's promotional and newsletter mail grouped by sender, with "
+                     "unsubscribe links. Write a short **inbox declutter digest**:\n"
+                     "1. A one-line summary (how many senders, how much bulk mail).\n"
+                     "2. A ranked list of the top senders worth unsubscribing from — highest volume "
+                     "first — each as `Sender — N emails — [unsubscribe](link)`. Only include a link "
+                     "if one was provided.\n"
+                     "3. A short note that the user decides — you're only suggesting, nothing is "
+                     "unsubscribed automatically.\n\nIf there was no mail or no account, say so plainly."),
+        _node("n4", "output", 940, 160),
+    ]
+    edges = [_edge("n1", "n2"), _edge("n2", "n3"), _edge("n3", "n4")]
+    return _graph(nodes, edges)
+
+
 # ── catalog ───────────────────────────────────────────────────────────────────
 # Order: model-only (simple → rich), then toolbox-gated, then previews.
 _CATALOG: List[Dict[str, Any]] = [
@@ -316,13 +340,13 @@ _CATALOG: List[Dict[str, Any]] = [
      "expected_output": "A brief: what the page is, key points, and links worth following.",
      "needs_toolbox": "web", "builder": _b_web_brief},
 
-    # Previews — visible in the library, runnable once Automations lands (Phase 2).
     {"id": "inbox_declutter", "name": "Inbox declutter", "category": "Monitor",
-     "description": "Daily: digest your promotional and newsletter mail, and queue up who to unsubscribe from — you approve each one.",
-     "sample_input": "Runs on a schedule against your inbox — no input needed.",
-     "expected_output": "A daily digest of bulk senders with one-click unsubscribes to approve.",
-     "needs_toolbox": None, "builder": None, "preview": True,
-     "preview_note": "Arrives with Automations — needs email access and a daily schedule."},
+     "description": "Digest your promotional and newsletter mail and rank who to unsubscribe from — you decide, nothing is unsubscribed automatically. Great as a daily automation.",
+     "sample_input": "7",
+     "expected_output": "A digest of bulk senders (by volume) with their unsubscribe links to review.",
+     "needs_toolbox": None, "needs_email": True, "builder": _b_inbox_declutter},
+
+    # Previews — visible in the library, runnable once their inputs land.
     {"id": "morning_brief", "name": "Morning brief", "category": "Monitor",
      "description": "Daily: your watched tickers and saved topics pulled into one short digest, waiting when you wake up.",
      "sample_input": "Runs on a schedule against your saved tickers and topics.",
@@ -363,6 +387,10 @@ def catalog(models: List[str], connected_toolboxes) -> List[Dict[str, Any]]:
             "preview": preview, "available": available, "has_model": bool(model),
             "needs": _needs_info(needs, connected),
         }
+        if meta.get("needs_email"):
+            # Not a hard gate — the email tool degrades gracefully — but the
+            # UI can hint that this recipe reads the inbox.
+            entry["needs_email"] = True
         if preview and meta.get("preview_note"):
             entry["preview_note"] = meta["preview_note"]
         if model and not preview and meta.get("builder"):

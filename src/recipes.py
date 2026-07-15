@@ -207,7 +207,7 @@ async def run_recipe(recipe: Dict[str, Any], run_input: str, owner: Optional[str
             elif ntype == "output":
                 out = "\n\n".join(u for u in upstream if u) or (upstream[0] if upstream else "")
             elif ntype == "tool":
-                out = await _run_tool_node(mcp, cfg, outputs, run_input)
+                out = await _run_tool_node(mcp, cfg, outputs, run_input, owner)
             elif ntype == "model":
                 out = await _run_model_node(cfg, upstream, outputs, run_input, owner)
             elif ntype == "loop":
@@ -249,17 +249,27 @@ def _node_label(node: Dict) -> str:
     return t or "node"
 
 
-async def _run_tool_node(mcp, cfg: Dict, outputs: Dict[str, str], run_input: str) -> str:
+async def _run_tool_node(mcp, cfg: Dict, outputs: Dict[str, str], run_input: str,
+                         owner: Optional[str] = None) -> str:
     tool = (cfg.get("tool") or "").strip()
     if not tool:
         return "[tool node: no tool selected]"
+    args = {}
+    for k, v in (cfg.get("args") or {}).items():
+        args[k] = _substitute(str(v), outputs, run_input) if isinstance(v, str) else v
+    # Built-in app tools (e.g. email read) run IN-PROCESS with the run owner —
+    # MCP toolbox subprocesses can't see whose data to touch. Checked first.
+    try:
+        from src.recipe_builtin_tools import BUILTIN_RECIPE_TOOLS
+        if tool in BUILTIN_RECIPE_TOOLS:
+            return await BUILTIN_RECIPE_TOOLS[tool](args, owner)
+    except Exception as e:
+        logger.debug("builtin recipe tool %s failed: %s", tool, e)
+        return f"[tool node: {tool} failed: {e}]"
     # Accept a bare tool name (osint_whois) or a qualified one (mcp__osint__osint_whois).
     qualified = tool if tool.startswith("mcp__") else _qualify_tool(mcp, tool)
     if not qualified:
         return f"[tool node: unknown tool {tool!r}]"
-    args = {}
-    for k, v in (cfg.get("args") or {}).items():
-        args[k] = _substitute(str(v), outputs, run_input) if isinstance(v, str) else v
     result = await mcp.call_tool(qualified, args)
     if isinstance(result, dict):
         return (result.get("stdout") or result.get("stderr") or result.get("error") or "").strip()

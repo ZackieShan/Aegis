@@ -32,7 +32,7 @@ def test_catalog_lists_recipes_with_metadata(client):
 
 
 def test_run_preview_recipe_409(client):
-    r = client.post("/api/recipes/catalog/inbox_declutter/run", json={"input": ""})
+    r = client.post("/api/recipes/catalog/morning_brief/run", json={"input": ""})
     assert r.status_code == 409
 
 

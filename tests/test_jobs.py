@@ -43,6 +43,23 @@ def test_manual_and_cron_triggers(jobs):
     assert c["next_run"] is not None
 
 
+def test_email_trigger_has_no_clock_schedule(jobs):
+    e = jobs.save_job(_canned(trigger={"kind": "email"}))
+    assert e["trigger"] == {"kind": "email"}
+    assert e["next_run"] is None          # fires on arrival, not a clock
+    # and it's discoverable to the arrival poll
+    owners = jobs._email_triggered_owners()
+    assert any(j["id"] == e["id"] for lst in owners.values() for j in lst)
+
+
+def test_email_triggered_owners_skips_disabled(jobs):
+    jobs.save_job(_canned(name="on", trigger={"kind": "email"}), owner="me")
+    jobs.save_job(_canned(name="off", trigger={"kind": "email"}, enabled=False), owner="me")
+    jobs.save_job(_canned(name="sched"), owner="me")  # schedule, not email
+    names = {j["name"] for lst in jobs._email_triggered_owners().values() for j in lst}
+    assert names == {"on"}
+
+
 def test_interval_next_run_is_clamped(jobs):
     rec = jobs.save_job(_canned(trigger={"kind": "schedule", "interval_seconds": 5}))
     # floor is 60s

@@ -1050,7 +1050,9 @@ function _fmtWhen(ts) {
 }
 
 function _fmtTrigger(t) {
-  if (!t || t.kind !== 'schedule') return 'Manual';
+  if (!t) return 'Manual';
+  if (t.kind === 'email') return 'On new email';
+  if (t.kind !== 'schedule') return 'Manual';
   const s = t.schedule || {};
   if (s.kind === 'interval') { const h = s.interval_seconds / 3600; return h >= 1 ? `Every ${h % 1 ? h.toFixed(1) : h}h` : `Every ${Math.round(s.interval_seconds / 60)}m`; }
   if (s.kind === 'cron') return `Cron: ${s.cron}`;
@@ -1142,16 +1144,19 @@ function _openAutomateForm(recipe, inputEl, container) {
   const whenRow = _el('div', 'rp-row');
   whenRow.appendChild(Object.assign(_el('label'), { textContent: 'Run' }));
   const kind = _el('select');
-  [['daily', 'Daily at'], ['hours', 'Every N hours'], ['cron', 'Custom cron']].forEach(([v, t]) => kind.appendChild(new Option(t, v)));
+  [['daily', 'Daily at'], ['hours', 'Every N hours'], ['cron', 'Custom cron'], ['email', 'When new email arrives']]
+    .forEach(([v, t]) => kind.appendChild(new Option(t, v)));
   whenRow.appendChild(kind);
   const timeIn = _el('input'); timeIn.type = 'time'; timeIn.value = '07:00';
   const hoursIn = _el('input'); hoursIn.type = 'number'; hoursIn.value = '6'; hoursIn.min = '1'; hoursIn.style.width = '64px'; hoursIn.hidden = true;
   const cronIn = _el('input'); cronIn.type = 'text'; cronIn.placeholder = '0 7 * * *'; cronIn.hidden = true;
-  whenRow.append(timeIn, hoursIn, cronIn);
+  const emailNote = _el('span', 'lib-note', 'Runs when new mail lands (checked every few minutes).'); emailNote.hidden = true;
+  whenRow.append(timeIn, hoursIn, cronIn, emailNote);
   kind.addEventListener('change', () => {
     timeIn.hidden = kind.value !== 'daily';
     hoursIn.hidden = kind.value !== 'hours';
     cronIn.hidden = kind.value !== 'cron';
+    emailNote.hidden = kind.value !== 'email';
   });
   form.appendChild(whenRow);
 
@@ -1170,10 +1175,14 @@ function _openAutomateForm(recipe, inputEl, container) {
   form.appendChild(actions);
 
   save.addEventListener('click', async () => {
-    const trigger = { kind: 'schedule' };
-    if (kind.value === 'daily') { const [h, m] = timeIn.value.split(':'); trigger.cron = `${parseInt(m, 10)} ${parseInt(h, 10)} * * *`; }
-    else if (kind.value === 'hours') { trigger.interval_seconds = Math.max(1, parseInt(hoursIn.value, 10) || 6) * 3600; }
-    else { trigger.cron = cronIn.value.trim(); }
+    let trigger;
+    if (kind.value === 'email') { trigger = { kind: 'email' }; }
+    else {
+      trigger = { kind: 'schedule' };
+      if (kind.value === 'daily') { const [h, m] = timeIn.value.split(':'); trigger.cron = `${parseInt(m, 10)} ${parseInt(h, 10)} * * *`; }
+      else if (kind.value === 'hours') { trigger.interval_seconds = Math.max(1, parseInt(hoursIn.value, 10) || 6) * 3600; }
+      else { trigger.cron = cronIn.value.trim(); }
+    }
     const body = {
       name: nameIn.value.trim() || recipe.name,
       source: { kind: 'canned', template_id: recipe.id },

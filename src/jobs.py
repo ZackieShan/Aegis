@@ -23,7 +23,7 @@ from src.constants import JOBS_DIR
 
 logger = logging.getLogger(__name__)
 
-_TRIGGERS = ("manual", "schedule")
+_TRIGGERS = ("manual", "schedule", "email")
 _SCHEDULE_KINDS = ("cron", "interval")
 _OUTPUTS = ("notify", "email", "document", "note")
 _HISTORY_MAX = 20
@@ -107,6 +107,9 @@ def _clean_trigger(raw: Any) -> Dict[str, Any]:
         return {"kind": "manual"}
     if kind == "manual":
         return {"kind": "manual"}
+    if kind == "email":
+        # Fires when new mail arrives (the recipe reads + filters the inbox).
+        return {"kind": "email"}
     sched = raw.get("kind_of") or raw.get("schedule") or {}
     skind = raw.get("schedule_kind") or (sched.get("kind") if isinstance(sched, dict) else None) or raw.get("s_kind")
     # accept a flat shape too: {kind:"schedule", cron:"..."} / {interval_seconds:n}
@@ -382,6 +385,9 @@ def record_run(job_id: str, ok: bool, summary: str = "", error: str = "",
 # re-fires in a tight loop.
 _scheduler_task: Optional["asyncio.Task"] = None
 _POLL_SECONDS = 30
+_EMAIL_CHECK_SECONDS = 180        # how often to poll the inbox for arrivals
+_email_baseline: Dict[str, int] = {}   # owner → last seen IMAP UIDNEXT
+_last_email_check = [0.0]
 
 
 async def _scheduler_loop() -> None:
@@ -394,10 +400,59 @@ async def _scheduler_loop() -> None:
                 # the next tick; fire_job then records the single real outcome.
                 _claim(job)
                 asyncio.create_task(_fire_and_forget(job))
+            # Email-triggered jobs fire on new mail (throttled inbox poll).
+            if time.time() - _last_email_check[0] >= _EMAIL_CHECK_SECONDS:
+                _last_email_check[0] = time.time()
+                await _arrival_check()
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("automations scheduler tick failed")
+
+
+def _email_triggered_owners() -> Dict[str, List[Dict[str, Any]]]:
+    """owner → their enabled email-triggered jobs."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for job in all_jobs():
+        if job.get("enabled") and (job.get("trigger") or {}).get("kind") == "email":
+            out.setdefault(job.get("owner") or "", []).append(job)
+    return out
+
+
+def _inbox_uidnext(owner: str) -> Optional[int]:
+    """Current INBOX UIDNEXT for an owner, or None if no mailbox. Cheap STATUS
+    call — a rise means new mail arrived."""
+    try:
+        from routes.email_helpers import _get_email_config, _imap
+        cfg = _get_email_config(owner=owner or "")
+        if not cfg or not cfg.get("imap_host"):
+            return None
+        with _imap(owner=owner or "") as conn:
+            typ, data = conn.status("INBOX", "(UIDNEXT)")
+            if typ != "OK" or not data:
+                return None
+            m = re.search(r"UIDNEXT\s+(\d+)", data[0].decode() if isinstance(data[0], bytes) else str(data[0]))
+            return int(m.group(1)) if m else None
+    except Exception as e:
+        logger.debug("inbox uidnext check failed for %s: %s", owner, e)
+        return None
+
+
+async def _arrival_check() -> None:
+    owners = _email_triggered_owners()
+    for owner, jobs_for_owner in owners.items():
+        uidnext = await asyncio.to_thread(_inbox_uidnext, owner)
+        if uidnext is None:
+            continue
+        prev = _email_baseline.get(owner)
+        _email_baseline[owner] = uidnext
+        # First observation just baselines — don't fire on the existing backlog.
+        if prev is None or uidnext <= prev:
+            continue
+        logger.info("new mail for %s (UIDNEXT %s→%s) — firing %d automation(s)",
+                    owner, prev, uidnext, len(jobs_for_owner))
+        for job in jobs_for_owner:
+            asyncio.create_task(_fire_and_forget(job))
 
 
 async def _fire_and_forget(job: Dict[str, Any]) -> None:
