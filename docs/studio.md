@@ -26,6 +26,8 @@ turns it into a video clip starting on that exact frame.
 
 ## Create
 
+![The Create tab — prompt, model, style, duration, seed](media/studio-create.png)
+
 Generate images and clips without leaving the Studio: prompt, model, style,
 duration (video) or size (image), seed — one panel. Videos hand off to the
 **Queue** tab; images resolve in place. Everything lands in Photos, where the
@@ -50,6 +52,8 @@ Duration goes up to ~10s on LTX models (24fps) and ~16s on Wan (16fps) — the
 engine caps at 257 frames either way.
 
 ## Movie
+
+![The movie maker — reorder, trim, and render clips into one film](media/studio-movie.png)
 
 Local models make short clips — 2 to 10 seconds. The **Movie** tab stitches
 several into one film.
@@ -82,6 +86,8 @@ size and LoRAs into a named look. Activate one and every image and video
 generation matches it, until you turn it off. Also drivable with `/style`.
 
 ## Queue
+
+![The queue — a live render, with chat protected on a CPU model](media/studio-queue.png)
 
 One list of everything slow: renders, films, automations, and research. It shows
 what's running with progress, what's next in line, what recently finished (with a
@@ -123,6 +129,23 @@ than handing you a 404.
 
 Agent mode swaps too, and shrinks its context budget to the CPU model's window
 (32K) — your coder model's 45K window would otherwise overflow it.
+
+---
+
+## On your phone
+
+The Studio works at phone width — the tab bar scrolls, movie rows wrap, and the
+whole modal goes full-screen:
+
+<p align="center">
+  <img src="media/studio-mobile.png" alt="The Studio's Create tab at iPhone width" width="320">
+</p>
+
+For remote use, pair Aegis with [Tailscale](https://tailscale.com): install it on
+the PC and phone, then `tailscale serve 7000` publishes the app as
+`https://<your-pc>.<tailnet>.ts.net` — real HTTPS (so the service worker and
+Voice Mode's microphone work in Safari), visible only inside your tailnet, with
+Aegis still bound to localhost. Add to Home Screen and it's an app.
 
 ---
 

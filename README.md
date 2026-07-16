@@ -190,6 +190,18 @@ next door in Studio → Styles:
 
 ![Studio style preset editor](docs/media/media-studio-styles.png)
 
+**Create, watch, stitch.** The Studio's Create tab generates images and clips in
+place (with a ✨ button that rewrites rough intent into a diffusion-ready scene);
+the Queue shows every long job — and while a render holds the GPU, chat answers
+on a small CPU model *so the render survives*; the Movie tab stitches clips into
+one film with reorder and trim:
+
+![Create — prompt, model, style, duration in one panel](docs/media/studio-create.png)
+
+![The queue during a live render — chat protected on a CPU model](docs/media/studio-queue.png)
+
+![The movie maker with two clips staged](docs/media/studio-movie.png)
+
 > Full walkthrough: the **[Studio guide](docs/studio.md)** — movie maker, styles,
 > the queue, and why chat drops to a CPU model while the GPU is rendering.
 
