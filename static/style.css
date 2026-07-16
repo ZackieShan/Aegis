@@ -25864,6 +25864,9 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   cursor: pointer;
   overflow: hidden;
   text-align: left;
+  /* The global `button { height: 32px }` clips the 16:9 video to a sliver —
+     these cards must grow to their thumbnail. */
+  height: auto;
 }
 .movie-pick-card:hover { border-color: var(--accent, var(--red)); }
 .movie-pick-card video {
