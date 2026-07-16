@@ -21,6 +21,27 @@ def _models_dir() -> str:
     return os.path.join(BASE_DIR, "models")
 
 
+# lightx2v 4-step distillation LoRAs for Wan2.2 T2V — shared between this
+# module's ComfyUI graph and the native sd-server path (video_generation
+# splices them into the prompt via sd.cpp's <lora:...> syntax).
+WAN_LIGHTNING_HIGH_LORA = "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"
+WAN_LIGHTNING_LOW_LORA = "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors"
+
+# Wan's standard negative prompt (from the reference workflows) — most of it
+# targets exactly the anatomy failures users notice: 多余的手指 (extra
+# fingers), 画得不好的手部 (badly drawn hands).
+WAN_DEFAULT_NEGATIVE = (
+    "色调艳丽，过曝，静态，细节模糊不清，最差质量，低质量，多余的手指，画得不好的手部"
+)
+
+
+def wan_lightning_available() -> bool:
+    """Both Wan2.2 Lightning expert LoRAs present in models/loras."""
+    loras_dir = os.path.join(_models_dir(), "loras")
+    return (os.path.exists(os.path.join(loras_dir, WAN_LIGHTNING_HIGH_LORA))
+            and os.path.exists(os.path.join(loras_dir, WAN_LIGHTNING_LOW_LORA)))
+
+
 def wan22_t2v_graph(
     prompt: str,
     negative_prompt: str = "",
@@ -39,17 +60,11 @@ def wan22_t2v_graph(
     When the lightx2v 4-step distillation LoRAs are present in models/loras
     they're wired in automatically (steps 4, cfg 1 per the template's LoRA
     branch) — same quality class, ~5x faster."""
-    _lightning_high = "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"
-    _lightning_low = "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors"
-    loras_dir = os.path.join(_models_dir(), "loras")
-    lightning = (os.path.exists(os.path.join(loras_dir, _lightning_high))
-                 and os.path.exists(os.path.join(loras_dir, _lightning_low)))
+    lightning = wan_lightning_available()
     if lightning:
         steps, cfg = 4, 1.0
     half = max(1, steps // 2)
-    negative = negative_prompt or (
-        "色调艳丽，过曝，静态，细节模糊不清，最差质量，低质量，多余的手指，画得不好的手部"
-    )
+    negative = negative_prompt or WAN_DEFAULT_NEGATIVE
     graph = {
         "1": {"class_type": "CLIPLoaderGGUF",
               "inputs": {"clip_name": "video\\umt5-xxl-encoder-Q8_0.gguf", "type": "wan"}},
@@ -86,9 +101,9 @@ def wan22_t2v_graph(
     }
     if lightning:
         graph["21"] = {"class_type": "LoraLoaderModelOnly",
-                       "inputs": {"model": ["4", 0], "lora_name": _lightning_high, "strength_model": 1.0}}
+                       "inputs": {"model": ["4", 0], "lora_name": WAN_LIGHTNING_HIGH_LORA, "strength_model": 1.0}}
         graph["22"] = {"class_type": "LoraLoaderModelOnly",
-                       "inputs": {"model": ["5", 0], "lora_name": _lightning_low, "strength_model": 1.0}}
+                       "inputs": {"model": ["5", 0], "lora_name": WAN_LIGHTNING_LOW_LORA, "strength_model": 1.0}}
         graph["6"]["inputs"]["model"] = ["21", 0]
         graph["7"]["inputs"]["model"] = ["22", 0]
     return graph
@@ -199,6 +214,66 @@ def flux2_klein_t2i_graph(
     }
 
 
+def hunyuanvideo15_t2v_graph(
+    prompt: str,
+    negative_prompt: str = "",
+    width: int = 832,
+    height: int = 480,
+    video_frames: int = 121,
+    fps: int = 24,
+    seed: int = 0,
+    steps: int = 20,
+    cfg: float = 6.0,
+) -> Dict[str, Any]:
+    """HunyuanVideo 1.5 720p T2V (8.3B DiT), per the bundled
+    video_hunyuan_video_1.5_720p_t2v template's base pass — the optional
+    1080p latent-super-resolution second stage is skipped, same as the Wan
+    and LTX builders render at target size directly.
+
+    weight_dtype fp8_e4m3fn casts the fp16 checkpoint at load (the
+    template's own guidance for sub-32GB cards): 8.3GB resident instead of
+    16.6GB, leaving 720p×121-frame activations comfortable on the 24GB 4090.
+    The template ships 20 steps as its speed/quality default (50 = original
+    quality); shift 7 / cfg 6 / euler+simple per its sampling chain."""
+    width = max(256, int(width) // 16 * 16)
+    height = max(256, int(height) // 16 * 16)
+    return {
+        "1": {"class_type": "DualCLIPLoader", "inputs": {
+            "clip_name1": "video\\qwen_2.5_vl_7b_fp8_scaled.safetensors",
+            "clip_name2": "video\\byt5_small_glyphxl_fp16.safetensors",
+            "type": "hunyuan_video_15",
+        }},
+        "2": {"class_type": "UNETLoader", "inputs": {
+            "unet_name": "video\\hunyuanvideo1.5_720p_t2v_fp16.safetensors",
+            "weight_dtype": "fp8_e4m3fn",
+        }},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "video\\hunyuanvideo15_vae_fp16.safetensors"}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": prompt}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": negative_prompt or ""}},
+        "6": {"class_type": "EmptyHunyuanVideo15Latent",
+              "inputs": {"width": width, "height": height, "length": video_frames, "batch_size": 1}},
+        "7": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["2", 0], "shift": 7}},
+        "8": {"class_type": "BasicScheduler",
+              "inputs": {"model": ["7", 0], "scheduler": "simple", "steps": int(steps), "denoise": 1}},
+        "9": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
+        "10": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "11": {"class_type": "CFGGuider",
+               "inputs": {"model": ["7", 0], "positive": ["4", 0], "negative": ["5", 0], "cfg": float(cfg)}},
+        "12": {"class_type": "SamplerCustomAdvanced", "inputs": {
+            "noise": ["9", 0], "guider": ["11", 0], "sampler": ["10", 0],
+            "sigmas": ["8", 0], "latent_image": ["6", 0],
+        }},
+        "13": {"class_type": "VAEDecodeTiled", "inputs": {
+            "samples": ["12", 0], "vae": ["3", 0],
+            "tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8,
+        }},
+        "14": {"class_type": "CreateVideo", "inputs": {"images": ["13", 0], "fps": float(fps)}},
+        "15": {"class_type": "SaveVideo", "inputs": {
+            "video": ["14", 0], "filename_prefix": "aegis/hunyuan15", "format": "mp4", "codec": "h264",
+        }},
+    }
+
+
 _LTX2_COMPANIONS = [
     "video/gemma_3_12B_it_fp4_mixed.safetensors",
     "video/ltx-2-19b-embeddings_connector_distill_bf16.safetensors",
@@ -218,6 +293,16 @@ COMFY_VIDEO_MODELS: Dict[str, Dict[str, Any]] = {
             "Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf",
             "video/umt5-xxl-encoder-Q8_0.gguf",
             "video/wan_2.1_vae.safetensors",
+        ],
+    },
+    "comfy-hunyuanvideo1.5-t2v": {
+        "builder": hunyuanvideo15_t2v_graph,
+        "label": "HunyuanVideo 1.5 720p T2V (ComfyUI)",
+        "required_files": [
+            "video/hunyuanvideo1.5_720p_t2v_fp16.safetensors",
+            "video/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+            "video/byt5_small_glyphxl_fp16.safetensors",
+            "video/hunyuanvideo15_vae_fp16.safetensors",
         ],
     },
     "comfy-ltx2-19b-fast": {

@@ -52,6 +52,34 @@ def is_video_model(model_id: str) -> bool:
     return bool(VIDEO_MODEL_RE.search(str(model_id or "")))
 
 
+def apply_wan_lightning(model_id: str, prompt: str, negative_prompt: str) -> tuple:
+    """(prompt, negative_prompt) with the Wan2.2 Lightning LoRAs spliced in
+    for native sd-server T2V renders.
+
+    sd.cpp applies LoRAs through prompt syntax — `<lora:name:1>` targets the
+    low-noise expert, `<lora:|high_noise|name:1>` the high-noise one (per its
+    docs/wan.md Lightning example, which pairs them with 4+4 euler steps at
+    cfg 3.5). The llama-swap entry's step counts assume these tags, so this
+    must stay in lockstep with engine/llama-swap.yaml. An empty negative also
+    gets Wan's standard one — at cfg 3.5 it actively steers away from the
+    extra-fingers/bad-hands failure mode. No-ops for non-Wan/i2v models, when
+    the LoRA files are missing, or when the prompt already carries a
+    lightx2v tag (e.g. from a style preset)."""
+    from src import comfyui_workflows
+
+    mid = str(model_id or "").lower()
+    if "wan" not in mid or "t2v" not in mid:
+        return prompt, negative_prompt
+    if not comfyui_workflows.wan_lightning_available():
+        return prompt, negative_prompt
+    negative_prompt = negative_prompt or comfyui_workflows.WAN_DEFAULT_NEGATIVE
+    if "lightx2v" in (prompt or "").lower():
+        return prompt, negative_prompt
+    low = comfyui_workflows.WAN_LIGHTNING_LOW_LORA.removesuffix(".safetensors")
+    high = comfyui_workflows.WAN_LIGHTNING_HIGH_LORA.removesuffix(".safetensors")
+    return f"{prompt}<lora:{low}:1><lora:|high_noise|{high}:1>", negative_prompt
+
+
 def list_video_models(owner: Optional[str] = None) -> List[Dict[str, str]]:
     """Video-capable model ids across enabled endpoints (from cached_models)."""
     from src.database import SessionLocal, ModelEndpoint
@@ -132,8 +160,11 @@ async def start_video_job(
     # event loop.
     root, model_id, headers = await asyncio.to_thread(_upstream_root, model, owner)
     submit_url = f"{root}/upstream/{model_id}/sdcpp/v1/vid_gen"
+    # Only the server sees the <lora:...> tags — the job record (and thus the
+    # gallery/movie-maker prompt) keeps the user's clean prompt.
+    gen_prompt, negative_prompt = apply_wan_lightning(model_id, prompt, negative_prompt)
     payload = {
-        "prompt": prompt,
+        "prompt": gen_prompt,
         "negative_prompt": negative_prompt or "",
         "width": int(width),
         "height": int(height),

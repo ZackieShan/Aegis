@@ -94,7 +94,9 @@ you fit them to your machine:
   presets, and the tagged model library. Video renders are stored as MP4.
 - **Image generation** (`/image`) — fully local diffusion with seeds, steps, and negative prompts.
 - **Video generation** (`/video`) — local clips up to ~10s, with audio on LTX-2 models; **animate
-  any Studio still** into a clip (`/video image=last` or the Studio's Animate button).
+  any Studio still** into a clip (`/video image=last` or the Studio's Animate button). Chat uses
+  your default model; Studio → Create lets you pick per render — Wan 2.2 (with 4-step Lightning
+  LoRAs for clean hands), LTX-2, or HunyuanVideo 1.5.
 - **Movie maker** — stitch your clips into one film: drag to reorder, trim heads and tails,
   render. Clips of different sizes/framerates are matched automatically, and clips without
   audio are padded with silence so a mixed set still concatenates cleanly.

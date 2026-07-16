@@ -151,7 +151,7 @@ function _fillModelSelect() {
   (_models[_kind] || []).forEach(m => {
     const o = document.createElement('option');
     o.value = m.model;
-    o.textContent = m.endpoint === 'comfyui' ? `${m.model} (ComfyUI)` : m.model;
+    o.textContent = m.label || (m.endpoint === 'comfyui' ? `${m.model} (ComfyUI)` : m.model);
     sel.appendChild(o);
   });
 }
@@ -240,7 +240,7 @@ function _render(host) {
     dur.id = 'create-duration';
     dur.className = 'media-input';
     dur.min = '1'; dur.max = '16'; dur.step = '0.5'; dur.value = '5';
-    dur.title = 'Seconds. Practical max ≈10s on LTX (24fps), ≈16s on Wan (16fps) — the engine clamps to 257 frames.';
+    dur.title = 'Seconds. Practical max ≈10s on LTX/HunyuanVideo (24fps), ≈16s on Wan (16fps) — the engine clamps to 257 frames.';
     opt('Seconds', dur);
   } else {
     const size = document.createElement('select');

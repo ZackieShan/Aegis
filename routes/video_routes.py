@@ -119,9 +119,11 @@ MAX_VIDEO_FRAMES = 257
 
 
 def _native_fps(model: str) -> int:
-    """The fps a video model was trained at — LTX is a 24fps pipeline (and
-    sd-server otherwise defaults it to 16, yielding slow-motion clips)."""
-    return 24 if "ltx" in (model or "").lower() else 16
+    """The fps a video model was trained at — LTX and HunyuanVideo 1.5 are
+    24fps pipelines (and sd-server otherwise defaults 16, yielding
+    slow-motion clips); Wan is 16."""
+    mid = (model or "").lower()
+    return 24 if ("ltx" in mid or "hunyuan" in mid) else 16
 
 
 def _resolve_frames(body, fps: int) -> int:
@@ -150,7 +152,11 @@ def setup_video_routes() -> APIRouter:
         try:
             if not await asyncio.to_thread(comfyui_client.is_up):
                 return []
-            return [{"model": m, "endpoint": "comfyui"} for m in comfyui_workflows.available_video_models()]
+            return [
+                {"model": m, "endpoint": "comfyui",
+                 "label": comfyui_workflows.COMFY_VIDEO_MODELS[m].get("label", m)}
+                for m in comfyui_workflows.available_video_models()
+            ]
         except Exception:
             return []
 
