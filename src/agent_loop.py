@@ -2549,6 +2549,75 @@ def _detect_runaway_call(call_freq, threshold=15):
     return sig.split(":", 1)[0] if sig else None
 
 
+# Argument keys whose VALUES distinguish genuinely different work:
+#   - payload keys — the value IS the work (a shell command, a code body, a
+#     note's text); two calls differing there are different actions, and
+#   - identifier keys — the value points at a distinct object (a path, a
+#     URL, an id); reading file B after file A is a file hunt, not a retry.
+# Calls carrying any of these keep their full-content signature below.
+# Deliberately NOT here: "query" and other free-recall search terms — a
+# reworded query against the same store is the same failed attempt retried.
+_FREEFORM_ARG_KEYS = {
+    "command", "code", "content", "text", "script", "body", "prompt",
+    "path", "file_path", "filename", "url", "uid", "id", "name",
+}
+
+# Dispatcher actions that MUTATE state. A serial batch of writes with
+# different values ("add these 8 appointments", one create_event per round)
+# is distinct work per call, never a retry — only reads (list/search/get)
+# collapse under value jitter.
+_WRITE_ACTION_RE = re.compile(
+    r"^(?:create|add|update|edit|delete|remove|insert|set|toggle|send|reply|"
+    r"move|archive|mark|write|save|upload|schedule|book|compose|import)",
+    re.IGNORECASE,
+)
+
+
+def _coarse_call_sig(block):
+    """Tool type + dispatcher action + argument KEY names, values dropped.
+
+    A manage_notes search with a reworded query is the SAME work retried, not
+    new work — value jitter must not read as progress (2026-07-16: a model
+    with no web tool re-listed notes/calendar for 12 rounds, each call's args
+    just different enough to dodge the exact-signature detectors). Only the
+    narrated-circling "is this fresh work?" test uses this; the exact-sig
+    detectors keep full args so a legitimate batch of distinct calls (18
+    calendar inserts) is still read as fresh work. Calls whose payload IS the
+    work or whose args identify a distinct target (bash commands, file paths,
+    URLs — per _FREEFORM_ARG_KEYS) also keep their content so build→test→fix
+    rounds and multi-file hunts stay unflagged.
+    """
+    content = (block.content or "").strip()
+    try:
+        args = json.loads(content) if content else {}
+    except Exception:
+        args = None
+    if isinstance(args, dict):
+        keys = {str(k) for k in args}
+        action = str(args.get("action") or "")[:40]
+        if keys & _FREEFORM_ARG_KEYS or _WRITE_ACTION_RE.match(action):
+            return f"{block.tool_type}:{content[:120]}"
+        return f"{block.tool_type}:{action}:{','.join(sorted(keys))}"
+    # Non-JSON content (fenced bash/python bodies): the content IS the work,
+    # so keep the same 120-char window the exact-sig detectors use — a 40-char
+    # prefix collapsed distinct long commands ("cd <project> && pytest a" vs
+    # "... pytest b") into one signature.
+    return f"{block.tool_type}:{content[:120]}"
+
+
+# Promissory narration ("Let me search...", "I'll check the browser...").
+# Deliberately looser than _INTENT_RE (line-anchored, verb whitelist): a
+# match here only counts against a round that ALSO repeats a recent tool
+# type and does no new coarse work, so over-matching is harmless while the
+# mid-sentence rephrasings that dodge the Jaccard near-repeat check
+# ("...capabilities, but let me try the browser") are still caught.
+_PROMISE_MARKER_RE = re.compile(
+    r"\b(?:let\s+me|let'?s|i'?ll|i\s+will|i'?m\s+going\s+to|going\s+to|"
+    r"i\s+need\s+to|i\s+should|we\s+should|i\s+must|i'?m\s+trying\s+to)\b",
+    re.IGNORECASE,
+)
+
+
 def _round_text_words(text):
     """Normalized word set of a round's visible text, for near-repeat checks."""
     return set(re.findall(r"[a-z0-9']+", (text or "").lower()))
@@ -3327,9 +3396,12 @@ async def stream_agent_loop(
     # and burned all 20 rounds narrating "I'll generate the image..." each time.
     _recent_type_sigs = collections.deque(maxlen=6)
     _recent_text_words = collections.deque(maxlen=6)
-    # Every distinct call signature seen this turn — a round that issues a
-    # signature not in here is doing NEW work and must not read as circling.
-    _seen_call_sigs: set = set()
+    # Every distinct COARSE call signature (tool + action + arg keys, values
+    # dropped — see _coarse_call_sig) seen this turn. A round whose every call
+    # maps to an already-seen coarse signature is re-treading the same work no
+    # matter how much its argument values jitter; only a genuinely new shape
+    # of call reads as progress for the narrated-circling detector.
+    _seen_work_sigs: set = set()
     _stuck_rounds = 0
     # Frequency of each exact call signature (tool + args), for the runaway
     # backstop. Counting identical repeats — not distinct same-tool calls —
@@ -3477,6 +3549,39 @@ async def stream_agent_loop(
             _schema_gap = set(_relevant_tools) - set(_tool_names_sent) - set(disabled_tools or [])
             if _schema_gap:
                 logger.warning(f"[agent-debug] relevant tools missing from sent schemas (no native schema?): {sorted(_schema_gap)}")
+
+        # A query that tool-RAG matched to web tools, arriving on a turn where
+        # those tools are per-turn disabled (Web toggle off), is the flail
+        # recipe: the model narrates "let me search..." forever while
+        # substituting the nearest personal tool it does have — notes,
+        # calendar, research library (2026-07-16: a war-news question burned
+        # 12 rounds listing notes). Tell it ONCE, up front, that web is off
+        # and how the user can turn it on.
+        if round_num == 1 and not _force_answer and _relevant_tools:
+            _web_off = sorted(
+                set(_relevant_tools)
+                & (set(WEB_TOOL_NAMES) | {"trigger_research"})
+                & set(disabled_tools or [])
+            )
+            if _web_off:
+                logger.info(
+                    f"[agent] web tools relevant but disabled this turn: {_web_off} — injecting web-off notice"
+                )
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "Note: internet access is OFF for this turn — "
+                        f"{', '.join(_web_off)} cannot be called because the user "
+                        "has not enabled the Web toggle for this message. Do NOT "
+                        "attempt to search the web or browse, and do NOT substitute "
+                        "other tools (notes, calendar, research library) — they hold "
+                        "the user's personal data, not current information. If the "
+                        "request needs up-to-date information, answer from your "
+                        "existing knowledge, note that it may be out of date, and "
+                        "tell the user they can enable the Web search toggle (the "
+                        "magnifier icon) or type /search to re-ask with live results."
+                    ),
+                })
 
         # Primary target + any configured fallback models. stream_llm_with_fallback
         # only switches on a pre-content failure, so streamed output is never
@@ -4040,10 +4145,12 @@ async def stream_agent_loop(
         # sequence of distinct edit_document FIND/REPLACEs). Requirements to
         # count a round as narrated-circling, ALL must hold:
         #   - same tool TYPE(s) as a recent round,
-        #   - narration is a near-repeat of a recent round's, AND
-        #   - this round issued NO new distinct call signature (every call
-        #     here was already seen) — i.e. no fresh work is happening.
-        # A genuinely new call signature means real progress → reset.
+        #   - the narration is a near-repeat of a recent round's, OR a short
+        #     promissory line ("Let me search..."), OR absent entirely, AND
+        #   - this round issued NO new COARSE call signature (tool + action +
+        #     arg keys — value jitter is the same work retried, not fresh
+        #     work; see _coarse_call_sig).
+        # A genuinely new shape of call means real progress → reset.
         _type_sig = "|".join(sorted({b.tool_type for b in tool_blocks}))
         _is_type_repeat = bool(tool_blocks) and _type_sig in _recent_type_sigs
         _recent_type_sigs.append(_type_sig)
@@ -4051,12 +4158,25 @@ async def stream_agent_loop(
         _is_text_repeat = _is_near_repeat_text(_words, _recent_text_words)
         _recent_text_words.append(_words)
         _has_new_call = any(
-            f"{b.tool_type}:{(b.content or '').strip()[:120]}" not in _seen_call_sigs
-            for b in tool_blocks
+            _coarse_call_sig(b) not in _seen_work_sigs for b in tool_blocks
         )
         for _b in tool_blocks:
-            _seen_call_sigs.add(f"{_b.tool_type}:{(_b.content or '').strip()[:120]}")
-        _narrated_circling = _is_type_repeat and _is_text_repeat and not _has_new_call
+            _seen_work_sigs.add(_coarse_call_sig(_b))
+        # A short "I'm about to do it" line is not evidence of progress: the
+        # 2026-07-16 flail wrote a fresh one-liner every round ("Let me search
+        # for recent news...", "Let me try the browser...") — varied enough to
+        # duck the 0.6 Jaccard bar — while re-treading already-seen work.
+        # Longer text gets the benefit of the doubt (real diagnosis/answers).
+        _is_promissory = (
+            bool(_real_text)
+            and len(_real_text) <= 240
+            and bool(_PROMISE_MARKER_RE.search(_real_text))
+        )
+        _narrated_circling = (
+            _is_type_repeat
+            and not _has_new_call
+            and (_is_text_repeat or _is_promissory or not _real_text)
+        )
         # Circling = repeating a recent call with nothing written, or re-running
         # already-seen calls behind a recycled announcement. Any real progress
         # (a NEW distinct call, or actual answer text) resets the streak.
@@ -4412,7 +4532,17 @@ async def stream_agent_loop(
                     _notes_action = ""
                 _notes_text = ""
                 if not result.get("error"):
-                    if _notes_action in {"list", "search", "find", "view", "lis"}:
+                    # Only surface the note list in the assistant's prose when
+                    # the user actually asked to see their notes. Ungated, any
+                    # stray manage_notes list call leaked the user's note
+                    # titles into an unrelated answer (2026-07-16: a war-news
+                    # question rendered "Here are your notes (11): ..."). The
+                    # raw output stays visible in the collapsible tool node
+                    # either way.
+                    if _notes_action in {"list", "search", "find", "view", "lis"} and (
+                        _ody_notes_finetune_mode
+                        or _looks_like_notes_list_request(_last_user)
+                    ):
                         _notes_text = _note_list_summary_from_tool_output(
                             result.get("output") or result.get("results") or result.get("content") or ""
                         )

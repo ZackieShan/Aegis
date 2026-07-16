@@ -69,3 +69,63 @@ def test_router_reports_non_calendar_categories():
     assert classify_tool_intent("reply to that email").category == "email"
     assert classify_tool_intent("open my calendar").category == "ui"
     assert classify_tool_intent("research cost effective local models").category == "research"
+
+
+def test_current_events_question_routes_to_web_not_calendar():
+    # Regression 2026-07-16: "what ... this week ... summary of EVENTS"
+    # matched the calendar lookup pattern, so a war-news question escalated
+    # as a calendar turn and flailed against manage_calendar/manage_notes.
+    # The curly apostrophe is the dictated/phone-keyboard form of the real
+    # message — it must not break matching.
+    msg = (
+        "What’s going on with the war and Iran and the war in Ukraine this "
+        "week give me a high-level summary of events and their impact for "
+        "each conflict include Lebanon Turkey Gaza Israel as well"
+    )
+    intent = classify_tool_intent(msg)
+    assert intent.needs_tools
+    assert intent.category == "web"
+    assert classify_tool_intent("What's happening in Gaza right now?").category == "web"
+
+
+def test_bare_whats_going_on_stays_plain_chat():
+    # No topic preposition — as likely to mean the user's own week as the
+    # news, so it must not auto-escalate.
+    assert not message_needs_tools("What's going on this week?")
+
+
+def test_dictated_curly_apostrophe_calendar_question_still_matches():
+    intent = classify_tool_intent("What’s on my calendar tomorrow?")
+    assert intent.needs_tools
+    assert intent.category == "calendar"
+
+
+def test_calendar_lookup_with_modifier_words_still_matches():
+    # The timeframe→noun tightening must still admit a determiner plus a
+    # couple of modifier words ("next THREE meetings", "upcoming WORK
+    # meetings"), or common lookups silently fall to plain chat.
+    for msg in (
+        "Show my upcoming work meetings",
+        "What are my next three meetings?",
+        "List today's team meetings",
+        "Show me this week's taekwondo classes",
+        "Check my upcoming dentist appointments",
+    ):
+        intent = classify_tool_intent(msg)
+        assert intent.needs_tools and intent.category == "calendar", msg
+
+
+def test_current_events_pattern_avoids_personal_and_mixed_topics():
+    # Personal topics must not escalate as web — category "web" triggers the
+    # tool clampdown in chat_routes, which would disable the very calendar/
+    # notes tools a schedule question needs.
+    assert not message_needs_tools("What's going on with my schedule this week?")
+    # Conversational check-ins whose preposition and time word live in
+    # different sentences must stay plain chat.
+    assert not message_needs_tools("What's going on with you? I've been stressed lately")
+    # Mixed messages containing an explicit shell request keep their shell
+    # routing — the current-events pattern is evaluated last.
+    intent = classify_tool_intent(
+        "What's going on with the server right now? Can you run htop on prod"
+    )
+    assert intent.category == "shell"

@@ -62,8 +62,13 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
 
         # Calendar/event lookup. A question such as "Do I have Taekwondo
         # classes this week?" needs the calendar tool; plain chat cannot know.
-        ("calendar", "calendar lookup request", rf"\b(?:list|show|check|find)\b.{{0,120}}\b(?:my\s+|the\s+)?(?:upcoming|next|today'?s?|tomorrow'?s?|this\s+week'?s?)\b.{{0,120}}\b{_CALENDAR_READ_THING}\b"),
-        ("calendar", "calendar lookup question", rf"\b(?:what|which)\b.{{0,120}}\b(?:upcoming|next|today'?s?|tomorrow'?s?|this\s+week'?s?)\b.{{0,120}}\b{_CALENDAR_READ_THING}\b"),
+        # The timeframe must qualify the calendar noun through at most a
+        # determiner and a couple of modifier words ("next THREE meetings",
+        # "upcoming WORK meetings"): with a free .{0,120} gap between them,
+        # "What's going on with the war ... this week ... summary of EVENTS"
+        # routed a news question to the calendar (2026-07-16).
+        ("calendar", "calendar lookup request", rf"\b(?:list|show|check|find)\b.{{0,120}}\b(?:my\s+|the\s+)?(?:upcoming|next|today'?s?|tomorrow'?s?|this\s+week'?s?)\b\s+(?:(?:my|the|our)\s+)?(?:[\w-]+\s+){{0,2}}{_CALENDAR_READ_THING}\b"),
+        ("calendar", "calendar lookup question", rf"\b(?:what|which)\b.{{0,120}}\b(?:upcoming|next|today'?s?|tomorrow'?s?|this\s+week'?s?)\b\s+(?:(?:my|the|our)\s+)?(?:[\w-]+\s+){{0,2}}{_CALENDAR_READ_THING}\b"),
         ("calendar", "calendar availability question", rf"\bdo\s+i\s+have\b.{{0,120}}\b(?:upcoming|next|today|tomorrow|this\s+week)\b.{{0,120}}\b{_CALENDAR_READ_THING}\b"),
         ("calendar", "calendar agenda question", r"\bwhat(?:'s| is)\s+on\s+(?:my\s+)?calendar\b"),
         ("calendar", "next calendar item question", r"\bwhen\s+(?:is|are)\s+(?:my\s+)?next\s+(?:event|meeting|appointment|class)\b"),
@@ -122,6 +127,17 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("shell", "imperative shell command request", rf"{_PLEASE}(deploy|build|install|restart|reboot|kill|tail|grep|cat|ls|cd|cp|mv|rm)\b\s+\S+"),
         ("shell", "assistant shell command request", rf"{_ACTION_QUESTION}(deploy|build|install|restart|reboot|kill|tail|grep|cat|ls|cd|cp|mv|rm)\b\s+\S+"),
         ("shell", "system/file check request", r"\b(check|see)\s+(if|whether|what)\s+.{1,40}\b(running|process|service|port|file|exists?)\b"),
+
+        # Current-events phrasing without an explicit search verb or "news"
+        # keyword ("What's going on with the war in Ukraine this week?").
+        # Deliberately LAST so every specific category (calendar, shell,
+        # email...) gets first shot at a mixed message. Guards: a topic
+        # preposition is required (bare "what's going on this week" is as
+        # likely to mean the user's own schedule → plain chat); personal
+        # topics ("with my schedule", "with you") are excluded; and the gap
+        # cannot cross a sentence boundary ("What's going on with you? I've
+        # been stressed lately" must stay plain chat).
+        ("web", "current events question", r"\bwhat(?:'s|\s+is)\s+(?:going\s+on|happening)\s+(?:with|in|around|between)\s+(?!(?:my|our|you\b|your)\b)[^.?!\n]{0,120}\b(?:this\s+(?:week|month|year)|today|right\s+now|lately|recently|these\s+days|in\s+the\s+news)\b"),
     )
 )
 
@@ -130,10 +146,24 @@ _TOOL_INTENT_PATTERNS: tuple[Pattern[str], ...] = tuple(
 )
 
 
+def _normalize_quotes(text: str) -> str:
+    """Fold typographic apostrophes/quotes to ASCII before pattern matching.
+
+    Phone keyboards and dictation produce U+2019 ("What’s"), which every
+    `'?s` pattern here misses — a dictated "What’s on my calendar" silently
+    fell through until 2026-07-16.
+    """
+    return (
+        text.replace("’", "'").replace("‘", "'")
+        .replace("“", '"').replace("”", '"')
+    )
+
+
 def classify_tool_intent(text: str) -> ToolIntent:
     """Classify whether a chat message should be promoted to agent mode."""
     if not text:
         return ToolIntent(False, reason="empty message")
+    text = _normalize_quotes(text)
     if _EXPLANATORY_PREFIX.search(text):
         return ToolIntent(False, reason="explanatory feature question")
     for category, reason, pattern in _ROUTING_PATTERNS:
@@ -146,6 +176,7 @@ def message_needs_tools(text: str, patterns: Iterable[Pattern[str]] = _TOOL_INTE
     """Return True when a plain chat message should be promoted to agent mode."""
     if not text:
         return False
+    text = _normalize_quotes(text)
     if _EXPLANATORY_PREFIX.search(text):
         return False
     if patterns is _TOOL_INTENT_PATTERNS:
