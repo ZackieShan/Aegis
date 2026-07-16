@@ -291,32 +291,39 @@ and all, resurrected locally from the original MS-Agent sprite data:
 New here? The **[Quickstart guide](QUICKSTART.md)** covers everything from
 first launch to connecting your first model.
 
-### Windows (native, no Docker)
-
-Double-click `launch-windows.bat`, or from a terminal:
-
-```powershell
-.\launch-windows.bat
-```
-
-This creates a virtualenv, installs dependencies, runs first-time setup, and
-starts the server at `http://127.0.0.1:7000`. Requires Python 3.11+.
-
-### Linux / macOS (native, no Docker)
+### macOS — one pasted line
 
 ```bash
-./start-linux.sh    # Linux -- requires Python 3.11+
-./start-macos.sh    # macOS
+curl -fsSL https://raw.githubusercontent.com/ZackieShan/Aegis/main/install.sh | sh
 ```
+
+Downloads Aegis, sets everything up (it asks before installing anything), and
+opens your browser when it's ready — at `http://localhost:7860` on a Mac
+(AirPlay holds the usual port).
+
+### Windows — one pasted line
+
+```powershell
+irm https://raw.githubusercontent.com/ZackieShan/Aegis/main/install.ps1 | iex
+```
+
+Installs Git/Python if missing, adds **Aegis to your Start Menu**, and opens
+the browser at `http://127.0.0.1:7000`. After that, launch it like any app.
 
 ### Docker
 
 ```bash
+git clone https://github.com/ZackieShan/Aegis.git && cd Aegis
 cp .env.example .env
 docker compose up -d --build
 ```
 
 Open `http://localhost:7000` when the containers are healthy.
+
+### Already cloned? (any OS)
+
+`launch-windows.bat` on Windows; `bash start-macos.sh` / `bash start-linux.sh`
+elsewhere.
 
 Log in with **admin / admin** and change the password after first login
 (Settings → Account). Native installs, GPU notes, Windows/macOS instructions,

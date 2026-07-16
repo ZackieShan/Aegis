@@ -15,7 +15,10 @@
 #>
 param(
     [int]$Port = 7000,
-    [string]$BindHost = "127.0.0.1"
+    [string]$BindHost = "127.0.0.1",
+    # Open the app in the default browser once the server answers. Used by the
+    # Start Menu shortcut so double-clicking the icon feels like opening an app.
+    [switch]$OpenBrowser
 )
 
 $ErrorActionPreference = "Stop"
@@ -321,4 +324,12 @@ if (Test-Path (Join-Path $nodeDir "node.exe")) {
 Write-Step ("Starting Aegis at http://{0}:{1}" -f $BindHost, $Port)
 Write-Host "Press Ctrl+C to stop."
 Write-Host ""
+if ($OpenBrowser) {
+    # Detached poller: opens the browser only once the server actually answers,
+    # so the user never stares at a connection-refused tab. Detached (not a PS
+    # job) because uvicorn blocks this console until shutdown.
+    $browseHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
+    $pollCmd = "for (`$i=0; `$i -lt 120; `$i++) { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 'http://$browseHost`:$Port/api/health' | Out-Null; Start-Process 'http://$browseHost`:$Port'; break } catch { Start-Sleep -Seconds 2 } }"
+    Start-Process powershell -WindowStyle Hidden -ArgumentList @("-NoProfile", "-Command", $pollCmd) | Out-Null
+}
 & $venvPy -m uvicorn app:app --host $BindHost --port $Port

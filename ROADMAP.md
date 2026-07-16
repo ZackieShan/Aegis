@@ -37,6 +37,9 @@ The local-first foundation is in place:
   the GPU is free, says so, and switches back.
 - **Knowledge & operability** — knowledge-graph memory, local call tracing, a Control
   Center dashboard, and a Doctor self-check with guarded one-click fixes.
+- **One-line install** — `curl | sh` (macOS/Linux) and `irm | iex` (Windows) installers
+  that go from nothing to a running app with the browser opening itself; a Start Menu
+  launcher on Windows; Cookbook downloads/serves no longer require tmux on macOS.
 
 ## Where it's going
 
@@ -44,6 +47,10 @@ The local-first foundation is in place:
 - **Cross-platform engine setup** — the one-command engine installer and guide are
   Windows-first today; bring the same to Linux and macOS (matching release binaries + layout).
 - **Fresh-install smoke tests** across Linux, macOS, and Windows — native, Docker, and WSL.
+  The macOS installer especially needs a real first-run test by a Mac user.
+- **Tray supervisor** — a tiny signed tray app (Tauri) that starts/stops the services,
+  shows status, and opens the UI: the ".exe feel" without freezing Python into a binary
+  that antivirus heuristics hate.
 - **Offline mode** — vendor the remaining CDN assets so a fully air-gapped install works
   end to end.
 

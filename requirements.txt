@@ -75,3 +75,8 @@ ddgs
 # (the only ffmpeg otherwise on disk), this one actually has libx264 and the
 # concat/trim/scale filters.
 imageio-ffmpeg
+
+# Hugging Face downloader used by Cookbook model downloads. Without it the
+# first download pip-installs it inside the background session — an opaque
+# multi-minute delay on exactly the user's first experience of the Cookbook.
+huggingface_hub

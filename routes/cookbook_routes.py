@@ -188,7 +188,8 @@ def _missing_binary_message(
     if binary == "tmux":
         return (
             f"tmux is required for Cookbook background downloads/serves on {target}. "
-            "Install it with your OS package manager, or run Cookbook server setup for that server."
+            "Install it with your OS package manager (macOS: `brew install tmux`), "
+            "or run Cookbook server setup for that server."
         )
     if binary == "docker":
         if local_host_docker_blocked:
@@ -944,8 +945,11 @@ def setup_cookbook_routes() -> APIRouter:
         return bool(re.search(rf"(^|[\s;&|()]){re.escape(binary)}($|[\s;&|()])", cmd or ""))
 
     def _launch_local_detached(session_id: str, bash_lines: list[str]) -> dict:
-        """Windows-native stand-in for a LOCAL tmux session (tmux doesn't exist
-        on Windows). Mirrors shell_routes._generate_win_detached / bg_jobs.launch:
+        """Detached-process stand-in for a LOCAL tmux session — used always on
+        Windows (tmux doesn't exist there) and on POSIX when tmux isn't
+        installed (macOS out of the box). find_bash() resolves Git Bash on
+        Windows and /bin/bash on POSIX; detached_popen_kwargs() handles the
+        per-platform detach. Mirrors shell_routes._generate_win_detached:
         runs the wrapper detached so it survives a browser/SSE disconnect (the
         whole point of the tmux feature for long downloads/serves), writing a
         <session>.log the status poller tails and a <session>.pid for liveness.
@@ -1102,9 +1106,17 @@ def setup_cookbook_routes() -> APIRouter:
         # LOCAL execution on a native-Windows host never uses tmux (it uses the
         # detached-process path below), regardless of the UI-supplied platform.
         local_windows = IS_WINDOWS and not remote
+        # POSIX-local without tmux uses the same detached-process fallback as
+        # Windows instead of erroring: a missing tmux must never dead-end the
+        # whole Cookbook. This was the literal "downloading from Cookbook
+        # doesn't work" for macOS users who never ran the start script's brew
+        # step. tmux stays preferred when present (attachable session).
+        local_detached = local_windows or (
+            not remote and not await _binary_available("tmux", None, req.ssh_port)
+        )
         logger.info(f"Download request: repo={req.repo_id}, remote={remote}, ssh_port={req.ssh_port}, platform={req.platform}")
 
-        if not is_windows and not local_windows and not await _binary_available("tmux", remote, req.ssh_port):
+        if not is_windows and not local_detached and not await _binary_available("tmux", remote, req.ssh_port):
             return {
                 "ok": False,
                 "error": _missing_binary_message("tmux", remote or "local server"),
@@ -1304,18 +1316,23 @@ def setup_cookbook_routes() -> APIRouter:
             lines.append('  fi')
             lines.append('done')
             lines.append('if [ $_ec -eq 0 ]; then echo ""; echo "DOWNLOAD_OK"; else echo ""; echo "DOWNLOAD_FAILED (exit $_ec after $_attempt attempts)"; fi')
-            if not IS_WINDOWS:
+            # The interactive tail (exec $SHELL keeps the tmux pane alive for
+            # inspection) only makes sense inside tmux — in the detached model
+            # stdin is /dev/null, so the shell would just exit. Windows and
+            # POSIX-no-tmux both take the detached path.
+            if not IS_WINDOWS and not local_detached:
                 lines.append(f"rm -f '{wrapper_script}'")
                 lines.append('exec "${SHELL:-/bin/bash}"')
                 wrapper_script.write_text("\n".join(lines) + "\n", encoding="utf-8")
                 wrapper_script.chmod(0o755)
-            setup_cmd = None if IS_WINDOWS else f"tmux set-option -g history-limit 100000 2>/dev/null; tmux new-session -d -s {session_id} {shlex.quote(str(wrapper_script))}"
+            setup_cmd = None if (IS_WINDOWS or local_detached) else f"tmux set-option -g history-limit 100000 2>/dev/null; tmux new-session -d -s {session_id} {shlex.quote(str(wrapper_script))}"
 
         logger.info(f"Model download: {req.repo_id} (backend={'ollama' if is_ollama_download else 'hf'}, include={req.include}, session={session_id}, remote={remote})")
         logger.info(f"Download setup_cmd: {setup_cmd}")
 
         if setup_cmd is None:
-            # LOCAL Windows: launch the bash wrapper detached; no tmux setup_cmd.
+            # LOCAL detached (Windows always; POSIX when tmux is absent):
+            # launch the bash wrapper as a detached process; no tmux setup_cmd.
             try:
                 _launch_local_detached(session_id, lines)
             except Exception as e:
@@ -1613,6 +1630,11 @@ def setup_cookbook_routes() -> APIRouter:
         # own lifecycle tracking; punting here keeps the code simple.
         local_win = is_windows and not remote
         if local_win:
+            return
+        # POSIX-local sessions launched detached (no tmux) leave a pid file;
+        # tmux capture-pane would just error against them, so skip the same
+        # way the Windows detached path does.
+        if not remote and (TMUX_LOG_DIR / f"{session_id}.pid").exists():
             return
         if remote:
             ssh_args = ["ssh"]
@@ -1987,6 +2009,11 @@ def setup_cookbook_routes() -> APIRouter:
         # LOCAL execution on a native-Windows host never uses tmux (detached
         # process path below), regardless of the UI-supplied platform.
         local_windows = IS_WINDOWS and not remote
+        # POSIX-local without tmux takes the same detached path instead of
+        # erroring — see the download route's twin flag for the rationale.
+        local_detached = local_windows or (
+            not remote and not await _binary_available("tmux", None, req.ssh_port)
+        )
 
         # Windows ships no llama-server binary and no llama.cpp build toolchain by
         # default, so a llama.cpp serve command here can never actually start —
@@ -2029,7 +2056,7 @@ def setup_cookbook_routes() -> APIRouter:
                 "Remote Windows Diffusers serving is not supported yet; use local Windows or a Linux remote server.",
             )
 
-        if not is_windows and not local_windows and not await _binary_available("tmux", remote, req.ssh_port):
+        if not is_windows and not local_detached and not await _binary_available("tmux", remote, req.ssh_port):
             return {
                 "ok": False,
                 "error": _missing_binary_message("tmux", remote or "local server"),
@@ -2540,7 +2567,7 @@ def setup_cookbook_routes() -> APIRouter:
                 handled_ollama_sidecar_probe = True
                 _append_serve_preflight_exit_lines(
                     runner_lines,
-                    keep_shell_open=not local_windows,
+                    keep_shell_open=not local_detached,
                 )
                 runner_lines.append(req.cmd)
                 runner_lines.append('_ody_exit=$?')
@@ -2555,7 +2582,7 @@ def setup_cookbook_routes() -> APIRouter:
             if not handled_ollama_serve and not handled_ollama_sidecar_probe:
                 _append_serve_preflight_exit_lines(
                     runner_lines,
-                    keep_shell_open=not local_windows,
+                    keep_shell_open=not local_detached,
                 )
                 if "vllm serve" in req.cmd or "mlx_lm.server" in req.cmd:
                     runner_lines.append('eval "$AEGIS_SERVE_CMD"')
@@ -2565,7 +2592,7 @@ def setup_cookbook_routes() -> APIRouter:
                     _append_pip_install_runner_lines(runner_lines, req.cmd)
                 else:
                     runner_lines.append(req.cmd)
-                if local_windows:
+                if local_detached:
                     # Detached background process — no interactive shell to keep open.
                     # Print the exit marker the status poller looks for, then stop.
                     _append_serve_exit_code_lines(
@@ -2587,8 +2614,9 @@ def setup_cookbook_routes() -> APIRouter:
             # regardless of the executable bit.
             safe_chmod(runner_path, 0o755)
 
-            if local_windows:
-                # LOCAL Windows: launch the bash runner detached (tmux replacement).
+            if local_detached:
+                # LOCAL detached (Windows always; POSIX when tmux is absent):
+                # launch the bash runner detached (tmux replacement).
                 setup_cmd = None
             elif remote:
                 remote_runner = f".{session_id}_run.sh"
@@ -4307,17 +4335,20 @@ def setup_cookbook_routes() -> APIRouter:
                 # as just "Locale: C / Ubuntu_Aegis ❯" and the agent
                 # can't diagnose the actual error.
                 capture_cmd = ssh_base + [remote, _remote_tmux_command("capture-pane", "-t", session_id, "-p", "-S", "-500")]
-            elif IS_WINDOWS:
-                # LOCAL Windows task: launched as a detached process (no tmux).
-                # Liveness comes from the <session>.pid file, output from the
-                # <session>.log file the wrapper redirects into. No subprocess.
+            elif IS_WINDOWS or (TMUX_LOG_DIR / f"{session_id}.pid").exists():
+                # LOCAL detached task (Windows always; POSIX when tmux was
+                # absent at launch — the pid file marks it). Liveness comes
+                # from the <session>.pid file, output from the <session>.log
+                # the wrapper redirects into. No subprocess.
                 check_cmd = None
                 capture_cmd = None
             else:
                 check_cmd = ["tmux", "has-session", "-t", session_id]
                 capture_cmd = ["tmux", "capture-pane", "-t", session_id, "-p", "-S", "-500"]
 
-            local_win_task = (not remote) and IS_WINDOWS
+            local_win_task = (not remote) and (
+                IS_WINDOWS or (TMUX_LOG_DIR / f"{session_id}.pid").exists()
+            )
 
             progress_text = ""
             full_snapshot = (task.get("output") or "")[-12000:] if task_type == "serve" else ""

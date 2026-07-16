@@ -212,6 +212,20 @@ else
     echo "▶ ChromaDB CLI not found in venv; skipping (tool index will be degraded)."
 fi
 
+# 4b. Ollama — the easiest local-model path on a Mac (signed .dmg, no engine
+#     build). If it's installed but its server isn't running, start it, same
+#     as the Windows launcher does. The Ollama.app menu-bar version usually
+#     runs its own daemon; this only covers the CLI-only install.
+if command -v ollama >/dev/null 2>&1; then
+    if (exec 3<>"/dev/tcp/127.0.0.1/11434") 2>/dev/null; then
+        echo "▶ Ollama already running on 127.0.0.1:11434 - models will be offered in-app."
+    else
+        OLLAMA_LOG="${TMPDIR:-/tmp}/aegis-ollama.log"
+        echo "▶ Starting Ollama in the background (logging to $OLLAMA_LOG)…"
+        nohup ollama serve >"$OLLAMA_LOG" 2>&1 &
+    fi
+fi
+
 # 5. Launch. Bind to loopback by default; opt into LAN/Tailscale with
 #    AEGIS_HOST=0.0.0.0.
 URL_HOST="$HOST"

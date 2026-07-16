@@ -38,7 +38,11 @@ VIDEO_MODEL_RE = re.compile(r"(?:^|[/\-_.])(?:wan[0-9.]*|ltx[0-9.]*|t2v|i2v|vide
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:\-]*$")
 
 _POLL_INTERVAL_S = 3.0
-_JOB_DEADLINE_S = 1800  # 30 min hard cap per generation
+# Hard cap per generation. 60 min, not 30: a 10s LTX-2 clip (241 frames) is a
+# legitimate request that takes well over half an hour on a 4090 — a cap it
+# can't fit just abandons healthy renders (and until the cancel-on-deadline
+# below, left sd-server grinding on a result nobody would collect).
+_JOB_DEADLINE_S = 3600
 _MAX_JOBS_KEPT = 50
 
 _JOBS: Dict[str, Dict[str, Any]] = {}
@@ -293,6 +297,17 @@ async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
                 await asyncio.sleep(_POLL_INTERVAL_S)
         job["error"] = f"Video generation exceeded the {_JOB_DEADLINE_S // 60}-minute cap"
         job["status"] = "error"
+        # Tell sd-server to stop: without this the GPU keeps grinding on a
+        # render whose poller is gone and whose result nobody will collect.
+        # Best-effort — some sd.cpp phases refuse interruption ("cannot be
+        # interrupted yet"), in which case it runs out on its own.
+        cancel_url = job.get("_cancel_url")
+        if cancel_url:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as _c:
+                    await _c.post(cancel_url, headers=headers)
+            except Exception:
+                logger.debug("Deadline cancel failed for %s", job_id, exc_info=True)
     except Exception as e:  # never let the poller die silently
         logger.exception("Video job %s poller crashed", job_id)
         job["error"] = f"Video job failed: {e}"

@@ -6,66 +6,67 @@ own machine.
 
 ## 1. Start it
 
-Pick the path that matches your machine. Every path ends with the app at
-**http://localhost:7000**.
+The fastest path is one pasted line — it downloads Aegis, sets everything up,
+and opens the app in your browser when it's ready:
 
-### Windows (native, no Docker)
+### macOS — paste into Terminal (⌘-Space, type "Terminal")
 
-Requires [Python 3.11+](https://www.python.org/downloads/). **Double-click
-`launch-windows.bat`** in the project folder — or from a terminal:
-
-```powershell
-.\launch-windows.bat
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZackieShan/Aegis/main/install.sh | sh
 ```
 
-First run creates a virtualenv, installs dependencies, runs setup, and starts
-the server. Re-running it skips whatever already exists. (The `.bat` wrapper
-exists because Windows blocks `.ps1` scripts by default; it runs
-`launch-windows.ps1` with the policy bypassed.)
+First run takes a few minutes: it installs what it needs (it will ask before
+installing Homebrew if you don't have it), asks you to create your admin
+account, and **opens your browser by itself** — on a Mac the app lives at
+**http://localhost:7860** (macOS AirPlay occupies the usual 7000).
+
+### Windows — paste into PowerShell
+
+```powershell
+irm https://raw.githubusercontent.com/ZackieShan/Aegis/main/install.ps1 | iex
+```
+
+Installs Git/Python if needed, puts **Aegis in your Start Menu**, and opens
+the browser at **http://localhost:7000** when the server is up. From then on,
+launch it like any app: Start → Aegis.
 
 ### Docker (Windows / macOS / Linux)
 
 Requires [Docker](https://docs.docker.com/get-docker/) with Compose:
 
 ```bash
+git clone https://github.com/ZackieShan/Aegis.git && cd Aegis
 cp .env.example .env
 docker compose up -d --build
 ```
 
 This also starts the bundled companion services (SearXNG web search, ChromaDB
-vector store, ntfy notifications) — nothing else to install.
+vector store, ntfy notifications) — nothing else to install. App at
+**http://localhost:7000**.
 
-### Linux (native)
+### Already have the code? (git clone or ZIP)
 
-Requires Python 3.11+ (`python3-venv` on Debian/Ubuntu):
-
-```bash
-./start-linux.sh
-```
-
-Sets up the environment, starts a local ChromaDB for vector search, and
-launches the app. `tmux`, `git`, and `cmake` are optional (Cookbook model
-serving); the script tells you if they're missing.
-
-### macOS (native)
-
-```bash
-./start-macos.sh
-```
+From the project folder: `launch-windows.bat` on Windows,
+`bash start-macos.sh` on macOS, `bash start-linux.sh` on Linux. (Use
+`bash <script>` rather than `./<script>` — it works even when the ZIP
+download loses the executable bit.)
 
 ## 2. Log in
 
-- **Username:** `admin`
-- **Password:** `admin`
-
-**Change the password right after your first login** (Settings → Account).
-The server binds to `127.0.0.1` by default, so it is only reachable from your
-own machine until you deliberately expose it.
+The first launch asks you to create your admin account in the terminal (if
+you skip it, the default is **admin / admin** — change it right after logging
+in under Settings → Account). The server binds to `127.0.0.1` by default, so
+it is only reachable from your own machine until you deliberately expose it.
 
 ## 3. Connect a model
 
-Aegis is bring-your-own-model. Open **Settings (gear icon) → Add Models** and
-pick whichever fits:
+Aegis is bring-your-own-model. **Easiest first model,** especially on a Mac:
+install [Ollama](https://ollama.com/download) (a normal drag-to-Applications
+app), then in Aegis open **Settings (gear icon) → Add Models → Scan for
+Servers** — Aegis finds it and connects. Pull a small model like `llama3.2`
+in Ollama and it appears in the chat picker.
+
+The other paths, whichever fits:
 
 - **Hosted API** — choose a provider preset (Anthropic, OpenAI, OpenRouter,
   Z.AI, Groq, Gemini, Mistral, …), paste your API key, hit **Test**, then
