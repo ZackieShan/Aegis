@@ -24,6 +24,25 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
+# Disable console QuickEdit for this session. With QuickEdit on (the default),
+# a single accidental CLICK inside this window starts text-selection and
+# silently SUSPENDS the server the moment it writes its next log line — the
+# app "hangs" with zero CPU and no error until someone presses Esc. Seen in
+# the wild; not a theoretical concern.
+try {
+    Add-Type -Name ConsoleMode -Namespace Aegis -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int handle);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+'@
+    $stdin = [Aegis.ConsoleMode]::GetStdHandle(-10)
+    $mode = 0
+    if ([Aegis.ConsoleMode]::GetConsoleMode($stdin, [ref]$mode)) {
+        # clear ENABLE_QUICK_EDIT_MODE (0x40), keep ENABLE_EXTENDED_FLAGS (0x80)
+        [Aegis.ConsoleMode]::SetConsoleMode($stdin, ($mode -band -bnot 0x40) -bor 0x80) | Out-Null
+    }
+} catch { }  # non-console hosts (e.g. hidden shortcut launch) — fine without it
+
 # Force Python's UTF-8 mode: the codebase reads/writes UTF-8 files, and
 # Windows' default locale encoding (cp1252) breaks them. On Linux/macOS
 # UTF-8 is already the default, so this makes both platforms behave alike.
