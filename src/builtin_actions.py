@@ -8,7 +8,7 @@ scheduler without needing an LLM call.
 import logging
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple
 
 from src.auth_helpers import owner_filter
@@ -18,6 +18,12 @@ from src.constants import DATA_DIR, DEEP_RESEARCH_DIR, TIDY_CALENDAR_STATE_FILE,
 from src.interactive_gate import wait_for_interactive_quiet
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    """Naive UTC to match the naive DB timestamps/ISO strings this module
+    stores and compares, without deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class TaskNoop(BaseException):
@@ -456,7 +462,7 @@ async def action_tidy_calendar(owner: str, **kwargs) -> Tuple[str, bool]:
                 if newest is not None:
                     STATE_FILE.write_text(json.dumps({
                         "last_created_at": newest.isoformat(),
-                        "last_run_at": datetime.utcnow().isoformat(),
+                        "last_run_at": _utcnow().isoformat(),
                         "scanned": len(events),
                         "removed": len(removed),
                     }, indent=2), encoding="utf-8")
@@ -663,7 +669,7 @@ async def action_email_auto_translate(owner: str, **kwargs) -> Tuple[str, bool]:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     body_hash, owner, target_language, uid, folder, subject, sender,
-                    translation, 1 if same_language else 0, model_used, _dt.utcnow().isoformat(),
+                    translation, 1 if same_language else 0, model_used, _utcnow().isoformat(),
                 ))
                 c.commit()
             finally:
@@ -709,7 +715,7 @@ async def action_email_auto_translate(owner: str, **kwargs) -> Tuple[str, bool]:
                 content = _re.sub(r"\s*<<<END>>>\s*$", "", content, flags=_re.I).strip()
             return content, False
 
-        since = (_dt.utcnow() - _td(days=days_back)).strftime("%d-%b-%Y")
+        since = (_utcnow() - _td(days=days_back)).strftime("%d-%b-%Y")
         examined = 0
         cached = 0
         translated = 0
@@ -892,7 +898,7 @@ async def action_classify_events(owner: str, **kwargs) -> Tuple[str, bool]:
 
         db = SessionLocal()
         try:
-            now = datetime.utcnow()
+            now = _utcnow()
             horizon = now + timedelta(days=30)
             events = db.query(CalendarEvent).filter(
                 CalendarEvent.dtstart >= now,
@@ -1185,7 +1191,7 @@ async def action_learn_sender_signatures(owner: str, **kwargs) -> Tuple[str, boo
         except Exception:
             cached = {}
 
-        cutoff_iso = (_dt.utcnow() - _td(days=30)).isoformat()
+        cutoff_iso = (_utcnow() - _td(days=30)).isoformat()
         eligible: list[tuple[str, list[dict]]] = []
         for addr, msgs in by_sender.items():
             if len(msgs) < 3:
@@ -1292,7 +1298,7 @@ async def action_learn_sender_signatures(owner: str, **kwargs) -> Tuple[str, boo
                     "INSERT OR REPLACE INTO sender_signatures "
                     "(from_address, owner, signature_text, sample_count, last_built_at, model_used, source) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (addr, owner_value, cached_sig, len(bodies), _dt.utcnow().isoformat(), model, "llm"),
+                    (addr, owner_value, cached_sig, len(bodies), _utcnow().isoformat(), model, "llm"),
                 )
                 conn.commit()
                 conn.close()
@@ -1812,7 +1818,7 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
         CACHE_DIR = _P(EMAIL_URGENCY_CACHE_DIR)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        AGE_CUTOFF = _dt.utcnow() - _td(days=7)
+        AGE_CUTOFF = _utcnow() - _td(days=7)
         TRIAGE_VERSION = 10
         CATEGORY_TAGS = {
             "bills", "receipt", "travel", "calendar", "action-needed",
@@ -2284,7 +2290,7 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                             "VALUES (?, ?, ?, ?, 'INBOX', ?, ?, ?, ?, ?, ?)",
                             (_msg_id, _owner_key, _acc_id, _uid_only, _v.get("subject", ""),
                              _v.get("from", ""), _json.dumps(_new_tags), _spam, _v.get("reason", ""),
-                             _dt2.utcnow().isoformat()),
+                             _utcnow().isoformat()),
                         )
                         tag_write_details.append({
                             "uid": _uid_only,

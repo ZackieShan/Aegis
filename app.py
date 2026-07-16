@@ -438,7 +438,7 @@ if AUTH_ENABLED:
                                 _db = SessionLocal()
                                 try:
                                     _db.query(ApiToken).filter(ApiToken.id == tid).update(
-                                        {"last_used_at": datetime.utcnow()}
+                                        {"last_used_at": datetime.now(timezone.utc).replace(tzinfo=None)}
                                     )
                                     _db.commit()
                                 finally:

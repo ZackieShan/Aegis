@@ -8,7 +8,7 @@ enabled tools, timezone, and the three check-in times/prompts/enabled flags.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,6 +18,12 @@ from core.database import SessionLocal, CrewMember, ScheduledTask
 from src.auth_helpers import get_current_user
 from core.auth import RESERVED_USERNAMES
 from src.task_scheduler import compute_next_run
+
+
+def _utcnow() -> datetime:
+    """Naive UTC matching the scheduler's naive DB fields and
+    compute_next_run(after=...), without deprecated _utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class CheckInUpdate(BaseModel):
@@ -197,11 +203,11 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
                     existing = [t for t in existing if t not in _EMAIL_TOOLS]
                 crew_db.enabled_tools = json.dumps(existing)
 
-            crew_db.updated_at = datetime.utcnow()
+            crew_db.updated_at = _utcnow()
 
             # Update check-in tasks.
             if payload.check_ins:
-                now_utc = datetime.utcnow()
+                now_utc = _utcnow()
                 tz_name = crew_db.timezone or None
                 for ci in payload.check_ins:
                     task = db.query(ScheduledTask).filter(
@@ -231,12 +237,12 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
                             cron_expression=task.cron_expression,
                             tz_name=tz_name,
                         )
-                    task.updated_at = datetime.utcnow()
+                    task.updated_at = _utcnow()
 
             # Timezone change also shifts the NEXT run of all check-ins even if
             # the user didn't touch the time fields.
             if payload.timezone is not None:
-                now_utc = datetime.utcnow()
+                now_utc = _utcnow()
                 tz_name = crew_db.timezone or None
                 tasks = db.query(ScheduledTask).filter(
                     ScheduledTask.owner == owner,

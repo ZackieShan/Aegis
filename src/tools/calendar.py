@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
     """Handle manage_calendar tool calls: list/create/update/delete calendar events (local SQLite)."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     from core.database import SessionLocal, CalendarCal, CalendarEvent, Note
     from routes.calendar_routes import (
         _ensure_default_calendar,
@@ -154,7 +154,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
                                   all_day: bool, minutes_before: int,
                                   is_utc: bool = False) -> tuple[Optional[str], Optional[str]]:
         remind_at = dtstart - timedelta(minutes=minutes_before)
-        now = datetime.utcnow() if is_utc else datetime.now()
+        now = datetime.now(timezone.utc).replace(tzinfo=None) if is_utc else datetime.now()
         if dtstart <= now:
             return None, "event already passed"
         if remind_at <= now:
@@ -225,7 +225,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
                 if start_raw:
                     start_dt = _parse_dt(start_raw)
                 else:
-                    start_dt = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                    start_dt = datetime.now(timezone.utc).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
                 if end_raw:
                     end_dt = _parse_dt(end_raw)
                 else:

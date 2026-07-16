@@ -11,12 +11,19 @@ import json
 import os
 import re
 import logging
+from datetime import datetime, timezone
 from typing import Optional, Dict
 
 from src.tool_utils import get_mcp_manager, _parse_tool_args
 from src.tool_security import BUILTIN_EMAIL_TOOLS
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    """Naive UTC matching the naive created_at/updated_at DB columns,
+    without deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 async def do_manage_endpoints(content: str, owner: Optional[str] = None) -> Dict:
@@ -44,10 +51,9 @@ async def do_manage_endpoints(content: str, owner: Optional[str] = None) -> Dict
             if not base_url:
                 return {"error": "base_url is required", "exit_code": 1}
             eid = str(_uuid.uuid4())[:8]
-            from datetime import datetime
             ep = ModelEndpoint(id=eid, name=name or base_url, base_url=base_url,
                                api_key=api_key, is_enabled=True,
-                               created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                               created_at=_utcnow(), updated_at=_utcnow())
             db.add(ep)
             db.commit()
             return {"response": f"Added endpoint '{name or base_url}' (id: {eid})", "exit_code": 0}
@@ -247,7 +253,6 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
     elif action == "add":
         from core.database import SessionLocal, McpServer
         import uuid as _uuid
-        from datetime import datetime
         name = args.get("name", "")
         command = args.get("command", "")
         cmd_args = args.get("args", [])
@@ -266,7 +271,7 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
             srv = McpServer(id=sid, name=name, transport="stdio", command=command,
                             args=json.dumps(cmd_args) if isinstance(cmd_args, list) else cmd_args,
                             env=json.dumps(env) if isinstance(env, dict) else env,
-                            is_enabled=True, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                            is_enabled=True, created_at=_utcnow(), updated_at=_utcnow())
             db.add(srv)
             db.commit()
         finally:
@@ -390,7 +395,6 @@ async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
 
         elif action == "add":
             import uuid as _uuid
-            from datetime import datetime
             from src.webhook_manager import validate_events, validate_webhook_url
             name = args.get("name", "")
             url = args.get("url", "")
@@ -405,7 +409,7 @@ async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
             wid = str(_uuid.uuid4())[:8]
             hook = Webhook(id=wid, name=name or url, url=url,
                            events=events, is_active=True,
-                           created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                           created_at=_utcnow(), updated_at=_utcnow())
             db.add(hook)
             db.commit()
             return {"response": f"Added webhook '{name or url}'", "exit_code": 0}
@@ -461,14 +465,13 @@ async def do_manage_tokens(content: str, owner: Optional[str] = None) -> Dict:
 
         elif action == "create":
             import uuid as _uuid, secrets, bcrypt
-            from datetime import datetime
             name = args.get("name", "API Token")
             raw_token = secrets.token_urlsafe(32)
             token_hash = bcrypt.hashpw(raw_token.encode(), bcrypt.gensalt()).decode()
             tid = str(_uuid.uuid4())[:8]
             t = ApiToken(id=tid, name=name, token_hash=token_hash,
                          token_prefix=raw_token[:8], is_active=True,
-                         created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                         created_at=_utcnow(), updated_at=_utcnow())
             db.add(t)
             db.commit()
             return {"response": f"Created token '{name}'", "token": raw_token, "exit_code": 0}

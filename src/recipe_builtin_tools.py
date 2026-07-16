@@ -11,7 +11,7 @@ import asyncio
 import email
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from typing import Any, Dict, List, Optional
 
@@ -60,7 +60,7 @@ def _fetch_promotional(owner: Optional[str], days: int) -> Dict[str, Any]:
     if not cfg or not cfg.get("imap_host"):
         return {"error": "no_account"}
 
-    since = (datetime.utcnow() - timedelta(days=max(1, days))).strftime("%d-%b-%Y")
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, days))).strftime("%d-%b-%Y")
     senders: Dict[str, Dict[str, Any]] = {}
     scanned = 0
     with _imap(owner=owner or "") as conn:
