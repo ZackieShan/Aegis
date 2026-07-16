@@ -25451,7 +25451,13 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   border-bottom: 1px solid var(--border);
   padding: 0 16px;
   background: var(--panel);
+  /* Eight tabs ≈ 800px — far wider than a phone. Scroll the bar instead of
+     letting the overflow make Movie/Styles/Settings unreachable. No visible
+     scrollbar: the half-cut tab at the edge is the swipe affordance. */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.gallery-tabs::-webkit-scrollbar { display: none; }
 .gallery-tab {
   padding: 8px 18px;
   background: none;
@@ -25462,6 +25468,7 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
+  flex-shrink: 0; /* tabs scroll (see .gallery-tabs), never crush */
   transition: opacity 0.15s, border-color 0.15s;
 }
 .gallery-tab:hover { opacity: 0.85; }
@@ -25874,6 +25881,19 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--fg);
+}
+
+/* Phone-width Studio: the movie row's fixed-width children (thumb + two trim
+   inputs + three buttons ≈ 330px) leave the title nothing at 375px — wrap the
+   trim/actions onto a second line instead of crushing the title to a sliver.
+   Tabs get tighter padding so more of the (scrollable) bar is visible. */
+@media (max-width: 640px) {
+  .gallery-tabs { padding: 0 6px; }
+  .gallery-tab { padding: 8px 10px; font-size: 12px; }
+  .movie-row { flex-wrap: wrap; }
+  .movie-row-mid { flex: 1 1 140px; }
+  .movie-row-trim { margin-left: 28px; } /* second line, indented past the number column */
+  .movie-bar .media-input { max-width: none; flex: 1 1 100%; }
 }
 .gallery-albums-container.gallery-dragover {
   border-color: var(--red);
