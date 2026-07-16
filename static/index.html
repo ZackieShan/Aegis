@@ -4,15 +4,18 @@
   <meta charset="UTF-8" />
   <title>Aegis Chat</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 120'%3E%3Cpolygon points='12,68 50,88 88,68 88,82 50,102 12,82' fill='%237a2fbf'/%3E%3Cpath d='M25,32 L25,48 Q25,57 34,57 L45.5,57 L45.5,49 L37.5,49 Q34,49 34,45 L34,32 Z' fill='%23ff9130'/%3E%3Cpath d='M75,32 L75,48 Q75,57 66,57 L54.5,57 L54.5,49 L62.5,49 Q66,49 66,45 L66,32 Z' fill='%23ff9130'/%3E%3Crect x='45.5' y='30' width='9' height='76' fill='%23ff9130'/%3E%3Cpolygon points='45.5,106 54.5,106 50,116' fill='%23ff9130'/%3E%3Cpolygon points='29.5,8 36.5,23 34,21 34,34 25,34 25,21 22.5,23' fill='%23ff9130'/%3E%3Cpolygon points='50,8 57,23 54.5,21 54.5,34 45.5,34 45.5,21 43,23' fill='%23ff9130'/%3E%3Cpolygon points='70.5,8 77.5,23 75,21 75,34 66,34 66,21 63.5,23' fill='%23ff9130'/%3E%3C/svg%3E">
-  <link rel="manifest" href="/static/manifest.json">
-  <meta name="theme-color" content="#282c34">
+  <link rel="manifest" href="/static/manifest.json?v=5">
+  <meta name="theme-color" content="#0a0512">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- Disable iOS / Android auto-linkifying of numbers (phone/date/address)
        in email bodies — was wrapping random digits in <a href="tel:..."> with
        browser-default styling that didn't match the Aegis theme. -->
   <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
-  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <!-- ?v bumps whenever the icon art changes: iOS caches home-screen icons
+       hard, so a new version string is what makes an existing install refresh.
+       Dedicated 180px apple-touch-icon (iOS applies its own rounded mask). -->
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v=5">
   <script nonce="{{CSP_NONCE}}">
   window._aegisLoadTime = Date.now();
   (function(){
@@ -178,7 +181,7 @@
             start_url: path,
             scope: '/',
             display: 'standalone',
-            background_color: '#0e0e10',
+            background_color: '#0a0512',
             theme_color: ac,
             icons: [
               { src: href, sizes: '192x192', type: 'image/svg+xml', purpose: 'any maskable' },
@@ -233,7 +236,7 @@
 </head>
 <body>
   <!-- Loading overlay — hides all flashing until app is ready -->
-  <div id="app-loader" style="position:fixed;inset:0;z-index:99999;background:var(--bg,#282c34);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:opacity .3s">
+  <div id="app-loader" style="position:fixed;inset:0;z-index:99999;background:var(--bg,#0a0512);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:opacity .3s">
     <div id="loader-wave" style="color:var(--brand-color,var(--red,#b45de0));font-family:monospace;font-size:11px;opacity:.5">▁▂▃</div>
   </div>
   <script nonce="{{CSP_NONCE}}">
