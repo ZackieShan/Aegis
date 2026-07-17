@@ -281,15 +281,27 @@ def acestep15_song_graph(
     seed: int = 0,
     bpm: int = 120,
     language: str = "en",
+    reference_audio: str = "",
 ) -> Dict[str, Any]:
     """ACE-Step 1.5 XL turbo text-to-song (music + vocals when lyrics are
     given), per the bundled audio_ace_step1_5_xl_turbo template: 8-step euler
     at cfg 1 with AuraFlow shift 3, negative from ConditioningZeroOut, MP3
     out. `tags` is the style line ("dreamy indie pop, female vocals, 90 BPM");
     empty `lyrics` yields an instrumental. The encoder's duration must match
-    the latent seconds or the structure planner writes past the clip."""
+    the latent seconds or the structure planner writes past the clip.
+
+    `reference_audio` (a filename inside ComfyUI/input) switches on COVER
+    mode: LoadAudio → VAEEncodeAudio (the ACE 1.5 VAE) → ReferenceTimbreAudio
+    appended to the positive conditioning — the model then follows the
+    reference's melody/structure/timbre (is_covers=True in model_base) and
+    DISCARDS LLM audio codes, so generate_audio_codes flips off (the 4B
+    code-gen pass would be pure wasted VRAM/time). The negative stays
+    ConditioningZeroOut of the RAW text encode, per the model's learned
+    null-embedding path. Keep `seconds` ≈ the reference's duration: the
+    reference latent is truncated to the target length and silence-padded
+    past it (a much longer target trails into unguided audio)."""
     seconds = max(5.0, min(600.0, float(seconds)))
-    return {
+    graph = {
         "1": {"class_type": "UNETLoader", "inputs": {
             "unet_name": "audio\\acestep_v1.5_xl_turbo_bf16.safetensors",
             "weight_dtype": "default",
@@ -310,7 +322,7 @@ def acestep15_song_graph(
             "timesignature": "4",
             "language": language or "en",
             "keyscale": "C major",
-            "generate_audio_codes": True,
+            "generate_audio_codes": not reference_audio,
             "cfg_scale": 2.0,
             "temperature": 0.85,
             "top_p": 0.9,
@@ -332,6 +344,14 @@ def acestep15_song_graph(
             "audio": ["9", 0], "filename_prefix": "aegis/song", "quality": "V0",
         }},
     }
+    if reference_audio:
+        graph["11"] = {"class_type": "LoadAudio", "inputs": {"audio": reference_audio}}
+        graph["12"] = {"class_type": "VAEEncodeAudio",
+                       "inputs": {"audio": ["11", 0], "vae": ["2", 0]}}
+        graph["13"] = {"class_type": "ReferenceTimbreAudio",
+                       "inputs": {"conditioning": ["4", 0], "latent": ["12", 0]}}
+        graph["8"]["inputs"]["positive"] = ["13", 0]
+    return graph
 
 
 # Aegis-facing ComfyUI music catalog — same file-gated pattern as video.

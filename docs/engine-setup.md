@@ -88,6 +88,26 @@ up in the model picker.
   the rail) — every capability shows a live green/amber/grey status and a one-click
   "try it." `/doctor` offers guarded one-click fixes for anything missing.
 
+## Voice cloning (Chatterbox)
+
+Optional: a dedicated venv under `engine/chatterbox` serves Resemble AI's
+MIT-licensed Chatterbox behind llama-swap as model `chatterbox-tts` (an
+OpenAI-compatible `/v1/audio/speech`). Setup:
+
+```powershell
+cd engine/chatterbox
+py -3.12 -m venv venv
+venv\Scripts\python -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+venv\Scripts\python -m pip install chatterbox-tts
+```
+
+Install CUDA torch FIRST — plain `pip install chatterbox-tts` pulls CPU-only
+torch. Add the `chatterbox-tts` entry to `llama-swap.yaml` (see this repo's
+example) pointing `--voices-dir` at Aegis's `data/voices`. Voices are cloned
+in Settings → Text to Speech → **My Voices** from ~10 seconds of speech; the
+~3.2GB model auto-downloads on first use, and each voice's conditioning is
+baked to a `.voice.pt` beside its sample so repeat synthesis is fast.
+
 ## Troubleshooting
 
 - **A model "spills" and generation crawls:** it doesn't fit VRAM at full offload.

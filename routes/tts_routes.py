@@ -1,14 +1,58 @@
 # routes/tts_routes.py
 """
-TTS API routes — multi-provider (local Kokoro, API endpoint, browser).
+TTS API routes — multi-provider (local Kokoro, API endpoint, browser),
+plus "My Voices": the user's cloned-voice samples for the Chatterbox engine.
 """
 
-from fastapi import APIRouter, HTTPException
+import logging
+import os
+import re
+import subprocess
+
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
-import logging
+
+from src.auth_helpers import require_privilege
 
 logger = logging.getLogger(__name__)
+
+_VOICE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9 _-]{0,38}$")
+_VOICE_UPLOAD_MAX = 25 * 1024 * 1024
+_VOICE_SRC_EXTS = ("wav", "mp3", "flac", "ogg", "opus", "m4a", "webm")
+
+
+def _voice_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9_-]+", "-", name.strip().lower()).strip("-")
+
+
+def _convert_to_wav(src_bytes: bytes, src_ext: str, dest_path: str) -> float:
+    """Any browser-recorded/uploaded audio → 24 kHz mono WAV (what Chatterbox
+    reads best; also makes webm/opus mic blobs usable — soundfile can't decode
+    those). Returns the duration in seconds."""
+    import tempfile
+
+    import imageio_ffmpeg
+    exe = imageio_ffmpeg.get_ffmpeg_exe()
+    with tempfile.NamedTemporaryFile(suffix=f".{src_ext}", delete=False) as tmp:
+        tmp.write(src_bytes)
+        tmp_path = tmp.name
+    try:
+        r = subprocess.run(
+            [exe, "-y", "-i", tmp_path, "-ac", "1", "-ar", "24000", "-vn", dest_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode != 0 or not os.path.exists(dest_path):
+            raise ValueError(f"Could not decode that audio ({(r.stderr or '').strip()[-200:]})")
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr or "")
+        probe = subprocess.run([exe, "-i", dest_path], capture_output=True, text=True, timeout=30)
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr or "") or m
+        return (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))) if m else 0.0
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 class TTSRequest(BaseModel):
     text: str
@@ -85,6 +129,93 @@ def setup_tts_routes(tts_service):
                 status_code=500,
                 detail={"message": f"Synthesis failed: {str(e)}"}
             )
+
+    @router.get("/my-voices")
+    async def my_voices(request: Request):
+        """The user's cloned voices (Chatterbox samples in VOICES_DIR)."""
+        require_privilege(request, "can_generate_images")
+        from services.tts.tts_service import cloned_voice_catalog
+        return {"voices": cloned_voice_catalog()}
+
+    @router.post("/my-voices")
+    async def add_my_voice(request: Request, name: str = Form(...), file: UploadFile = File(...)):
+        """Clone a voice: save a ~10s speech sample under a name.
+
+        Any format the mic or a file picker produces (webm/opus included) is
+        converted to 24 kHz mono WAV — the shape Chatterbox conditions on.
+        Chatterbox only reads the first ~10s, so long uploads are fine.
+        Conversion goes through a temp name and only replaces an existing
+        voice after validation — a botched re-record must never destroy the
+        previous good sample."""
+        require_privilege(request, "can_generate_images")
+        from src.constants import VOICES_DIR
+        from src.upload_limits import read_upload_limited
+
+        if not _VOICE_NAME_RE.fullmatch(name or ""):
+            raise HTTPException(400, "Voice name: 1-39 letters/numbers/spaces/dashes.")
+        slug = _voice_slug(name)
+        if not slug:
+            raise HTTPException(400, "Voice name must contain letters or numbers.")
+        ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+        if ext not in _VOICE_SRC_EXTS:
+            raise HTTPException(400, f"Unsupported audio type '.{ext}'.")
+        data = await read_upload_limited(file, _VOICE_UPLOAD_MAX, "Voice sample")
+        if len(data) < 1024:
+            raise HTTPException(400, "That sample looks empty.")
+
+        os.makedirs(VOICES_DIR, exist_ok=True)
+        dest = os.path.join(VOICES_DIR, f"{slug}.wav")
+        # ffmpeg picks the container from the extension, and the voice
+        # catalogs glob VOICES_DIR/*.wav — a .tmp subdir satisfies both.
+        tmp_dir = os.path.join(VOICES_DIR, ".tmp")
+        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_dest = os.path.join(tmp_dir, f"{slug}.wav")
+        try:
+            seconds = _convert_to_wav(data, ext, tmp_dest)
+            if seconds and seconds < 3:
+                raise HTTPException(400, f"Sample is only {seconds:.1f}s — record at least 3s (about 10s is ideal).")
+            os.replace(tmp_dest, dest)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        finally:
+            try:
+                os.unlink(tmp_dest)
+            except OSError:
+                pass
+        # A re-recorded voice must invalidate BOTH caches: the Chatterbox
+        # server's baked conditionals and Aegis's synthesized-speech cache
+        # (its key is voice-name based, so old audio would replay verbatim).
+        try:
+            os.unlink(f"{dest}.voice.pt")
+        except OSError:
+            pass
+        try:
+            tts_service.clear_cache()
+        except Exception:
+            pass
+        return {"ok": True, "voice": slug, "seconds": round(seconds, 1) if seconds else None}
+
+    @router.delete("/my-voices/{name}")
+    async def delete_my_voice(request: Request, name: str):
+        require_privilege(request, "can_generate_images")
+        from src.constants import VOICES_DIR
+        slug = _voice_slug(name)
+        removed = False
+        for suffix in (".wav", ".mp3", ".flac", ".ogg", ".wav.voice.pt", ".mp3.voice.pt", ".flac.voice.pt", ".ogg.voice.pt"):
+            p = os.path.join(VOICES_DIR, f"{slug}{suffix}")
+            if os.path.exists(p):
+                try:
+                    os.unlink(p)
+                    removed = removed or not suffix.endswith(".voice.pt")
+                except OSError:
+                    logger.warning("Could not delete voice file %s", p)
+        if not removed:
+            raise HTTPException(404, f"No cloned voice named '{slug}'")
+        try:
+            tts_service.clear_cache()
+        except Exception:
+            pass
+        return {"ok": True}
 
     @router.post("/clear-cache")
     async def clear_tts_cache():

@@ -939,7 +939,6 @@ async function initTtsSettings() {
   var ttsEnabledToggle = el('set-ttsEnabledToggle');
   var ttsConfigWrap = provSel ? provSel.closest('div[style*="flex-direction"]') : null;
 
-  var previewBtn = el('set-ttsVoicePreview');
   // The static <option>s in index.html are the OpenAI voice set — keep them
   // as the endpoint-provider catalog.
   var OPENAI_VOICE_OPTIONS = Array.prototype.map.call(voiceSelect.options, function(o) {
@@ -961,9 +960,16 @@ async function initTtsSettings() {
       o.value = v.id; o.textContent = v.label || v.id;
       voiceSelect.appendChild(o);
     });
-    if (keep && Array.prototype.some.call(voiceSelect.options, function(o) { return o.value === keep; })) {
-      voiceSelect.value = keep;
+    if (!keep) return;
+    if (!Array.prototype.some.call(voiceSelect.options, function(o) { return o.value === keep; })) {
+      // Never let a failed catalog fetch silently repoint the SAVED voice at
+      // the list's first entry — a later save would persist the swap. Keep
+      // the saved value selectable until the user chooses otherwise.
+      var kept = document.createElement('option');
+      kept.value = keep; kept.textContent = keep + ' (saved)';
+      voiceSelect.appendChild(kept);
     }
+    voiceSelect.value = keep;
   }
 
   var _kokoroVoices = null;
@@ -992,6 +998,15 @@ async function initTtsSettings() {
       fillVoiceSelect(list, keep || '');
       return true;
     }
+    if (prov.startsWith('endpoint:')) {
+      // The server decides: cloned voices for a Chatterbox endpoint, the
+      // OpenAI names otherwise.
+      try {
+        var er = await fetch('/api/tts/voices?provider=' + encodeURIComponent(prov), { credentials: 'same-origin' });
+        var evs = (await er.json()).voices || [];
+        if (evs.length) { fillVoiceSelect(evs, keep || evs[0].id); return true; }
+      } catch (e) { /* fall through to the static list */ }
+    }
     fillVoiceSelect(OPENAI_VOICE_OPTIONS, keep || 'alloy');
     return true;
   }
@@ -1009,42 +1024,7 @@ async function initTtsSettings() {
     var catalogOk = prov !== 'disabled';
     voiceSelect.style.display = catalogOk ? '' : 'none';
     voiceInput.style.display = 'none';
-    if (previewBtn) previewBtn.style.display = catalogOk ? '' : 'none';
   }
-
-  var _previewAudio = null;
-  async function previewVoice() {
-    if (!previewBtn) return;
-    var sample = 'Hi! This is how I sound reading your chats aloud.';
-    var voice = getVoice();
-    previewBtn.disabled = true;
-    try {
-      if (provSel.value === 'browser') {
-        var u = new SpeechSynthesisUtterance(sample);
-        var match = (window.speechSynthesis.getVoices() || []).find(function(v) { return v.name === voice; });
-        if (match) u.voice = match;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(u);
-      } else {
-        var r = await fetch('/api/tts/synthesize', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: sample, voice: voice, format: 'audio' }),
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        if (_previewAudio) { _previewAudio.pause(); URL.revokeObjectURL(_previewAudio.src); }
-        _previewAudio = new Audio(URL.createObjectURL(await r.blob()));
-        await _previewAudio.play();
-      }
-    } catch (e) {
-      ttsMsg.textContent = 'Preview failed: ' + (e.message || e);
-      ttsMsg.style.color = 'var(--red)';
-      setTimeout(function() { ttsMsg.textContent = ''; }, 4000);
-    } finally {
-      previewBtn.disabled = false;
-    }
-  }
-  if (previewBtn) previewBtn.addEventListener('click', previewVoice);
 
   var ttsKeywords = ['tts', 'audio'];
   try {
@@ -1052,10 +1032,24 @@ async function initTtsSettings() {
     var endpoints = await epRes.json();
     endpoints.forEach(function(ep) {
       if (!ep.is_enabled) return;
-      var hasTTS = (ep.models || []).some(m => ttsKeywords.some(kw => m.toLowerCase().includes(kw)));
+      var models = ep.models || [];
+      var hasTTS = models.some(m => ttsKeywords.some(kw => m.toLowerCase().includes(kw)));
       if (!hasTTS) return;
-      var opt = document.createElement('option'); opt.value = 'endpoint:' + ep.id; opt.textContent = ep.name + ' (API)'; provSel.appendChild(opt);
+      var isClone = models.some(m => /chatterbox/i.test(m));
+      var opt = document.createElement('option');
+      opt.value = 'endpoint:' + ep.id;
+      opt.textContent = isClone ? 'Voice Cloning — your voices (local Chatterbox)' : ep.name + ' (API)';
+      if (isClone) opt.dataset.chatterbox = '1';
+      provSel.appendChild(opt);
     });
+    // The endpoint model list is a static OpenAI pair — a cloning endpoint
+    // speaks as "chatterbox-tts", so the option must exist to be selectable.
+    if (modelSelect && ![].some.call(modelSelect.options, function(o) { return o.value === 'chatterbox-tts'; })) {
+      var cbOpt = document.createElement('option');
+      cbOpt.value = 'chatterbox-tts';
+      cbOpt.textContent = 'chatterbox-tts (voice cloning)';
+      modelSelect.appendChild(cbOpt);
+    }
   } catch (e) { console.warn('Failed to load endpoints for TTS', e); }
 
   try {
@@ -1094,8 +1088,11 @@ async function initTtsSettings() {
 
   provSel.addEventListener('change', async function() {
     var prov = provSel.value;
-    if (isEndpoint()) modelSelect.value = 'tts-1';
-    await loadVoicesFor(prov, prov === 'local' ? 'af_heart' : (isEndpoint() ? 'alloy' : ''));
+    if (isEndpoint()) {
+      var selOpt = provSel.options[provSel.selectedIndex];
+      modelSelect.value = (selOpt && selOpt.dataset.chatterbox) ? 'chatterbox-tts' : 'tts-1';
+    }
+    await loadVoicesFor(prov, prov === 'local' ? 'af_heart' : '');
     updateVisibility();
     saveTTS();
   });
@@ -1105,6 +1102,116 @@ async function initTtsSettings() {
   voiceInput.addEventListener('change', saveTTS);
   speedSelect.addEventListener('change', saveAndClearCache);
   if (ttsEnabledToggle) ttsEnabledToggle.addEventListener('change', function() { syncTtsDisabled(); saveTTS(); });
+
+  // ── My Voices: clone a voice from a mic recording or an uploaded sample ──
+  var mvList = el('set-ttsMyVoicesList');
+  var mvName = el('set-ttsVoiceName');
+  var mvRecord = el('set-ttsVoiceRecord');
+  var mvUpload = el('set-ttsVoiceUpload');
+  var mvFile = el('set-ttsVoiceFile');
+
+  function mvMsg(text, isErr) {
+    ttsMsg.textContent = text;
+    ttsMsg.style.color = isErr ? 'var(--red, #e55)' : 'var(--fg)';
+    setTimeout(function() { if (ttsMsg.textContent === text) ttsMsg.textContent = ''; }, 5000);
+  }
+
+  async function refreshMyVoices() {
+    if (!mvList) return;
+    try {
+      var r = await fetch('/api/tts/my-voices', { credentials: 'same-origin' });
+      var voices = (await r.json()).voices || [];
+      mvList.replaceChildren();
+      if (!voices.length) {
+        var empty = document.createElement('div');
+        empty.style.cssText = 'font-size:11px;opacity:0.55;';
+        empty.textContent = 'No cloned voices yet.';
+        mvList.appendChild(empty);
+        return;
+      }
+      voices.forEach(function(v) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;';
+        var nm = document.createElement('span');
+        nm.textContent = '🎤 ' + v.id;
+        nm.style.flex = '1';
+        row.appendChild(nm);
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'admin-btn-sm';
+        del.style.cssText = 'padding:2px 10px;font-size:11px;';
+        del.textContent = 'Delete';
+        del.addEventListener('click', async function() {
+          del.disabled = true;
+          try {
+            var dr = await fetch('/api/tts/my-voices/' + encodeURIComponent(v.id), { method: 'DELETE', credentials: 'same-origin' });
+            if (!dr.ok) throw new Error('HTTP ' + dr.status);
+            refreshMyVoices();
+            loadVoicesFor(provSel.value, getVoice());
+          } catch (e) { mvMsg('Delete failed: ' + e.message, true); del.disabled = false; }
+        });
+        row.appendChild(del);
+        mvList.appendChild(row);
+      });
+    } catch (e) { /* section degrades silently */ }
+  }
+
+  async function submitVoiceSample(blob, filename) {
+    var name = (mvName && mvName.value || '').trim();
+    if (!name) { mvMsg('Give the voice a name first.', true); return; }
+    var fd = new FormData();
+    fd.append('name', name);
+    fd.append('file', blob, filename);
+    mvMsg('Cloning "' + name + '"…');
+    try {
+      var r = await fetch('/api/tts/my-voices', { method: 'POST', credentials: 'same-origin', body: fd });
+      var d = await r.json().catch(function() { return {}; });
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      mvMsg('Voice "' + d.voice + '" cloned (' + (d.seconds ? d.seconds + 's sample' : 'sample saved') + ') — pick the Voice Cloning provider to use it.');
+      if (mvName) mvName.value = '';
+      refreshMyVoices();
+      loadVoicesFor(provSel.value, getVoice());
+    } catch (e) { mvMsg('Cloning failed: ' + (e.message || e), true); }
+  }
+
+  if (mvUpload && mvFile) {
+    mvUpload.addEventListener('click', function() { mvFile.click(); });
+    mvFile.addEventListener('change', function() {
+      var f = mvFile.files && mvFile.files[0];
+      if (f) submitVoiceSample(f, f.name);
+      mvFile.value = '';
+    });
+  }
+
+  var mvRecorder = null;
+  if (mvRecord) {
+    mvRecord.addEventListener('click', async function() {
+      if (mvRecorder) { // stop early
+        mvRecorder.stop();
+        return;
+      }
+      if (!(mvName && mvName.value.trim())) { mvMsg('Give the voice a name first.', true); return; }
+      try {
+        var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) { mvMsg('Microphone unavailable: ' + e.message, true); return; }
+      var mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'].find(function(m) { return window.MediaRecorder && MediaRecorder.isTypeSupported(m); }) || '';
+      mvRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      var chunks = [];
+      mvRecorder.ondataavailable = function(e) { if (e.data && e.data.size) chunks.push(e.data); };
+      mvRecorder.onstop = function() {
+        stream.getTracks().forEach(function(t) { t.stop(); });
+        mvRecord.textContent = '● Record 10s';
+        mvRecorder = null;
+        var blob = new Blob(chunks, { type: mime || 'audio/webm' });
+        submitVoiceSample(blob, 'sample.webm');
+      };
+      mvRecorder.start();
+      mvRecord.textContent = '■ Stop';
+      mvMsg('Recording — read a couple of natural sentences… (auto-stops at 15s)');
+      setTimeout(function() { if (mvRecorder && mvRecorder.state === 'recording') mvRecorder.stop(); }, 15000);
+    });
+  }
+  refreshMyVoices();
 
   // Preview / test button
   var previewBtn = el('set-ttsPreviewBtn');

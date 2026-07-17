@@ -53,6 +53,22 @@ OPENAI_VOICES = [
     ("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
 ]
 
+CLONED_SAMPLE_EXTS = (".wav", ".mp3", ".flac", ".ogg")
+
+
+def cloned_voice_catalog() -> list:
+    """The user's cloned voices — one per sample file in VOICES_DIR (the same
+    directory the Chatterbox engine server reads)."""
+    from src.constants import VOICES_DIR
+    seen = []
+    try:
+        for p in sorted(Path(VOICES_DIR).glob("*")):
+            if p.suffix.lower() in CLONED_SAMPLE_EXTS:
+                seen.append({"id": p.stem, "label": f"{p.stem} — your cloned voice"})
+    except Exception:
+        pass
+    return seen
+
 
 def _safe_speed(value, default: float = 1.0) -> float:
     """Parse the stored tts_speed defensively. The settings layer tolerates
@@ -172,8 +188,23 @@ class TTSService:
             "speed": speed,
         }
 
+        # Local engine endpoints (llama-swap) may cold-load a multi-GB model
+        # inside the first request — 60s cuts a legitimate first synthesis off.
+        is_local = any(h in base_url for h in ("127.0.0.1", "localhost", "0.0.0.0"))
+        if is_local:
+            # A voice request would swap the engine's GPU models — never let a
+            # play-button click evict a live render. (Kokoro/browser voices
+            # are unaffected; they don't touch the GPU engine.)
+            try:
+                from src import job_queue
+                busy = job_queue.gpu_busy()
+                if busy:
+                    logger.warning("TTS endpoint synthesis refused: GPU busy with %s render", busy.get("kind"))
+                    return None
+            except Exception:
+                pass
         try:
-            r = httpx.post(url, json=payload, headers=headers, timeout=60)
+            r = httpx.post(url, json=payload, headers=headers, timeout=300 if is_local else 60)
             r.raise_for_status()
             logger.info(f"API TTS: {len(r.content)} bytes from {base_url}")
             return r.content
@@ -242,8 +273,27 @@ class TTSService:
         if provider == "local":
             return KOKORO_VOICES
         if provider.startswith("endpoint:"):
+            # A Chatterbox-serving endpoint speaks in the user's own cloned
+            # voices, not the OpenAI names.
+            if self._endpoint_serves_chatterbox(provider.split(":", 1)[1]):
+                return cloned_voice_catalog()
             return OPENAI_VOICES
         return []  # browser voices enumerate client-side; disabled has none
+
+    @staticmethod
+    def _endpoint_serves_chatterbox(endpoint_id: str) -> bool:
+        try:
+            import json
+            from core.database import SessionLocal, ModelEndpoint
+            db = SessionLocal()
+            try:
+                ep = db.query(ModelEndpoint).filter(ModelEndpoint.id == endpoint_id).first()
+                cached = json.loads(getattr(ep, "cached_models", None) or "[]") if ep else []
+            finally:
+                db.close()
+            return any("chatterbox" in str(m).lower() for m in cached)
+        except Exception:
+            return False
 
     def set_voice(self, voice: str):
         """Legacy no-op — voice is now managed via admin settings."""

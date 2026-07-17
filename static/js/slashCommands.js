@@ -1855,10 +1855,11 @@ async function _cmdSong(args) {
       '`/song <style tags>` — generate an instrumental (genre, mood, tempo, instruments)',
       '`/song length=90 <tags>` — song length in seconds (default 60)',
       '`/song seed=42 bpm=100 <tags>` — reproducible take / tempo hint',
+      '`/song from=last <tags>` — **cover** your newest Studio track in a new style (or `from=<id>`)',
       '',
       'Example: `/song length=90 dreamy indie pop, female vocals, warm acoustic guitar`.',
-      'For **lyrics** (verses/chorus need line breaks) use Studio → Create → Song.',
-      'Finished songs land in the Studio next to your photos and clips.',
+      'For **lyrics** (verses/chorus need line breaks) or uploading a track to cover,',
+      'use Studio → Create → Song. Finished songs land in the Studio.',
     ].join('\n'));
     return true;
   }
@@ -1866,7 +1867,7 @@ async function _cmdSong(args) {
   const opts = {};
   const rest = [];
   for (const a of args) {
-    const m = /^(length|seconds|duration|seed|bpm)=(.+)$/i.exec(a);
+    const m = /^(length|seconds|duration|seed|bpm|from|cover)=(.+)$/i.exec(a);
     if (m && !rest.length) opts[m[1].toLowerCase()] = m[2]; else rest.push(a);
   }
   const tags = rest.join(' ').trim();
@@ -1877,6 +1878,7 @@ async function _cmdSong(args) {
   if (lengthOpt) payload.seconds = parseFloat(lengthOpt); // "90s" parses as 90
   if (opts.seed) payload.seed = parseInt(opts.seed, 10);
   if (opts.bpm) payload.bpm = parseInt(opts.bpm, 10);
+  if (opts.from || opts.cover) payload.reference_id = opts.from || opts.cover;
 
   let jobId, model, seconds;
   try {
@@ -1887,9 +1889,10 @@ async function _cmdSong(args) {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { slashReplyMd('✗ ' + (d.detail || d.error || `Song start failed (${r.status})`)); return true; }
     jobId = d.job_id; model = d.model; seconds = d.seconds;
+    var isCover = !!d.cover;
   } catch (e) { slashReplyMd('Song start failed: ' + e.message); return true; }
 
-  const rep = slashReplyMd(`🎵 Writing a ${Math.round(seconds)}s track with \`${model}\` — it lands here and in the Studio.`);
+  const rep = slashReplyMd(`🎵 ${isCover ? 'Covering your track' : 'Writing a track'} (${Math.round(seconds)}s) with \`${model}\` — it lands here and in the Studio.`);
   const status = document.createElement('div');
   status.className = 'generated-image-caption';
   status.textContent = 'Queued…';

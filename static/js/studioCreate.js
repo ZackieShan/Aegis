@@ -13,6 +13,7 @@ let _styles = [];
 let _activeStyle = '';
 let _busy = false;
 let _source = null;           // {id, url, prompt} — a Photos still to animate/stylize
+let _songRef = null;          // {name, seconds, label} staged upload | {last:true} — cover mode
 
 /** Hand a Photos still to the Create tab (the Animate/Stylize buttons).
  *  Call before switching to the tab — renderCreateTab reads it. */
@@ -128,19 +129,30 @@ async function _generate(host) {
 
   try {
     if (_kind === 'audio') {
-      const dur = Number(document.getElementById('create-duration')?.value || 60);
+      const durRaw = (document.getElementById('create-duration')?.value || '').trim();
+      const payload = {
+        tags: prompt,
+        lyrics: (document.getElementById('create-lyrics')?.value || '').trim(),
+        seed: body.seed,
+        model: body.model,
+      };
+      // An empty Seconds with a reference means "match the reference" — the
+      // backend probes the track's real length; only send an explicit value.
+      if (durRaw !== '' && !isNaN(Number(durRaw))) {
+        payload.seconds = Math.max(10, Math.min(600, Number(durRaw)));
+      } else if (!_songRef) {
+        payload.seconds = 60;
+      }
+      if (_songRef) {
+        if (_songRef.last) payload.reference_id = 'last';
+        else payload.reference_name = _songRef.name;
+      }
       const d = await _json('/api/audio/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tags: prompt,
-          lyrics: (document.getElementById('create-lyrics')?.value || '').trim(),
-          seconds: Math.max(10, Math.min(600, isNaN(dur) ? 60 : dur)),
-          seed: body.seed,
-          model: body.model,
-        }),
+        body: JSON.stringify(payload),
       });
-      _status(`Queued on ${d.model} — a ${Math.round(d.seconds)}s ${d.has_lyrics ? 'song' : 'instrumental'} lands in Photos when it finishes.`);
+      _status(`Queued on ${d.model} — a ${Math.round(d.seconds)}s ${d.cover ? 'cover' : (d.has_lyrics ? 'song' : 'instrumental')} lands in Photos when it finishes.`);
       document.querySelector('#gallery-modal .gallery-tab[data-tab="queue"]')?.click();
     } else if (_kind === 'video') {
       const dur = Number(document.getElementById('create-duration')?.value || 5);
@@ -284,6 +296,54 @@ function _render(host) {
     ly.value = window.__createLyricsDraft || '';
     ly.addEventListener('input', () => { window.__createLyricsDraft = ly.value; });
     host.appendChild(ly);
+
+    // Cover mode: hand ACE-Step a reference track — the new song follows its
+    // melody/structure/feel (with your tags + lyrics on top).
+    const refRow = _el('div', 'create-source');
+    const refLabel = _el('div', 'create-source-label',
+      _songRef
+        ? (_songRef.last ? 'Covering your latest Studio song.' : `Covering: ${_songRef.label} (${_songRef.seconds ? Math.round(_songRef.seconds) + 's' : 'length unknown'})`)
+        : 'No reference — composing from scratch. Add a track to make a cover.');
+    refRow.appendChild(refLabel);
+    if (_songRef) {
+      const clear = _el('button', 'gallery-detail-back', '✕ Clear');
+      clear.type = 'button';
+      clear.addEventListener('click', () => { _songRef = null; _render(host); });
+      refRow.appendChild(clear);
+    } else {
+      const useLast = _el('button', 'gallery-detail-back', 'Latest song');
+      useLast.type = 'button';
+      useLast.title = 'Cover the newest track in your Studio';
+      useLast.addEventListener('click', () => { _songRef = { last: true }; _render(host); });
+      refRow.appendChild(useLast);
+      const up = _el('button', 'gallery-detail-back', 'Upload track…');
+      up.type = 'button';
+      const fileIn = document.createElement('input');
+      fileIn.type = 'file';
+      fileIn.accept = '.mp3,.wav,.flac,.ogg,.opus,.m4a,audio/*';
+      fileIn.style.display = 'none';
+      fileIn.addEventListener('change', async () => {
+        const f = fileIn.files && fileIn.files[0];
+        if (!f) return;
+        up.disabled = true; up.textContent = 'Uploading…';
+        try {
+          const fd = new FormData();
+          fd.append('file', f, f.name);
+          const r = await fetch('/api/audio/reference', { method: 'POST', credentials: 'same-origin', body: fd });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.detail || `Upload failed (${r.status})`);
+          _songRef = { name: d.name, seconds: d.seconds, label: f.name };
+          _render(host);  // the duration input reads _songRef.seconds
+        } catch (e) {
+          _status('Reference upload failed: ' + e.message, 'movie-status-err');
+          up.disabled = false; up.textContent = 'Upload track…';
+        }
+      });
+      up.addEventListener('click', () => fileIn.click());
+      refRow.appendChild(up);
+      refRow.appendChild(fileIn);
+    }
+    host.appendChild(refRow);
   }
 
   if (_kind !== 'audio') {
@@ -339,8 +399,19 @@ function _render(host) {
     dur.type = 'number';
     dur.id = 'create-duration';
     dur.className = 'media-input';
-    dur.min = '10'; dur.max = '600'; dur.step = '5'; dur.value = '60';
-    dur.title = 'Song length in seconds — ACE-Step writes full structure (intro/verse/chorus) into whatever you give it.';
+    dur.min = '10'; dur.max = '600'; dur.step = '5';
+    // Covers default to the reference's length (the model truncates/pads the
+    // reference to the target). _render rebuilds this input, so the value
+    // must come from state — a direct .value write would be wiped.
+    if (_songRef && _songRef.seconds) {
+      dur.value = String(Math.round(Math.min(600, _songRef.seconds)));
+    } else if (_songRef) {
+      dur.value = '';
+      dur.placeholder = 'reference length';
+    } else {
+      dur.value = '60';
+    }
+    dur.title = 'Song length in seconds — ACE-Step writes full structure (intro/verse/chorus) into whatever you give it. Empty with a reference = match the reference.';
     opt('Seconds', dur);
   } else if (_kind === 'video') {
     const dur = document.createElement('input');

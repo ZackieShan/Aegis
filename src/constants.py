@@ -57,6 +57,9 @@ DEEP_RESEARCH_DIR = os.path.join(DATA_DIR, "deep_research")
 MCP_OAUTH_DIR = os.path.join(DATA_DIR, "mcp_oauth")
 GENERATED_IMAGES_DIR = os.path.join(DATA_DIR, "generated_images")
 TTS_CACHE_DIR = os.path.join(DATA_DIR, "tts_cache")
+# Cloned-voice reference samples (Settings → TTS → My Voices). The Chatterbox
+# engine server reads this same directory (--voices-dir).
+VOICES_DIR = os.path.join(DATA_DIR, "voices")
 EMAIL_URGENCY_CACHE_DIR = os.path.join(DATA_DIR, "email_urgency_cache")
 SKILLS_DIR = os.path.join(DATA_DIR, "skills")
 GALLERY_DIR = os.path.join(DATA_DIR, "gallery")

@@ -40,6 +40,46 @@ def test_acestep_seconds_clamped():
     assert latent["inputs"]["seconds"] == 600.0
 
 
+def test_acestep_cover_mode_wiring():
+    """Reference audio flips the graph into ACE's cover path: LoadAudio →
+    VAEEncodeAudio (ACE 1.5 VAE) → ReferenceTimbreAudio on the POSITIVE
+    branch only, LLM code-gen off (the model discards codes with a reference
+    present — running the 4B pass would be pure waste)."""
+    g = comfyui_workflows.acestep15_song_graph(tags="jazz", seconds=30, reference_audio="aegis_ref_abc.mp3")
+    ref = next(n for n in g.values() if n["class_type"] == "ReferenceTimbreAudio")
+    enc_id = next(k for k, n in g.items() if n["class_type"] == "TextEncodeAceStepAudio1.5")
+    vae_id = next(k for k, n in g.items() if n["class_type"] == "VAELoader")
+    load = next(n for n in g.values() if n["class_type"] == "LoadAudio")
+    venc = next(n for n in g.values() if n["class_type"] == "VAEEncodeAudio")
+    ks = next(n for n in g.values() if n["class_type"] == "KSampler")
+    neg = next(n for n in g.values() if n["class_type"] == "ConditioningZeroOut")
+
+    assert load["inputs"]["audio"] == "aegis_ref_abc.mp3"
+    assert venc["inputs"]["vae"] == [vae_id, 0]          # ACE 1.5 VAE, never another
+    assert ref["inputs"]["conditioning"] == [enc_id, 0]
+    ref_id = next(k for k, n in g.items() if n["class_type"] == "ReferenceTimbreAudio")
+    assert ks["inputs"]["positive"] == [ref_id, 0]
+    assert neg["inputs"]["conditioning"] == [enc_id, 0]  # negative stays RAW text encode
+    assert g[enc_id]["inputs"]["generate_audio_codes"] is False
+    # Sampler untouched: cover still denoises from the empty latent.
+    assert ks["inputs"]["denoise"] == 1
+    # No reference → no cover nodes, codes on.
+    g2 = comfyui_workflows.acestep15_song_graph(tags="jazz", seconds=30)
+    assert not any(n["class_type"] == "ReferenceTimbreAudio" for n in g2.values())
+    assert next(n for n in g2.values() if n["class_type"] == "TextEncodeAceStepAudio1.5")["inputs"]["generate_audio_codes"] is True
+
+
+def test_audio_reference_name_gate():
+    """/api/audio/generate only accepts names its own upload route minted —
+    a caller can never point ComfyUI's LoadAudio at an arbitrary path."""
+    from routes.audio_routes import _AUDIO_REF_NAME_RE
+    assert _AUDIO_REF_NAME_RE.fullmatch("aegis_ref_0123456789ab.mp3")
+    assert _AUDIO_REF_NAME_RE.fullmatch("aegis_ref_deadbeef1234.wav")
+    for bad in ("../secrets.mp3", "aegis_ref_0123456789ab.exe", "song.mp3",
+                "aegis_ref_XYZ.mp3", "aegis_ref_0123456789ab.mp3/../x"):
+        assert not _AUDIO_REF_NAME_RE.fullmatch(bad), bad
+
+
 def test_audio_catalog_gated_on_files(monkeypatch):
     spec = comfyui_workflows.COMFY_AUDIO_MODELS["comfy-acestep1.5-song"]
     assert spec["builder"] is comfyui_workflows.acestep15_song_graph
@@ -157,6 +197,32 @@ def test_kokoro_voice_catalog():
     assert svc.list_voices("local") == KOKORO_VOICES
     assert svc.list_voices("endpoint:abc")[0]["id"] == "alloy"
     assert svc.list_voices("browser") == []
+
+
+def test_cloned_voice_catalog_and_endpoint_detection(tmp_path, monkeypatch):
+    import src.constants as sconstants
+    from services.tts import tts_service as ts
+    monkeypatch.setattr(sconstants, "VOICES_DIR", str(tmp_path))
+    (tmp_path / "zac.wav").write_bytes(b"RIFFxxxx")
+    (tmp_path / "grandma.mp3").write_bytes(b"ID3xxxx")
+    (tmp_path / "zac.wav.voice.pt").write_bytes(b"not-a-voice")  # baked cache, not a voice
+    ids = [v["id"] for v in ts.cloned_voice_catalog()]
+    assert ids == ["grandma", "zac"]
+
+    svc = ts.TTSService.__new__(ts.TTSService)
+    monkeypatch.setattr(ts.TTSService, "_endpoint_serves_chatterbox", staticmethod(lambda eid: eid == "cb"))
+    assert [v["id"] for v in svc.list_voices("endpoint:cb")] == ["grandma", "zac"]
+    assert svc.list_voices("endpoint:other")[0]["id"] == "alloy"
+
+
+def test_my_voice_name_validation():
+    from routes.tts_routes import _VOICE_NAME_RE, _voice_slug
+    assert _VOICE_NAME_RE.fullmatch("Zac")
+    assert _VOICE_NAME_RE.fullmatch("Grandma June")
+    assert not _VOICE_NAME_RE.fullmatch("../evil")
+    assert not _VOICE_NAME_RE.fullmatch("")
+    assert _voice_slug("Grandma June") == "grandma-june"
+    assert _voice_slug("  Zac!!  ") == "zac"
 
 
 def test_kokoro_british_voices_use_b_pipeline():

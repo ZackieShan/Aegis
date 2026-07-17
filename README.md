@@ -104,10 +104,16 @@ you fit them to your machine:
 - **Music generation** (`/song`) — full songs with vocals, locally, on ACE-Step 1.5: style
   tags + optional lyrics (Studio → Create → Song has the lyrics editor with [Verse]/[Chorus]
   markers) → an MP3 in the Studio. A 45-second track renders in ~20 seconds on a 4090.
+- **Cover any track** — upload an MP3 (or pick a Studio song) as a reference and ACE-Step
+  re-imagines it in a new style, keeping the melody and structure: `/song from=last
+  synthwave, retro 80s` or the Song tab's reference picker. New lyrics welcome.
 - **Read replies aloud** — local Kokoro TTS with ~30 named voices (American/British,
   male/female) and a preview button in Settings → Text to Speech; runs faster than realtime
   on CPU so it never competes with renders for the GPU. Voice Mode closes the loop:
   speak → agent acts → the reply is spoken back.
+- **Clone your own voice** — record ~10 seconds in Settings → TTS → My Voices and Aegis
+  speaks as you (or grandma, with permission) via MIT-licensed Chatterbox on the local
+  engine. Cloned voices appear as a "Voice Cloning" provider in the voice picker.
 - **Movie maker** — stitch your clips into one film: drag to reorder, trim heads and tails,
   render. Clips of different sizes/framerates are matched automatically, and clips without
   audio are padded with silence so a mixed set still concatenates cleanly.

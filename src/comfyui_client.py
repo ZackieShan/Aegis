@@ -138,10 +138,12 @@ async def start_song_job(
     seed: int = -1,
     bpm: int = 120,
     language: str = "en",
+    reference_audio: str = "",
 ) -> str:
     """Queue an ACE-Step song render and return an Aegis job id (same
     registry as video/image-edit jobs — /api/video/status polls it, the
-    unified queue shows it, the GPU guard sees it)."""
+    unified queue shows it, the GPU guard sees it). `reference_audio` names
+    a file already inside ComfyUI's input dir → cover mode."""
     import httpx
     from src import comfyui_workflows, video_generation
 
@@ -152,6 +154,7 @@ async def start_song_job(
         tags=tags, lyrics=lyrics or "",
         seconds=float(seconds), seed=int(seed),
         bpm=int(bpm), language=language or "en",
+        reference_audio=reference_audio or "",
     )
     if graph is None:
         raise ValueError(f"Unknown ComfyUI audio workflow '{model}'")
@@ -181,6 +184,7 @@ async def start_song_job(
         "status": "queued",
         "prompt": tags,
         "lyrics": bool(lyrics),
+        "has_reference": bool(reference_audio),
         "model": model,
         "owner": owner,
         "session_id": session_id,
