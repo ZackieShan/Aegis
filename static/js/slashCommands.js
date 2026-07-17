@@ -1510,6 +1510,22 @@ async function _cmdBonzi(args) {
   return true;
 }
 
+// Aegis Amp easter egg — the Y2K-skinned floating music player (module in
+// static/js/winamp.js; same state as the Settings → Appearance toggle).
+async function _cmdWinamp(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const amp = window.aegisAmp;
+  if (!amp) { slashReplyMd('The Amp is unavailable — its module failed to load.'); return true; }
+  if (sub === 'off' || (amp.enabled && sub !== 'on')) {
+    amp.disable();
+    slashReplyMd('🎛️ The Amp powers down with a satisfying *click*. `/winamp` brings it back.');
+  } else {
+    amp.enable();
+    slashReplyMd('🎛️ **Aegis Amp** is on — it plays whatever the Studio\'s Music tab plays. Drag it by the title bar; `/winamp off` (or Settings → Appearance) puts it away.');
+  }
+  return true;
+}
+
 // Local observability — show recent LLM/agent calls (model, latency, tools).
 async function _cmdTraces(args) {
   await typewriterReply('Reading recent traces…');
@@ -7020,6 +7036,13 @@ const COMMANDS = {
     help: 'Summon or dismiss Bonzi Buddy (/bonzi, /bonzi off, /bonzi fact)',
     handler: (args) => _cmdBonzi(args),
     usage: '/bonzi'
+  },
+  winamp: {
+    alias: ['amp'],
+    category: 'Tools',
+    help: 'Toggle the Aegis Amp — a Y2K-skinned floating player for Studio songs (/winamp, /winamp off)',
+    handler: (args) => _cmdWinamp(args),
+    usage: '/winamp'
   },
   traces: {
     alias: ['observability', 'trace'],

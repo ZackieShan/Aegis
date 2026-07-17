@@ -2022,11 +2022,15 @@ function initAppearance() {
     });
   });
 
+  // Easter-egg toggles share one convention: localStorage 'aegis-<key>' and a
+  // CustomEvent 'aegis-<key>-change' the egg's module listens for (bonzi.js,
+  // winamp.js).
   modalEl.querySelectorAll('[data-egg-key]').forEach(function(chk) {
     chk.addEventListener('change', function() {
-      if (chk.dataset.eggKey !== 'bonzi') return;
-      localStorage.setItem('aegis-bonzi', chk.checked ? 'on' : 'off');
-      window.dispatchEvent(new CustomEvent('aegis-bonzi-change', {
+      var key = chk.dataset.eggKey;
+      if (!key) return;
+      localStorage.setItem('aegis-' + key, chk.checked ? 'on' : 'off');
+      window.dispatchEvent(new CustomEvent('aegis-' + key + '-change', {
         detail: { enabled: chk.checked }
       }));
     });
@@ -2069,8 +2073,8 @@ function syncPrivacyCheckboxes() {
 }
 
 function syncEggCheckboxes() {
-  modalEl.querySelectorAll('[data-egg-key="bonzi"]').forEach(function(chk) {
-    chk.checked = localStorage.getItem('aegis-bonzi') === 'on';
+  modalEl.querySelectorAll('[data-egg-key]').forEach(function(chk) {
+    chk.checked = localStorage.getItem('aegis-' + chk.dataset.eggKey) === 'on';
   });
 }
 

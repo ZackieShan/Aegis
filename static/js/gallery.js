@@ -1241,7 +1241,7 @@ function _renderGrid() {
     const _kindNoun = ({ videos: 'videos', generated: 'generated images', photos: 'photos', music: 'songs' })[_kind] || 'items';
     const emptyMsg = _filtered
       ? `No ${_kindNoun} match this view — try the All chip.`
-      : 'No photos yet. Click Upload or drag-and-drop to get started!';
+      : 'No media yet. Click Upload or drag-and-drop to get started!';
     grid.innerHTML = uploadTile + `<div class="gallery-empty">${emptyMsg}</div>`;
     _wireUploadTile();
     if (loadMore) loadMore.style.display = 'none';
@@ -1910,10 +1910,10 @@ function _openDetail(img) {
   });
 
   document.getElementById('gallery-delete-btn').addEventListener('click', async () => {
-    if (!await uiModule.styledConfirm('Delete this photo? This cannot be undone.', { confirmText: 'Delete', danger: true })) return;
+    if (!await uiModule.styledConfirm('Delete this item? This cannot be undone.', { confirmText: 'Delete', danger: true })) return;
     const ok = await _deleteImage(img.id);
     if (!ok) {
-      uiModule.showError('Failed to delete photo');
+      uiModule.showError('Delete failed');
       return;
     }
     detail.style.display = 'none';
@@ -1921,7 +1921,7 @@ function _openDetail(img) {
     _total = Math.max(0, _total - 1);
     _renderGrid();
     _renderStats();
-    if (uiModule) uiModule.showToast('Photo deleted');
+    if (uiModule) uiModule.showToast('Deleted');
   });
 
   // Tag input — Enter saves; also strips a leading '#' from each tag so
@@ -2080,7 +2080,7 @@ export function openGallery() {
       <div class="gallery-tabs">
         <button class="gallery-tab active" data-tab="images">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
-          <span class="gallery-tab-label">Photos</span>
+          <span class="gallery-tab-label">Media</span>
         </button>
         <button class="gallery-tab" data-tab="albums">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>

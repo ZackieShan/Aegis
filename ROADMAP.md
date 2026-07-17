@@ -30,6 +30,11 @@ The local-first foundation is in place:
 - **Two media engines** — stable-diffusion.cpp for speed and **ComfyUI** as a sibling
   engine for what it can't run (GGUF video merges, FLUX.2-klein, Lightning LoRAs), with
   VRAM handed back after every job so both share one GPU.
+- **Maker studios** — the Studio reorganized around explicit makers: a Media library
+  (section filters + delete), an Image Maker with every diffusion control on screen, a
+  Music Maker (composer, a persistent track player, and the Voice Lab with in-place voice
+  cloning), and a Movie Maker that pairs clip generation with the film timeline. Plus the
+  Aegis Amp — a Y2K classic-skinned floating player easter egg (`/winamp`).
 - **One queue, and chat that survives your renders** — every long job (renders, films,
   automations, research) in one list with progress, position, and cancel. And because a
   diffusion model fills the card while llama-swap resolves contention by *evicting*, a chat

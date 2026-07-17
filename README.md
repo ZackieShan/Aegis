@@ -88,22 +88,26 @@ you fit them to your machine:
 - **Repo → Wiki** (`/wiki`) — turn any local repo into a structured Overview / Architecture / module guide.
 
 **Create & converse**
-- **Studio** (`/studio`) — one home for generated media: photos, albums, a **Create** panel
-  (prompt, model, style, duration — with a ✨ button that rewrites rough intent into a
-  diffusion-ready scene using a local model), the image editor, the movie maker, style
-  presets, and the tagged model library. Video renders are stored as MP4.
+- **Studio** (`/studio`) — one home for all your media, organized as explicit makers:
+  a **Media** library (photos, generated images, videos, and music, with section filters,
+  favorites, and one-click delete), an **Image Maker**, a **Music Maker**, a **Movie
+  Maker**, the image editor, albums, style presets, the job queue, and the tagged model
+  library. Every maker keeps all its controls on screen — prompt, model, style, size,
+  steps, seed, negative prompt, duration — with a ✨ button that rewrites rough intent
+  into a diffusion-ready scene using a local model. Video renders are stored as MP4.
 - **Image generation** (`/image`) — fully local diffusion with seeds, steps, and negative prompts.
 - **Video generation** (`/video`) — local clips up to ~10s, with audio on LTX-2 models; **animate
   any Studio still** into a clip (`/video image=last` or the Studio's Animate button). Chat uses
-  your default model; Studio → Create lets you pick per render — Wan 2.2 (with 4-step Lightning
+  your default model; the Movie Maker lets you pick per render — Wan 2.2 (with 4-step Lightning
   LoRAs for clean hands), LTX-2, or HunyuanVideo 1.5.
 - **Stylize any photo** — the Stylize button on a Studio photo opens Create with the photo
   attached: describe the change ("make it a watercolor"), pick a style and an edit model
-  (qwen-image-edit), and the result lands in Photos next to the original. Animate works the
+  (qwen-image-edit), and the result lands in Media next to the original. Animate works the
   same way — prompt, style, model, and clip length before anything renders.
 - **Music generation** (`/song`) — full songs with vocals, locally, on ACE-Step 1.5: style
-  tags + optional lyrics (Studio → Create → Song has the lyrics editor with [Verse]/[Chorus]
-  markers) → an MP3 in the Studio. A 45-second track renders in ~20 seconds on a 4090.
+  tags + optional lyrics (Studio → **Music** is the Music Maker: composer with lyrics editor,
+  a real track player with prev/next/seek that keeps playing while you browse, and the Voice
+  Lab) → an MP3 in the Studio. A 45-second track renders in ~20 seconds on a 4090.
 - **Cover any track** — upload an MP3 (or pick a Studio song) as a reference and ACE-Step
   re-imagines it in a new style, keeping the melody and structure: `/song from=last
   synthwave, retro 80s` or the Song tab's reference picker. New lyrics welcome.
@@ -111,9 +115,10 @@ you fit them to your machine:
   male/female) and a preview button in Settings → Text to Speech; runs faster than realtime
   on CPU so it never competes with renders for the GPU. Voice Mode closes the loop:
   speak → agent acts → the reply is spoken back.
-- **Clone your own voice** — record ~10 seconds in Settings → TTS → My Voices and Aegis
-  speaks as you (or grandma, with permission) via MIT-licensed Chatterbox on the local
-  engine. Cloned voices appear as a "Voice Cloning" provider in the voice picker.
+- **Clone your own voice** — the **Voice Lab** (Studio → Music) records ~10 seconds, names
+  it, and Aegis speaks as you (or grandma, with permission) via MIT-licensed Chatterbox on
+  the local engine — with per-voice Test and "Use this voice" buttons, and automatic
+  routing so a cloned voice works no matter which TTS provider is active.
 - **Movie maker** — stitch your clips into one film: drag to reorder, trim heads and tails,
   render. Clips of different sizes/framerates are matched automatically, and clips without
   audio are padded with silence so a mixed set still concatenates cleanly.
@@ -130,6 +135,9 @@ you fit them to your machine:
 - **Voice** — on-device speech-to-text + text-to-speech, plus a hands-free **Voice Mode**:
   speak, the agent acts, it reads the reply back.
 - **Vision** — a local vision model for images and screenshots.
+- **Y2K easter eggs** — Bonzi Buddy (`/bonzi`) supervises your chats, and the **Aegis Amp**
+  (`/winamp`) is a classic-late-90s-skinned floating player for your Studio songs — green
+  LCD, spectrum bars, beveled buttons. It really whips the llama's ass.
 
 **Stay organized**
 - AI-assisted **Documents**, **Email** (IMAP/SMTP triage + drafts), **Notes / Tasks / Calendar**
@@ -174,12 +182,37 @@ restart; llama-swap hot-reloads the change:
 
 ![The /engine command showing per-model context recommendations](docs/media/engine.png)
 
-**Image generation and Studio.** Generated media lands in the Studio next to your
-own photos (this lighthouse came out of a served Qwen-Image model in 8 steps):
+**The Studio's Media library.** Everything you make or upload in one place — photos,
+generated images, videos, and songs — with section filters, favorites, search, and
+one-click delete (that's the Aegis Amp easter egg in the corner):
 
-![Studio with generated image and video](docs/media/gallery.png)
+![The Studio Media library with photos, songs and videos](docs/media/studio-media.png)
 
 ![Photo detail view](docs/media/image-detail.png)
+
+**The Music Maker.** Compose (style tags + lyrics, or cover a reference track), then
+play everything you've made in a real track player — playback keeps going while you
+browse other tabs:
+
+![The Music Maker with song composer and track player](docs/media/music-maker.png)
+
+**The Voice Lab.** Preview any of the ~30 local voices, or clone your own from a
+10-second recording — Test and "Use this voice" buttons right on each clone:
+
+![The Voice Lab with voice preview and cloning](docs/media/voice-lab.png)
+
+**The Image and Movie Makers.** Every control on screen — model, style, size, steps,
+seed, negative prompt — and the Movie Maker pairs clip generation with the film
+timeline, so you make clips and stitch them in the same tab:
+
+![The Image Maker with all diffusion controls](docs/media/image-maker.png)
+
+![The Movie Maker with clip generation and film assembly](docs/media/movie-maker.png)
+
+**The Aegis Amp.** A love letter to late-90s media players, one `/winamp` away —
+it plays your Studio songs with a green LCD, spectrum bars, and beveled everything:
+
+![The Aegis Amp Y2K player skin over the Studio](docs/media/aegis-amp.png)
 
 **AI image editor.** Masked inpaint, background removal, upscaling, and full-image
 instruction edits, driven by a served edit model (Qwen-Image-Edit):

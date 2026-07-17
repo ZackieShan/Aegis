@@ -9,7 +9,7 @@
  * The full flow without leaving the Studio: describe it (✨ can rewrite rough
  * intent into a diffusion-ready scene), pick model/style/size/steps/seed,
  * generate — images resolve inline, videos and songs hand off to the Queue tab,
- * and everything lands in Photos where the Movie tab can pick it up.
+ * and everything lands in the Media tab where the Movie Maker can pick it up.
  *
  * DOM NOTE: several maker hosts can exist at once (hidden tabs keep their
  * DOM), so every lookup is scoped to the active host via _$() — never
@@ -210,7 +210,7 @@ async function _generate(host, kind) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      _statusIn(host, `Queued on ${d.model} — the edited photo lands in Photos when it finishes.`);
+      _statusIn(host, `Queued on ${d.model} — the edited photo lands in Media when it finishes.`);
       document.querySelector('#gallery-modal .gallery-tab[data-tab="queue"]')?.click();
     } else {
       const size = _$('create-size', host)?.value || '';
@@ -229,7 +229,7 @@ async function _generate(host, kind) {
       });
       if (d.error) { _statusIn(host, d.error, 'movie-status-err'); return; }
       const wrap = _el('span');
-      wrap.appendChild(document.createTextNode('Done — saved to Photos. '));
+      wrap.appendChild(document.createTextNode('Done — saved to Media. '));
       const a = document.createElement('a');
       a.href = d.image_url; a.target = '_blank'; a.textContent = 'Open';
       wrap.appendChild(a);
@@ -268,7 +268,7 @@ const _MAKER_COPY = {
     + 'style, set size / steps / seed / negative prompt, and Generate. The ✨ '
     + 'button rewrites rough ideas into something a diffusion model can draw.'],
   video: ['Clip Maker',
-    'Generate video clips here — they land in Photos and can be stitched into '
+    'Generate video clips here — they land in Media and can be stitched into '
     + 'a film below. Describe the scene and motion, not the task; the ✨ button '
     + 'rewrites rough ideas for you.'],
   audio: ['Song Composer',

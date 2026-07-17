@@ -62,6 +62,10 @@ function _styles() {
     background: var(--accent, var(--red,#b45de0)); color: #fff; font-size: .8rem; line-height: 1; }
   .music-title { flex: 1; min-width: 0; font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .music-meta { font-size: .7rem; opacity: .55; flex-shrink: 0; }
+  .music-del { flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border,#3a2657); color: var(--fg,#cbb8ec);
+    font-size: .72rem; line-height: 1; opacity: .55; }
+  .music-del:hover { opacity: 1; border-color: #e5484d; color: #e5484d; }
   .music-bar { position: sticky; bottom: 0; margin-top: 12px; display: flex; align-items: center; gap: 10px;
     padding: 10px 12px; border: 1px solid var(--border,#3a2657); border-radius: 11px;
     background: var(--panel,#120a1c); box-shadow: 0 -4px 16px rgba(0,0,0,.25); }
@@ -147,6 +151,15 @@ function _wireAudioEvents() {
   });
   _audio.addEventListener('play', _syncUI);
   _audio.addEventListener('pause', _syncUI);
+  // The Aegis Amp easter egg (winamp.js) has prev/next buttons but no track
+  // list of its own — it asks the Studio to jump.
+  window.addEventListener('aegis-amp-jump', (e) => {
+    if (!_tracks.length) return;
+    const dir = (e.detail && e.detail.dir) || 1;
+    if (_current < 0) { _playIndex(dir > 0 ? 0 : _tracks.length - 1); return; }
+    const next = _current + (dir > 0 ? 1 : -1);
+    if (next >= 0 && next < _tracks.length) _playIndex(next);
+  });
 }
 
 async function _renderTracks(section) {
@@ -186,6 +199,29 @@ async function _renderTracks(section) {
     row.appendChild(title);
     const when = (t.created_at || '').slice(0, 10);
     row.appendChild(_el('div', 'music-meta', [t.model, when].filter(Boolean).join(' · ')));
+    const del = _el('button', 'music-del', '✕');
+    del.type = 'button';
+    del.title = 'Delete this track';
+    del.setAttribute('aria-label', 'Delete track');
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!window.confirm(`Delete "${_trackTitle(t)}"? This cannot be undone.`)) return;
+      try {
+        await _json('/api/gallery/' + encodeURIComponent(t.id), { method: 'DELETE' });
+        // If it's the loaded track, stop it — its file is gone.
+        if (window.__studioAudioMeta && window.__studioAudioMeta.id === t.id) {
+          _audio.pause();
+          _audio.removeAttribute('src');
+          window.__studioAudioMeta = null;
+          _current = -1;
+        }
+        window.dispatchEvent(new CustomEvent('gallery-refresh', { detail: { source: 'music-delete' } }));
+        await _renderTracks(section);
+      } catch (err) {
+        window.alert('Delete failed: ' + err.message);
+      }
+    });
+    row.appendChild(del);
     list.appendChild(row);
   });
   section.appendChild(list);
