@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # is CPU work. It belongs in the queue (it's slow, you want to watch it) but it
 # contends for no VRAM, so marking it GPU would strand chat on the 3B for
 # nothing.
-GPU_KINDS = frozenset({"image", "video", "image_edit"})
+GPU_KINDS = frozenset({"image", "video", "image_edit", "audio"})
 
 # Terminal states. Anything else is considered live.
 DONE_STATES = frozenset({"done", "error", "cancelled"})

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class TTSRequest(BaseModel):
     text: str
     format: str = "audio"  # "audio" or "base64"
+    voice: str = ""        # override the saved voice (settings preview)
 
 def setup_tts_routes(tts_service):
     """Setup TTS routes with the provided TTS service"""
@@ -27,6 +28,17 @@ def setup_tts_routes(tts_service):
             logger.error(f"Failed to get TTS stats: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    @router.get("/voices")
+    async def list_voices(provider: str = ""):
+        """Voice catalog for a provider (drives the settings picker). The
+        picker asks for the provider it is ABOUT to switch to, which may not
+        be saved yet — hence the query param over the stored setting."""
+        try:
+            return {"voices": tts_service.list_voices(provider or None)}
+        except Exception as e:
+            logger.error(f"Failed to list TTS voices: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     @router.post("/synthesize")
     async def synthesize_speech(request: TTSRequest):
         """Synthesize speech from text"""
@@ -38,16 +50,16 @@ def setup_tts_routes(tts_service):
                 )
             
             if request.format == "base64":
-                audio_b64 = tts_service.synthesize_to_base64(request.text)
+                audio_b64 = tts_service.synthesize_to_base64(request.text, voice=request.voice)
                 if not audio_b64:
                     raise HTTPException(
                         status_code=500,
                         detail={"message": "Synthesis failed"}
                     )
                 return {"audio": audio_b64}
-            
+
             else:  # audio format
-                audio_data = tts_service.synthesize(request.text)
+                audio_data = tts_service.synthesize(request.text, voice=request.voice)
                 if not audio_data:
                     raise HTTPException(
                         status_code=500,

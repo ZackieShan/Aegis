@@ -939,9 +939,62 @@ async function initTtsSettings() {
   var ttsEnabledToggle = el('set-ttsEnabledToggle');
   var ttsConfigWrap = provSel ? provSel.closest('div[style*="flex-direction"]') : null;
 
+  var previewBtn = el('set-ttsVoicePreview');
+  // The static <option>s in index.html are the OpenAI voice set — keep them
+  // as the endpoint-provider catalog.
+  var OPENAI_VOICE_OPTIONS = Array.prototype.map.call(voiceSelect.options, function(o) {
+    return { id: o.value, label: o.textContent };
+  });
+
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
   function getModel() { return isEndpoint() ? modelSelect.value : modelInput.value; }
-  function getVoice() { return isEndpoint() ? voiceSelect.value : voiceInput.value; }
+  function getVoice() {
+    // Every provider now picks from the select; the free-text input remains
+    // only as an escape hatch when a catalog fails to load.
+    return voiceSelect.style.display !== 'none' ? voiceSelect.value : voiceInput.value;
+  }
+
+  function fillVoiceSelect(list, keep) {
+    voiceSelect.replaceChildren();
+    list.forEach(function(v) {
+      var o = document.createElement('option');
+      o.value = v.id; o.textContent = v.label || v.id;
+      voiceSelect.appendChild(o);
+    });
+    if (keep && Array.prototype.some.call(voiceSelect.options, function(o) { return o.value === keep; })) {
+      voiceSelect.value = keep;
+    }
+  }
+
+  var _kokoroVoices = null;
+  async function loadVoicesFor(prov, keep) {
+    if (prov === 'local') {
+      if (!_kokoroVoices) {
+        try {
+          var r = await fetch('/api/tts/voices?provider=local', { credentials: 'same-origin' });
+          _kokoroVoices = (await r.json()).voices || [];
+        } catch (e) { _kokoroVoices = []; }
+      }
+      if (_kokoroVoices.length) { fillVoiceSelect(_kokoroVoices, keep || 'af_heart'); return true; }
+      return false;
+    }
+    if (prov === 'browser') {
+      var enumerate = function() {
+        var voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+        return voices.map(function(v) { return { id: v.name, label: v.name + ' (' + v.lang + ')' }; });
+      };
+      var list = enumerate();
+      if (!list.length && window.speechSynthesis) {
+        // Chrome loads voices async — retry once they announce themselves.
+        window.speechSynthesis.onvoiceschanged = function() { fillVoiceSelect(enumerate(), keep); };
+      }
+      list.unshift({ id: '', label: 'OS default voice' });
+      fillVoiceSelect(list, keep || '');
+      return true;
+    }
+    fillVoiceSelect(OPENAI_VOICE_OPTIONS, keep || 'alloy');
+    return true;
+  }
 
   function updateVisibility() {
     var prov = provSel.value;
@@ -950,12 +1003,48 @@ async function initTtsSettings() {
     speedRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     if (isEndpoint()) {
       modelSelect.style.display = ''; modelInput.style.display = 'none';
-      voiceSelect.style.display = ''; voiceInput.style.display = 'none';
     } else {
       modelSelect.style.display = 'none'; modelInput.style.display = '';
-      voiceSelect.style.display = 'none'; voiceInput.style.display = prov === 'disabled' ? 'none' : '';
+    }
+    var catalogOk = prov !== 'disabled';
+    voiceSelect.style.display = catalogOk ? '' : 'none';
+    voiceInput.style.display = 'none';
+    if (previewBtn) previewBtn.style.display = catalogOk ? '' : 'none';
+  }
+
+  var _previewAudio = null;
+  async function previewVoice() {
+    if (!previewBtn) return;
+    var sample = 'Hi! This is how I sound reading your chats aloud.';
+    var voice = getVoice();
+    previewBtn.disabled = true;
+    try {
+      if (provSel.value === 'browser') {
+        var u = new SpeechSynthesisUtterance(sample);
+        var match = (window.speechSynthesis.getVoices() || []).find(function(v) { return v.name === voice; });
+        if (match) u.voice = match;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      } else {
+        var r = await fetch('/api/tts/synthesize', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: sample, voice: voice, format: 'audio' }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (_previewAudio) { _previewAudio.pause(); URL.revokeObjectURL(_previewAudio.src); }
+        _previewAudio = new Audio(URL.createObjectURL(await r.blob()));
+        await _previewAudio.play();
+      }
+    } catch (e) {
+      ttsMsg.textContent = 'Preview failed: ' + (e.message || e);
+      ttsMsg.style.color = 'var(--red)';
+      setTimeout(function() { ttsMsg.textContent = ''; }, 4000);
+    } finally {
+      previewBtn.disabled = false;
     }
   }
+  if (previewBtn) previewBtn.addEventListener('click', previewVoice);
 
   var ttsKeywords = ['tts', 'audio'];
   try {
@@ -974,7 +1063,8 @@ async function initTtsSettings() {
     var settings = await settingsRes.json();
     if (settings.tts_provider) provSel.value = settings.tts_provider;
     if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
-    if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
+    await loadVoicesFor(provSel.value, settings.tts_voice || '');
+    if (settings.tts_voice) { voiceInput.value = settings.tts_voice; }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
     if (ttsEnabledToggle) ttsEnabledToggle.checked = settings.tts_enabled !== false;
   } catch (e) { console.warn('Failed to load TTS settings', e); }
@@ -1002,11 +1092,10 @@ async function initTtsSettings() {
     fetch('/api/tts/clear-cache', { method: 'POST', credentials: 'same-origin' }).catch(function(){});
   }
 
-  provSel.addEventListener('change', function() {
+  provSel.addEventListener('change', async function() {
     var prov = provSel.value;
-    if (prov === 'local') voiceInput.value = 'af_heart';
-    else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
-    else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
+    if (isEndpoint()) modelSelect.value = 'tts-1';
+    await loadVoicesFor(prov, prov === 'local' ? 'af_heart' : (isEndpoint() ? 'alloy' : ''));
     updateVisibility();
     saveTTS();
   });

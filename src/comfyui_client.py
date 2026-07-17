@@ -128,6 +128,77 @@ async def start_video_job(
     return job_id
 
 
+async def start_song_job(
+    tags: str,
+    lyrics: str = "",
+    model: str = "comfy-acestep1.5-song",
+    owner: Optional[str] = None,
+    session_id: Optional[str] = None,
+    seconds: float = 60.0,
+    seed: int = -1,
+    bpm: int = 120,
+    language: str = "en",
+) -> str:
+    """Queue an ACE-Step song render and return an Aegis job id (same
+    registry as video/image-edit jobs — /api/video/status polls it, the
+    unified queue shows it, the GPU guard sees it)."""
+    import httpx
+    from src import comfyui_workflows, video_generation
+
+    if seed is None or seed < 0:
+        seed = uuid.uuid4().int % (2**31 - 1)
+    graph = comfyui_workflows.build_audio_graph(
+        model,
+        tags=tags, lyrics=lyrics or "",
+        seconds=float(seconds), seed=int(seed),
+        bpm=int(bpm), language=language or "en",
+    )
+    if graph is None:
+        raise ValueError(f"Unknown ComfyUI audio workflow '{model}'")
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
+        r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
+        if r.status_code != 200:
+            raise ValueError(f"ComfyUI submit failed ({r.status_code}): {r.text[:300]}")
+        envelope = r.json()
+    remote_id = str(envelope.get("prompt_id") or "")
+    if not remote_id:
+        raise ValueError(f"ComfyUI returned no prompt id: {str(envelope)[:200]}")
+
+    job_id = uuid.uuid4().hex[:12]
+    queue_id = job_queue.add(
+        "audio",
+        tags or "song",
+        owner=owner,
+        session_id=session_id,
+        external_id=job_id,
+        meta={"model": model, "engine": "comfyui", "seconds": float(seconds)},
+    )
+    video_generation._JOBS[job_id] = {
+        "id": job_id,
+        "kind": "audio",
+        "queue_id": queue_id,
+        "status": "queued",
+        "prompt": tags,
+        "lyrics": bool(lyrics),
+        "model": model,
+        "owner": owner,
+        "session_id": session_id,
+        "seconds": float(seconds),
+        "created": time.time(),
+        "remote_id": remote_id,
+        "engine": "comfyui",
+        "video_url": None,
+        "image_id": None,
+        "error": None,
+        "progress": None,
+    }
+    video_generation._prune_jobs()
+    asyncio.create_task(_poll_job(job_id, remote_id))
+    logger.info("ComfyUI song job %s queued (%.0fs, lyrics=%s)", job_id, seconds, bool(lyrics))
+    return job_id
+
+
 async def _poll_job(job_id: str, remote_id: str) -> None:
     import httpx
     from src import video_generation
@@ -171,9 +242,12 @@ async def _poll_job(job_id: str, remote_id: str) -> None:
                     job["status"] = "error"
                     await free_vram()
                     return
-                fileinfo = _first_video_output(entry.get("outputs") or {})
+                if job.get("kind") == "audio":
+                    fileinfo = _first_audio_output(entry.get("outputs") or {})
+                else:
+                    fileinfo = _first_video_output(entry.get("outputs") or {})
                 if not fileinfo:
-                    job["error"] = "ComfyUI finished without a video output"
+                    job["error"] = "ComfyUI finished without an output file"
                     job["status"] = "error"
                     await free_vram()
                     return
@@ -292,5 +366,16 @@ def _first_video_output(outputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             for f in out.get(kind, []) or []:
                 fn = str(f.get("filename") or "")
                 if fn.rsplit(".", 1)[-1].lower() in ("mp4", "webm", "mov", "m4v", "avi"):
+                    return f
+    return None
+
+
+def _first_audio_output(outputs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """SaveAudioMP3/SaveAudio report under an "audio" key (not "images")."""
+    for out in outputs.values():
+        for kind in ("audio", "audios"):
+            for f in out.get(kind, []) or []:
+                fn = str(f.get("filename") or "")
+                if fn.rsplit(".", 1)[-1].lower() in ("mp3", "flac", "wav", "ogg", "opus"):
                     return f
     return None

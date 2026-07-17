@@ -7,8 +7,8 @@
  * lands in Photos where the Movie tab can pick it up.
  */
 
-let _kind = 'video';          // 'image' | 'video' — video first: it's the flagship
-let _models = { image: [], video: [] };
+let _kind = 'video';          // 'image' | 'video' | 'audio' — video first: it's the flagship
+let _models = { image: [], video: [], audio: [] };
 let _styles = [];
 let _activeStyle = '';
 let _busy = false;
@@ -25,6 +25,7 @@ const _EDIT_MODEL_RE = /edit|inpaint|fill/i;
 
 function _kindModels() {
   const all = _models[_kind] || [];
+  if (_kind === 'audio') return all;
   if (!_source) {
     // Editing-only models can't generate from scratch — hide them until a
     // source photo is attached.
@@ -51,13 +52,15 @@ async function _json(url, opts) {
 }
 
 async function _loadOptions() {
-  const [img, vid, sty] = await Promise.allSettled([
+  const [img, vid, aud, sty] = await Promise.allSettled([
     _json('/api/image/models'),
     _json('/api/video/models'),
+    _json('/api/audio/models'),
     _json('/api/styles'),
   ]);
   _models.image = img.status === 'fulfilled' ? (img.value.models || []) : [];
   _models.video = vid.status === 'fulfilled' ? (vid.value.models || []) : [];
+  _models.audio = aud.status === 'fulfilled' ? (aud.value.models || []) : [];
   _styles = sty.status === 'fulfilled' ? (sty.value.styles || []) : [];
   _activeStyle = sty.status === 'fulfilled' ? (sty.value.active || '') : '';
 }
@@ -124,7 +127,22 @@ async function _generate(host) {
   if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
 
   try {
-    if (_kind === 'video') {
+    if (_kind === 'audio') {
+      const dur = Number(document.getElementById('create-duration')?.value || 60);
+      const d = await _json('/api/audio/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tags: prompt,
+          lyrics: (document.getElementById('create-lyrics')?.value || '').trim(),
+          seconds: Math.max(10, Math.min(600, isNaN(dur) ? 60 : dur)),
+          seed: body.seed,
+          model: body.model,
+        }),
+      });
+      _status(`Queued on ${d.model} — a ${Math.round(d.seconds)}s ${d.has_lyrics ? 'song' : 'instrumental'} lands in Photos when it finishes.`);
+      document.querySelector('#gallery-modal .gallery-tab[data-tab="queue"]')?.click();
+    } else if (_kind === 'video') {
       const dur = Number(document.getElementById('create-duration')?.value || 5);
       body.duration = Math.max(1, Math.min(16, isNaN(dur) ? 5 : dur));
       if (_source) body.image_id = _source.id;
@@ -206,7 +224,7 @@ function _render(host) {
 
   // Type toggle
   const pills = _el('div', 'create-pills');
-  [['video', 'Video'], ['image', 'Image']].forEach(([k, label]) => {
+  [['video', 'Video'], ['image', 'Image'], ['audio', 'Song']].forEach(([k, label]) => {
     const b = _el('button', 'create-pill' + (k === _kind ? ' active' : ''), label);
     b.type = 'button';
     b.addEventListener('click', () => { _kind = k; _render(host); });
@@ -216,8 +234,8 @@ function _render(host) {
 
   // Source photo (set by the Photos view's Animate/Stylize buttons): the
   // prompt now describes what to DO to this image — motion for video,
-  // an edit instruction for image.
-  if (_source) {
+  // an edit instruction for image. Songs take no source photo.
+  if (_source && _kind !== 'audio') {
     const strip = _el('div', 'create-source');
     const thumb = document.createElement('img');
     thumb.className = 'create-source-thumb';
@@ -242,25 +260,42 @@ function _render(host) {
   ta.id = 'create-prompt';
   ta.className = 'create-prompt';
   ta.rows = 3;
-  ta.placeholder = _source
-    ? (_kind === 'video'
-      ? 'subtle camera push-in, natural motion, cinematic…'
-      : 'turn it into a hand-painted watercolor illustration, soft pastel palette…')
-    : (_kind === 'video'
-      ? 'A lone rider crossing a red-rock desert at dusk, long shadows, slow tracking shot, hand-painted anime style with soft watercolor skies…'
-      : 'A weathered cowboy portrait at golden hour, warm rim light, painterly anime style, shallow depth of field…');
+  ta.placeholder = _kind === 'audio'
+    ? 'dreamy indie pop, female vocals, 100 BPM, warm acoustic guitar, soft drums, nostalgic summer feel…'
+    : _source
+      ? (_kind === 'video'
+        ? 'subtle camera push-in, natural motion, cinematic…'
+        : 'turn it into a hand-painted watercolor illustration, soft pastel palette…')
+      : (_kind === 'video'
+        ? 'A lone rider crossing a red-rock desert at dusk, long shadows, slow tracking shot, hand-painted anime style with soft watercolor skies…'
+        : 'A weathered cowboy portrait at golden hour, warm rim light, painterly anime style, shallow depth of field…');
   ta.value = window.__createPromptDraft || '';
   ta.addEventListener('input', () => { window.__createPromptDraft = ta.value; });
   host.appendChild(ta);
 
-  const enhanceRow = _el('div', 'create-row');
-  const enh = _el('button', 'memory-toolbar-btn', '✨ Enhance prompt');
-  enh.id = 'create-enhance';
-  enh.type = 'button';
-  enh.title = 'Rewrite rough intent into a scene description the model can actually draw (local utility model)';
-  enh.addEventListener('click', _enhance);
-  enhanceRow.appendChild(enh);
-  host.appendChild(enhanceRow);
+  // Song lyrics — optional; empty means instrumental. [Verse]/[Chorus]
+  // section markers steer the structure.
+  if (_kind === 'audio') {
+    const ly = document.createElement('textarea');
+    ly.id = 'create-lyrics';
+    ly.className = 'create-prompt';
+    ly.rows = 5;
+    ly.placeholder = 'Lyrics (optional — leave empty for an instrumental)\n[Verse 1]\n…\n[Chorus]\n…';
+    ly.value = window.__createLyricsDraft || '';
+    ly.addEventListener('input', () => { window.__createLyricsDraft = ly.value; });
+    host.appendChild(ly);
+  }
+
+  if (_kind !== 'audio') {
+    const enhanceRow = _el('div', 'create-row');
+    const enh = _el('button', 'memory-toolbar-btn', '✨ Enhance prompt');
+    enh.id = 'create-enhance';
+    enh.type = 'button';
+    enh.title = 'Rewrite rough intent into a scene description the model can actually draw (local utility model)';
+    enh.addEventListener('click', _enhance);
+    enhanceRow.appendChild(enh);
+    host.appendChild(enhanceRow);
+  }
 
   // Options grid
   const grid = _el('div', 'create-grid');
@@ -276,28 +311,38 @@ function _render(host) {
   modelSel.className = 'settings-select';
   opt('Model', modelSel);
 
-  const styleSel = document.createElement('select');
-  styleSel.id = 'create-style';
-  styleSel.className = 'settings-select';
-  const oDefault = document.createElement('option');
-  oDefault.value = '';
-  oDefault.textContent = _activeStyle ? `Active style (${_activeStyle})` : 'No style';
-  styleSel.appendChild(oDefault);
-  if (_activeStyle) {
-    const oNone = document.createElement('option');
-    oNone.value = 'none';
-    oNone.textContent = 'No style';
-    styleSel.appendChild(oNone);
+  if (_kind !== 'audio') {
+    const styleSel = document.createElement('select');
+    styleSel.id = 'create-style';
+    styleSel.className = 'settings-select';
+    const oDefault = document.createElement('option');
+    oDefault.value = '';
+    oDefault.textContent = _activeStyle ? `Active style (${_activeStyle})` : 'No style';
+    styleSel.appendChild(oDefault);
+    if (_activeStyle) {
+      const oNone = document.createElement('option');
+      oNone.value = 'none';
+      oNone.textContent = 'No style';
+      styleSel.appendChild(oNone);
+    }
+    _styles.forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.name;
+      o.textContent = s.name;
+      styleSel.appendChild(o);
+    });
+    opt('Style', styleSel);
   }
-  _styles.forEach(s => {
-    const o = document.createElement('option');
-    o.value = s.name;
-    o.textContent = s.name;
-    styleSel.appendChild(o);
-  });
-  opt('Style', styleSel);
 
-  if (_kind === 'video') {
+  if (_kind === 'audio') {
+    const dur = document.createElement('input');
+    dur.type = 'number';
+    dur.id = 'create-duration';
+    dur.className = 'media-input';
+    dur.min = '10'; dur.max = '600'; dur.step = '5'; dur.value = '60';
+    dur.title = 'Song length in seconds — ACE-Step writes full structure (intro/verse/chorus) into whatever you give it.';
+    opt('Seconds', dur);
+  } else if (_kind === 'video') {
     const dur = document.createElement('input');
     dur.type = 'number';
     dur.id = 'create-duration';

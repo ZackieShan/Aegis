@@ -13,6 +13,46 @@ from src.constants import TTS_CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
+# Kokoro-82M v1.0 voice catalog (hexgrad/Kokoro-82M voices/). Prefix encodes
+# G2P language + gender: a=American b=British, f=female m=male. Grades from
+# the model card — the top of each group sounds best.
+KOKORO_VOICES = [
+    {"id": "af_heart",    "label": "Heart — American female (best)"},
+    {"id": "af_bella",    "label": "Bella — American female"},
+    {"id": "af_nicole",   "label": "Nicole — American female (whisper)"},
+    {"id": "af_aoede",    "label": "Aoede — American female"},
+    {"id": "af_kore",     "label": "Kore — American female"},
+    {"id": "af_sarah",    "label": "Sarah — American female"},
+    {"id": "af_nova",     "label": "Nova — American female"},
+    {"id": "af_alloy",    "label": "Alloy — American female"},
+    {"id": "af_sky",      "label": "Sky — American female"},
+    {"id": "af_jessica",  "label": "Jessica — American female"},
+    {"id": "af_river",    "label": "River — American female"},
+    {"id": "am_michael",  "label": "Michael — American male"},
+    {"id": "am_fenrir",   "label": "Fenrir — American male"},
+    {"id": "am_puck",     "label": "Puck — American male"},
+    {"id": "am_echo",     "label": "Echo — American male"},
+    {"id": "am_eric",     "label": "Eric — American male"},
+    {"id": "am_liam",     "label": "Liam — American male"},
+    {"id": "am_onyx",     "label": "Onyx — American male"},
+    {"id": "am_adam",     "label": "Adam — American male"},
+    {"id": "am_santa",    "label": "Santa — American male (ho ho)"},
+    {"id": "bf_emma",     "label": "Emma — British female"},
+    {"id": "bf_isabella", "label": "Isabella — British female"},
+    {"id": "bf_alice",    "label": "Alice — British female"},
+    {"id": "bf_lily",     "label": "Lily — British female"},
+    {"id": "bm_george",   "label": "George — British male"},
+    {"id": "bm_fable",    "label": "Fable — British male"},
+    {"id": "bm_lewis",    "label": "Lewis — British male"},
+    {"id": "bm_daniel",   "label": "Daniel — British male"},
+]
+
+# The OpenAI-compatible /audio/speech voice set (endpoint provider).
+OPENAI_VOICES = [
+    {"id": v, "label": v} for v in
+    ("alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer")
+]
+
 
 def _safe_speed(value, default: float = 1.0) -> float:
     """Parse the stored tts_speed defensively. The settings layer tolerates
@@ -143,13 +183,15 @@ class TTSService:
 
     # ── Public interface ──
 
-    def synthesize(self, text: str, use_cache: bool = True) -> Optional[bytes]:
+    def synthesize(self, text: str, use_cache: bool = True, voice: Optional[str] = None) -> Optional[bytes]:
         settings = self._load_settings()
         if settings.get("tts_enabled") is False:
             return None
         provider = settings["tts_provider"]
         model = settings["tts_model"]
-        voice = settings["tts_voice"]
+        # Explicit voice (the settings picker's preview button) wins over the
+        # saved setting.
+        voice = (voice or "").strip() or settings["tts_voice"]
         speed = _safe_speed(settings.get("tts_speed", "1"))
 
         if provider in ("disabled", "browser"):
@@ -187,12 +229,21 @@ class TTSService:
 
         return audio_data
 
-    def synthesize_to_base64(self, text: str) -> Optional[str]:
+    def synthesize_to_base64(self, text: str, voice: Optional[str] = None) -> Optional[str]:
         import base64
-        audio = self.synthesize(text)
+        audio = self.synthesize(text, voice=voice)
         if audio:
             return base64.b64encode(audio).decode("utf-8")
         return None
+
+    def list_voices(self, provider: Optional[str] = None) -> list:
+        """Voice catalog for a provider (default: the active one)."""
+        provider = provider or self._load_settings()["tts_provider"]
+        if provider == "local":
+            return KOKORO_VOICES
+        if provider.startswith("endpoint:"):
+            return OPENAI_VOICES
+        return []  # browser voices enumerate client-side; disabled has none
 
     def set_voice(self, voice: str):
         """Legacy no-op — voice is now managed via admin settings."""
@@ -229,46 +280,68 @@ class TTSService:
 
 
 class _KokoroPipeline:
-    """Encapsulates the Kokoro-82M local GPU pipeline."""
+    """Encapsulates the Kokoro-82M local pipeline (GPU when available, else
+    CPU — 82M params synthesizes faster than realtime on CPU, and CPU keeps
+    the GPU free for image/video renders; speech is bursty and tiny)."""
 
     def __init__(self):
-        self.pipeline = None
+        self.pipeline = None       # the American-English pipeline (default)
+        self._pipes = {}           # lang code -> KPipeline ('a'=US, 'b'=UK)
         self.available = False
         self.device = None
         self._init()
 
+    def _make_pipe(self, lang_code: str):
+        import torch
+        from kokoro import KPipeline
+
+        if self.device.type == "cuda":
+            with torch.cuda.device(0):
+                pipe = KPipeline(lang_code=lang_code)
+                if hasattr(pipe, "model"):
+                    pipe.model = pipe.model.to(self.device)
+        else:
+            pipe = KPipeline(lang_code=lang_code)
+        return pipe
+
     def _init(self):
         try:
             import torch
-            from kokoro import KPipeline
 
-            if not torch.cuda.is_available():
-                logger.warning("CUDA not available for Kokoro TTS")
-                return
-
-            self.device = torch.device("cuda:0")
-            with torch.cuda.device(0):
-                self.pipeline = KPipeline(lang_code="a")
-                if hasattr(self.pipeline, "model"):
-                    self.pipeline.model = self.pipeline.model.to(self.device)
+            self.device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+            self.pipeline = self._make_pipe("a")
+            self._pipes["a"] = self.pipeline
             self.available = True
-            logger.info("Kokoro-82M TTS pipeline loaded")
+            logger.info(f"Kokoro-82M TTS pipeline loaded ({'GPU' if self.device.type == 'cuda' else 'CPU'})")
         except ImportError as e:
             logger.warning(f"Kokoro TTS not available: {e}")
             logger.warning("Install with: pip install kokoro soundfile")
         except Exception as e:
             logger.error(f"Kokoro init failed: {e}", exc_info=True)
 
+    def _pipe_for(self, voice: str):
+        """British voices (bf_*/bm_*) need the 'b' G2P pipeline or they read
+        with American phonemes; anything else uses the default American one."""
+        lang = "b" if str(voice or "").lower().startswith(("bf_", "bm_")) else "a"
+        pipe = self._pipes.get(lang)
+        if pipe is None:
+            pipe = self._make_pipe(lang)
+            self._pipes[lang] = pipe
+        return pipe
+
     def synthesize_raw(self, text: str, voice: str = "af_heart") -> Optional[bytes]:
         if not self.available:
             return None
         try:
+            import contextlib
             import torch
             import numpy as np
 
-            with torch.cuda.device(self.device):
+            pipeline = self._pipe_for(voice)
+            ctx = torch.cuda.device(self.device) if self.device.type == "cuda" else contextlib.nullcontext()
+            with ctx:
                 chunks = []
-                for _, _, audio in self.pipeline(text, voice=voice):
+                for _, _, audio in pipeline(text, voice=voice):
                     chunks.append(audio)
 
             if not chunks:

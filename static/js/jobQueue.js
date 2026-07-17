@@ -13,6 +13,7 @@ const KIND_LABEL = {
   video: 'Video',
   image: 'Image',
   image_edit: 'Edit',
+  audio: 'Song',
   movie: 'Film',
   recipe: 'Automation',
   research: 'Research',

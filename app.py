@@ -531,6 +531,8 @@ async def serve_generated_image(filename: str, request: Request):
         "webp": "image/webp", "gif": "image/gif",
         "mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
         "mkv": "video/x-matroska", "m4v": "video/mp4",
+        "mp3": "audio/mpeg", "flac": "audio/flac", "wav": "audio/wav",
+        "ogg": "audio/ogg", "opus": "audio/opus",
     }.get(ext, "application/octet-stream")
     # Generated-image filenames are content hashes → the bytes for a given
     # filename never change. Cache them hard so the gallery doesn't
@@ -837,6 +839,9 @@ logger.info("Control Center routes initialized")
 # Video generation — async jobs on a served Wan/LTX model (sd-server vid_gen)
 from routes.video_routes import setup_video_routes
 app.include_router(setup_video_routes())
+
+from routes.audio_routes import setup_audio_routes
+app.include_router(setup_audio_routes())
 
 # Movie maker (stitch clips into one film) + the unified job queue.
 from routes.movie_routes import setup_movie_routes

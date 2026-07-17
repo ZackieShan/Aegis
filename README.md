@@ -101,6 +101,13 @@ you fit them to your machine:
   attached: describe the change ("make it a watercolor"), pick a style and an edit model
   (qwen-image-edit), and the result lands in Photos next to the original. Animate works the
   same way — prompt, style, model, and clip length before anything renders.
+- **Music generation** (`/song`) — full songs with vocals, locally, on ACE-Step 1.5: style
+  tags + optional lyrics (Studio → Create → Song has the lyrics editor with [Verse]/[Chorus]
+  markers) → an MP3 in the Studio. A 45-second track renders in ~20 seconds on a 4090.
+- **Read replies aloud** — local Kokoro TTS with ~30 named voices (American/British,
+  male/female) and a preview button in Settings → Text to Speech; runs faster than realtime
+  on CPU so it never competes with renders for the GPU. Voice Mode closes the loop:
+  speak → agent acts → the reply is spoken back.
 - **Movie maker** — stitch your clips into one film: drag to reorder, trim heads and tails,
   render. Clips of different sizes/framerates are matched automatically, and clips without
   audio are padded with silence so a mixed set still concatenates cleanly.

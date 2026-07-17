@@ -12,6 +12,14 @@
 # GPU-accelerated transcription — it's auto-detected, CPU is used otherwise.
 faster-whisper
 
+# Local text-to-speech (chat read-aloud, voice mode replies) via Kokoro-82M,
+# for the "local" TTS provider — ~30 named voices, Settings → Text to Speech
+# has the picker with previews. Faster than realtime on CPU (torch CPU build
+# is fine); uses CUDA automatically when torch sees a GPU. Pulls spacy/misaki
+# for G2P; the 330MB model downloads from HF on first synthesis.
+kokoro
+soundfile
+
 # NOTE: PyMuPDF moved to core requirements.txt — it powers the PDF viewer and
 # form-filling, and since Aegis is AGPL-3.0 the AGPL license of PyMuPDF is a
 # non-issue for this project. Kept out of here to avoid a duplicate install.

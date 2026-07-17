@@ -473,6 +473,9 @@ def finish_job_bytes(job: Dict[str, Any], raw: bytes, ext: str) -> None:
     if job.get("kind") == "image":
         if ext not in ("png", "jpg", "jpeg", "webp"):
             ext = "png"
+    elif job.get("kind") == "audio":
+        if ext not in ("mp3", "flac", "wav", "ogg", "opus"):
+            ext = "mp3"
     elif ext not in ("webm", "mp4", "avi", "webp"):
         ext = "webm"
 
@@ -497,14 +500,19 @@ def finish_job_bytes(job: Dict[str, Any], raw: bytes, ext: str) -> None:
         from core.database import SessionLocal, GalleryImage
         image_id = str(uuid.uuid4())
         db = SessionLocal()
-        quality = ("edit" if job.get("kind") == "image"
-                   else f"{job.get('video_frames')}f@{job.get('fps')}fps")
+        kind = job.get("kind") or "video"
+        if kind == "image":
+            quality, size = "edit", f"{job.get('width')}x{job.get('height')}"
+        elif kind == "audio":
+            quality, size = "song", f"{round(job.get('seconds') or 0)}s"
+        else:
+            quality, size = f"{job.get('video_frames')}f@{job.get('fps')}fps", f"{job.get('width')}x{job.get('height')}"
         db.add(GalleryImage(
             id=image_id,
             filename=filename,
             prompt=job.get("prompt"),
             model=job.get("model"),
-            size=f"{job.get('width')}x{job.get('height')}",
+            size=size,
             quality=quality,
             session_id=job.get("session_id"),
             owner=job.get("owner"),

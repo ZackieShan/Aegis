@@ -262,13 +262,20 @@ function _isMediaFile(f) {
   // Some Linux file managers and older browsers leave .type blank; fall
   // back to the extension.
   const ext = (f?.name || '').toLowerCase().split('.').pop() || '';
-  return ['png','jpg','jpeg','webp','gif','mp4','mov','webm','mkv','m4v'].includes(ext);
+  return ['png','jpg','jpeg','webp','gif','mp4','mov','webm','mkv','m4v','mp3','flac','wav','ogg','opus'].includes(ext);
 }
 
 // True if a URL/filename refers to a video — used to pick <video> vs <img>.
 function _isVideoUrl(url) {
   const ext = (url || '').toLowerCase().split('?')[0].split('.').pop();
   return ['mp4','mov','webm','mkv','m4v'].includes(ext);
+}
+
+// True for generated songs / audio clips — they get a music-note tile in the
+// grid and an <audio> player in the detail view.
+function _isAudioUrl(url) {
+  const ext = (url || '').toLowerCase().split('?')[0].split('.').pop();
+  return ['mp3','flac','wav','ogg','opus'].includes(ext);
 }
 
 // Recursively walk a webkit FileSystemEntry, returning all media Files under it.
@@ -1268,7 +1275,11 @@ function _renderGrid() {
              <span class="gallery-card-play" aria-hidden="true">
                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
              </span>`
-          : `<img src="${_esc(img.url)}" alt="${_esc(img.prompt)}" loading="lazy" />`}
+          : _isAudioUrl(img.url)
+            ? `<div class="gallery-card-audio" aria-hidden="true">
+                 <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+               </div>`
+            : `<img src="${_esc(img.url)}" alt="${_esc(img.prompt)}" loading="lazy" />`}
         <div class="gallery-card-info">
           <div class="gallery-card-prompt">${_esc(promptPreview)}</div>
           <div class="gallery-card-meta">
@@ -1422,7 +1433,7 @@ function _openDetail(img) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         Edit
       </button>
-      ${_isVideoUrl(img.url) ? '' : `<button class="gallery-detail-back" id="gallery-stylize-btn" title="Stylize — reimagine this photo with an AI edit (prompt, style and model in Create)" aria-label="Stylize photo" style="display:inline-flex;align-items:center;gap:4px;">
+      ${(_isVideoUrl(img.url) || _isAudioUrl(img.url)) ? '' : `<button class="gallery-detail-back" id="gallery-stylize-btn" title="Stylize — reimagine this photo with an AI edit (prompt, style and model in Create)" aria-label="Stylize photo" style="display:inline-flex;align-items:center;gap:4px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2m0 20v-2m7-7h-2M4 15H2m3.343-8.657L3.929 4.929m14.142 14.142-1.414-1.414M19.071 4.929l-1.414 1.414M6.343 17.657l-1.414 1.414"/><path d="m9 15 6-6 3 3-6 6-3.5.5z"/></svg>
         Stylize
       </button>
@@ -1479,7 +1490,12 @@ function _openDetail(img) {
         <div class="gallery-detail-img-frame">
           ${_isVideoUrl(img.url)
             ? `<video id="gallery-detail-img" src="${_esc(img.url)}" controls preload="metadata" playsinline></video>`
-            : `<img id="gallery-detail-img" src="${_esc(img.url)}" alt="${_esc(img.prompt)}" />`}
+            : _isAudioUrl(img.url)
+              ? `<div class="gallery-detail-audio">
+                   <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                   <audio id="gallery-detail-img" src="${_esc(img.url)}" controls preload="metadata" style="width:100%;max-width:480px;"></audio>
+                 </div>`
+              : `<img id="gallery-detail-img" src="${_esc(img.url)}" alt="${_esc(img.prompt)}" />`}
           <div id="gallery-detail-face-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></div>
         </div>
         <button class="gallery-detail-nav gallery-detail-nav-next" id="gallery-detail-next" title="Next (→)" aria-label="Next">

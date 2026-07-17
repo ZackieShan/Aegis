@@ -1846,6 +1846,106 @@ async function _cmdEngine(args) {
 //   /video <prompt>              generate (auto-picks a served video model)
 //   /video model=<id> <prompt>   pick the model; also frames=/fps=/size=WxH/seed=
 //   /video models                list served video models
+async function _cmdSong(args) {
+  const sub = (args[0] || '').toLowerCase();
+  if (!args.length || sub === 'help') {
+    slashReplyMd([
+      '**Local music generation** — ACE-Step 1.5 on the ComfyUI engine.',
+      '',
+      '`/song <style tags>` — generate an instrumental (genre, mood, tempo, instruments)',
+      '`/song length=90 <tags>` — song length in seconds (default 60)',
+      '`/song seed=42 bpm=100 <tags>` — reproducible take / tempo hint',
+      '',
+      'Example: `/song length=90 dreamy indie pop, female vocals, warm acoustic guitar`.',
+      'For **lyrics** (verses/chorus need line breaks) use Studio → Create → Song.',
+      'Finished songs land in the Studio next to your photos and clips.',
+    ].join('\n'));
+    return true;
+  }
+
+  const opts = {};
+  const rest = [];
+  for (const a of args) {
+    const m = /^(length|seconds|duration|seed|bpm)=(.+)$/i.exec(a);
+    if (m && !rest.length) opts[m[1].toLowerCase()] = m[2]; else rest.push(a);
+  }
+  const tags = rest.join(' ').trim();
+  if (!tags) { slashReplyMd('Usage: `/song <style tags>` — e.g. `/song lofi hip hop, mellow, rainy night, 80 BPM`'); return true; }
+
+  const payload = { tags };
+  const lengthOpt = opts.length || opts.seconds || opts.duration;
+  if (lengthOpt) payload.seconds = parseFloat(lengthOpt); // "90s" parses as 90
+  if (opts.seed) payload.seed = parseInt(opts.seed, 10);
+  if (opts.bpm) payload.bpm = parseInt(opts.bpm, 10);
+
+  let jobId, model, seconds;
+  try {
+    const r = await fetch('/api/audio/generate', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { slashReplyMd('✗ ' + (d.detail || d.error || `Song start failed (${r.status})`)); return true; }
+    jobId = d.job_id; model = d.model; seconds = d.seconds;
+  } catch (e) { slashReplyMd('Song start failed: ' + e.message); return true; }
+
+  const rep = slashReplyMd(`🎵 Writing a ${Math.round(seconds)}s track with \`${model}\` — it lands here and in the Studio.`);
+  const status = document.createElement('div');
+  status.className = 'generated-image-caption';
+  status.textContent = 'Queued…';
+  rep.body.appendChild(status);
+
+  const t0 = Date.now();
+  let pollFails = 0;
+  const timer = setInterval(async () => {
+    if (!document.contains(rep.el)) { clearInterval(timer); return; }
+    const elapsedS = Math.round((Date.now() - t0) / 1000);
+    if (elapsedS > 20 * 60) {
+      clearInterval(timer);
+      status.textContent = '✗ Gave up waiting after 20 minutes — check the Studio later or the engine logs.';
+      return;
+    }
+    let d;
+    try {
+      const r = await fetch(`/api/video/status/${jobId}`, { credentials: 'same-origin' });
+      d = await r.json();
+      if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+      pollFails = 0;
+    } catch (e) {
+      pollFails += 1;
+      if (pollFails < 4) { status.textContent = `Still composing… (status check failed, retrying ${pollFails}/3)`; return; }
+      clearInterval(timer);
+      status.textContent = '✗ Lost track of the job: ' + e.message + ' — if it finishes anyway, the song appears in the Studio.';
+      return;
+    }
+    if (d.status === 'done' && d.video_url) {
+      clearInterval(timer);
+      status.remove();
+      const aud = document.createElement('audio');
+      aud.controls = true;
+      aud.preload = 'metadata';
+      aud.src = d.video_url;
+      aud.style.width = '100%';
+      rep.body.appendChild(aud);
+      const cap = document.createElement('div');
+      cap.className = 'generated-image-caption';
+      cap.textContent = tags + ' — saved to Studio';
+      rep.body.appendChild(cap);
+      uiModule.scrollHistory();
+      _persistMsg('assistant', `🎵 Song ready: ${d.video_url} — "${tags}" (saved to Studio)`, { source: 'slash' });
+    } else if (d.status === 'error' || d.status === 'canceled') {
+      clearInterval(timer);
+      status.textContent = '✗ ' + (d.error || 'Song generation failed');
+      _persistMsg('assistant', `Song generation failed: ${d.error || 'unknown error'}`, { source: 'slash' });
+    } else {
+      const mm = String(Math.floor(elapsedS / 60));
+      const ss = String(elapsedS % 60).padStart(2, '0');
+      status.textContent = `${d.status === 'running' ? 'Composing' : 'Queued'}… ${mm}:${ss}`;
+    }
+  }, 4000);
+  return true;
+}
+
 async function _cmdVideo(args) {
   const sub = (args[0] || '').toLowerCase();
   if (!args.length || sub === 'help') {
@@ -6959,6 +7059,13 @@ const COMMANDS = {
     help: 'Generate video locally on a served Wan/LTX model: /video length=5s <prompt>, /video models',
     handler: (args) => _cmdVideo(args),
     usage: '/video <prompt>'
+  },
+  song: {
+    alias: ['music', 'songgen'],
+    category: 'Tools',
+    help: 'Generate music locally with ACE-Step: /song length=90 <style tags> (lyrics: Studio → Create → Song)',
+    handler: (args) => _cmdSong(args),
+    usage: '/song <style tags>'
   },
   image: {
     alias: ['img', 'imagine'],

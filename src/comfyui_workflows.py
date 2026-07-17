@@ -274,6 +274,93 @@ def hunyuanvideo15_t2v_graph(
     }
 
 
+def acestep15_song_graph(
+    tags: str,
+    lyrics: str = "",
+    seconds: float = 60.0,
+    seed: int = 0,
+    bpm: int = 120,
+    language: str = "en",
+) -> Dict[str, Any]:
+    """ACE-Step 1.5 XL turbo text-to-song (music + vocals when lyrics are
+    given), per the bundled audio_ace_step1_5_xl_turbo template: 8-step euler
+    at cfg 1 with AuraFlow shift 3, negative from ConditioningZeroOut, MP3
+    out. `tags` is the style line ("dreamy indie pop, female vocals, 90 BPM");
+    empty `lyrics` yields an instrumental. The encoder's duration must match
+    the latent seconds or the structure planner writes past the clip."""
+    seconds = max(5.0, min(600.0, float(seconds)))
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {
+            "unet_name": "audio\\acestep_v1.5_xl_turbo_bf16.safetensors",
+            "weight_dtype": "default",
+        }},
+        "2": {"class_type": "VAELoader", "inputs": {"vae_name": "audio\\ace_1.5_vae.safetensors"}},
+        "3": {"class_type": "DualCLIPLoader", "inputs": {
+            "clip_name1": "audio\\qwen_0.6b_ace15.safetensors",
+            "clip_name2": "audio\\qwen_4b_ace15.safetensors",
+            "type": "ace",
+        }},
+        "4": {"class_type": "TextEncodeAceStepAudio1.5", "inputs": {
+            "clip": ["3", 0],
+            "tags": tags,
+            "lyrics": lyrics or "",
+            "seed": seed,
+            "bpm": int(bpm),
+            "duration": seconds,
+            "timesignature": "4",
+            "language": language or "en",
+            "keyscale": "C major",
+            "generate_audio_codes": True,
+            "cfg_scale": 2.0,
+            "temperature": 0.85,
+            "top_p": 0.9,
+            "top_k": 0,
+            "min_p": 0.0,
+        }},
+        "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
+        "6": {"class_type": "EmptyAceStep1.5LatentAudio",
+              "inputs": {"seconds": seconds, "batch_size": 1}},
+        "7": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 3}},
+        "8": {"class_type": "KSampler", "inputs": {
+            "model": ["7", 0], "positive": ["4", 0], "negative": ["5", 0],
+            "latent_image": ["6", 0],
+            "seed": seed, "steps": 8, "cfg": 1,
+            "sampler_name": "euler", "scheduler": "simple", "denoise": 1,
+        }},
+        "9": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["8", 0], "vae": ["2", 0]}},
+        "10": {"class_type": "SaveAudioMP3", "inputs": {
+            "audio": ["9", 0], "filename_prefix": "aegis/song", "quality": "V0",
+        }},
+    }
+
+
+# Aegis-facing ComfyUI music catalog — same file-gated pattern as video.
+COMFY_AUDIO_MODELS: Dict[str, Dict[str, Any]] = {
+    "comfy-acestep1.5-song": {
+        "builder": acestep15_song_graph,
+        "label": "ACE-Step 1.5 XL turbo (song / music)",
+        "required_files": [
+            "audio/acestep_v1.5_xl_turbo_bf16.safetensors",
+            "audio/qwen_0.6b_ace15.safetensors",
+            "audio/qwen_4b_ace15.safetensors",
+            "audio/ace_1.5_vae.safetensors",
+        ],
+    },
+}
+
+
+def available_audio_models() -> List[str]:
+    """Comfy audio model ids whose required files all exist on disk."""
+    return _available(COMFY_AUDIO_MODELS)
+
+
+def build_audio_graph(model_id: str, **params) -> Optional[Dict[str, Any]]:
+    spec = COMFY_AUDIO_MODELS.get(model_id)
+    if not spec:
+        return None
+    return spec["builder"](**params)
+
+
 _LTX2_COMPANIONS = [
     "video/gemma_3_12B_it_fp4_mixed.safetensors",
     "video/ltx-2-19b-embeddings_connector_distill_bf16.safetensors",
