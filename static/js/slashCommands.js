@@ -1859,7 +1859,7 @@ async function _cmdSong(args) {
       '',
       'Example: `/song length=90 dreamy indie pop, female vocals, warm acoustic guitar`.',
       'For **lyrics** (verses/chorus need line breaks) or uploading a track to cover,',
-      'use Studio → Create → Song. Finished songs land in the Studio.',
+      'use Studio → Music (the Music Maker has the lyrics editor and player). Finished songs land there.',
     ].join('\n'));
     return true;
   }
@@ -7066,7 +7066,7 @@ const COMMANDS = {
   song: {
     alias: ['music', 'songgen'],
     category: 'Tools',
-    help: 'Generate music locally with ACE-Step: /song length=90 <style tags> (lyrics: Studio → Create → Song)',
+    help: 'Generate music locally with ACE-Step: /song length=90 <style tags> (lyrics + player: Studio → Music)',
     handler: (args) => _cmdSong(args),
     usage: '/song <style tags>'
   },

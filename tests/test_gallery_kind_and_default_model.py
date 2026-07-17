@@ -21,11 +21,13 @@ from routes.gallery.gallery_routes import (
 def _kind_predicates(GalleryImage):
     """The exact predicates the library route's `kind` filter uses."""
     from sqlalchemy import and_, or_
+    from routes.gallery.gallery_routes import AUDIO_EXTS
     vid = or_(*[GalleryImage.filename.ilike(f"%.{e}") for e in sorted(VIDEO_EXTS)])
+    aud = or_(*[GalleryImage.filename.ilike(f"%.{e}") for e in sorted(AUDIO_EXTS)])
     upload = or_(GalleryImage.model == None,  # noqa: E711
                  GalleryImage.model == "",
                  GalleryImage.model.in_(UPLOAD_MODEL_SENTINELS))
-    return vid, upload
+    return vid, aud, upload
 
 
 class _Ep:
@@ -85,22 +87,26 @@ def test_kind_predicates_partition_gallery():
             _mk(db, GalleryImage, f"{marker}-d.mp4", "imported"),        # uploaded video
             _mk(db, GalleryImage, f"{marker}-e.png", "chat-upload"),     # chat attachment
             _mk(db, GalleryImage, f"{marker}-f.png", None),              # legacy row
+            _mk(db, GalleryImage, f"{marker}-g.mp3", "ace-step-1.5"),    # generated song
         ]
         db.commit()
 
         base = db.query(GalleryImage).filter(GalleryImage.filename.like(f"{marker}%"))
-        vid, upload = _kind_predicates(GalleryImage)
+        vid, aud, upload = _kind_predicates(GalleryImage)
 
         videos = {r.filename for r in base.filter(vid)}
-        generated = {r.filename for r in base.filter(and_(~upload, ~vid))}
-        photos = {r.filename for r in base.filter(and_(upload, ~vid))}
+        music = {r.filename for r in base.filter(aud)}
+        generated = {r.filename for r in base.filter(and_(~upload, ~vid, ~aud))}
+        photos = {r.filename for r in base.filter(and_(upload, ~vid, ~aud))}
 
         assert videos == {f"{marker}-b.webm", f"{marker}-d.mp4"}
+        assert music == {f"{marker}-g.mp3"}
         assert generated == {f"{marker}-a.png"}
         assert photos == {f"{marker}-c.jpg", f"{marker}-e.png", f"{marker}-f.png"}
         # exact partition: disjoint and complete
-        assert videos | generated | photos == {r.filename for r in rows}
+        assert videos | music | generated | photos == {r.filename for r in rows}
         assert not (videos & generated) and not (videos & photos) and not (generated & photos)
+        assert not (music & videos) and not (music & generated) and not (music & photos)
     finally:
         try:
             db.query(GalleryImage).filter(GalleryImage.filename.like(f"{marker}%")).delete(

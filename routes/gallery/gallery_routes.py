@@ -134,8 +134,9 @@ _IMAGE_MODEL_ID_RE = re.compile(
 _EDIT_MODEL_ID_RE = re.compile(r"inpaint|edit|fill", re.I)
 
 # Media types the gallery stores. Shared by the upload validator and the
-# library `kind` filter (Photos / Generated / Videos sections).
+# library `kind` filter (Photos / Generated / Videos / Music sections).
 VIDEO_EXTS = {"mp4", "mov", "webm", "mkv", "m4v"}
+AUDIO_EXTS = {"mp3", "wav", "flac", "ogg", "opus", "m4a"}
 IMAGE_EXTS = {"png", "jpg", "jpeg", "webp", "gif"}
 
 # `model` values that mean "this row is a user upload, not AI-generated".
@@ -299,17 +300,18 @@ def setup_gallery_routes() -> APIRouter:
             img_dir.mkdir(parents=True, exist_ok=True)
 
             ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
-            if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS:
+            if ext not in VIDEO_EXTS and ext not in IMAGE_EXTS and ext not in AUDIO_EXTS:
                 raise HTTPException(400, f"Unsupported file type: .{ext}")
             is_video = ext in VIDEO_EXTS
+            is_audio = ext in AUDIO_EXTS
             filename = f"{uuid.uuid4().hex[:12]}.{ext}"
             img_path = img_dir / filename
             img_path.write_bytes(content)
 
-            # Extract EXIF for images only — PIL can't parse video containers
-            # and the failure path logs a noisy WARNING. We'll add ffprobe-based
-            # video metadata extraction in a follow-up.
-            exif = {} if is_video else _extract_exif(content)
+            # Extract EXIF for images only — PIL can't parse video/audio
+            # containers and the failure path logs a noisy WARNING. We'll add
+            # ffprobe-based media metadata extraction in a follow-up.
+            exif = {} if (is_video or is_audio) else _extract_exif(content)
             original_name = file.filename.rsplit(".", 1)[0] if "." in file.filename else file.filename
 
             img_id = str(uuid.uuid4())
@@ -727,22 +729,26 @@ def setup_gallery_routes() -> APIRouter:
             if model:
                 q = q.filter(GalleryImage.model == model)
 
-            # Kind filter — the gallery's Photos / Generated / Videos sections.
-            # Videos = video file extension (generated or uploaded); Generated =
-            # a real AI model id is recorded; Photos = uploads (NULL/'' legacy
-            # rows plus the sentinel values the upload handlers stamp).
-            if kind in ("photos", "generated", "videos"):
+            # Kind filter — the gallery's Photos / Generated / Videos / Music
+            # sections. Videos/Music go by file extension (generated or
+            # uploaded); Generated = a real AI model id is recorded and it's a
+            # still image; Photos = uploads (NULL/'' legacy rows plus the
+            # sentinel values the upload handlers stamp).
+            if kind in ("photos", "generated", "videos", "music"):
                 from sqlalchemy import and_, or_ as _or2
                 _video_pred = _or2(*[GalleryImage.filename.ilike(f"%.{e}") for e in sorted(VIDEO_EXTS)])
+                _audio_pred = _or2(*[GalleryImage.filename.ilike(f"%.{e}") for e in sorted(AUDIO_EXTS)])
                 _upload_pred = _or2(GalleryImage.model == None,  # noqa: E711
                                     GalleryImage.model == "",
                                     GalleryImage.model.in_(UPLOAD_MODEL_SENTINELS))
                 if kind == "videos":
                     q = q.filter(_video_pred)
+                elif kind == "music":
+                    q = q.filter(_audio_pred)
                 elif kind == "generated":
-                    q = q.filter(and_(~_upload_pred, ~_video_pred))
-                else:  # photos: uploads that aren't videos
-                    q = q.filter(and_(_upload_pred, ~_video_pred))
+                    q = q.filter(and_(~_upload_pred, ~_video_pred, ~_audio_pred))
+                else:  # photos: uploads that aren't videos or audio
+                    q = q.filter(and_(_upload_pred, ~_video_pred, ~_audio_pred))
 
             # Album filter
             if album:

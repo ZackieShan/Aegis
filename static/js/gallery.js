@@ -14,6 +14,7 @@ import settingsModule from './settings.js';
 import { renderMovieTab, stopMovieTab } from './movieMaker.js';
 import { renderQueueTab, stopQueueTab } from './jobQueue.js';
 import { renderCreateTab, setCreateSource } from './studioCreate.js';
+import { renderMusicTab, stopMusicTab } from './studioMusic.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -275,7 +276,7 @@ function _isVideoUrl(url) {
 // grid and an <audio> player in the detail view.
 function _isAudioUrl(url) {
   const ext = (url || '').toLowerCase().split('?')[0].split('.').pop();
-  return ['mp3','flac','wav','ogg','opus'].includes(ext);
+  return ['mp3','flac','wav','ogg','opus','m4a'].includes(ext);
 }
 
 // Recursively walk a webkit FileSystemEntry, returning all media Files under it.
@@ -412,6 +413,7 @@ function _renderAlbums() {
       fhtml += `<button class="gallery-chip gallery-chip-kind${_kind === 'photos' ? ' active' : ''}" data-kind="photos" title="Uploaded photos">Photos</button>`;
       fhtml += `<button class="gallery-chip gallery-chip-kind${_kind === 'generated' ? ' active' : ''}" data-kind="generated" title="AI-generated images">Generated</button>`;
       fhtml += `<button class="gallery-chip gallery-chip-kind${_kind === 'videos' ? ' active' : ''}" data-kind="videos" title="Videos (generated and uploaded)">Videos</button>`;
+      fhtml += `<button class="gallery-chip gallery-chip-kind${_kind === 'music' ? ' active' : ''}" data-kind="music" title="Songs and audio">Music</button>`;
     }
     _activeTags.forEach(t => {
       fhtml += `<span class="gallery-chip gallery-chip-active-album" title="Filtered to tag — click × to remove"><span>#${_esc(t)}</span><button class="gallery-chip-clear" data-clear-tag="${_esc(t)}" aria-label="Remove tag filter">&times;</button></span>`;
@@ -1236,7 +1238,7 @@ function _renderGrid() {
     // library may well have items — saying "No photos yet, click Upload" there
     // is false and reads like a failed upload.
     const _filtered = _kind || _favoritesOnly || _search || _activeTags.length || _activeAlbum;
-    const _kindNoun = ({ videos: 'videos', generated: 'generated images', photos: 'photos' })[_kind] || 'items';
+    const _kindNoun = ({ videos: 'videos', generated: 'generated images', photos: 'photos', music: 'songs' })[_kind] || 'items';
     const emptyMsg = _filtered
       ? `No ${_kindNoun} match this view — try the All chip.`
       : 'No photos yet. Click Upload or drag-and-drop to get started!';
@@ -1825,7 +1827,9 @@ function _openDetail(img) {
   const _handToCreate = (kind) => {
     setCreateSource({ id: img.id, url: img.url, prompt: img.prompt || '' }, kind);
     detail.style.display = 'none';
-    document.querySelector('#gallery-modal .gallery-tab[data-tab="create"]')?.click();
+    // Video creation lives in the Movie Maker; image edits in the Image Maker.
+    const tab = kind === 'video' ? 'movie' : 'create';
+    document.querySelector(`#gallery-modal .gallery-tab[data-tab="${tab}"]`)?.click();
   };
   document.getElementById('gallery-animate-btn')?.addEventListener('click', () => _handToCreate('video'));
   document.getElementById('gallery-stylize-btn')?.addEventListener('click', () => _handToCreate('image'));
@@ -2087,9 +2091,13 @@ export function openGallery() {
           <span class="gallery-tab-label">Edit</span>
           <span class="gallery-tab-close" id="gallery-editor-tab-close" title="Close edit" aria-label="Close edit">×</span>
         </button>
-        <button class="gallery-tab" data-tab="create">
-          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span>
-          <span class="gallery-tab-label">Create</span>
+        <button class="gallery-tab" data-tab="create" title="Image Maker — every image control in one place">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg></span>
+          <span class="gallery-tab-label">Image</span>
+        </button>
+        <button class="gallery-tab" data-tab="music" title="Music Maker — compose songs, play your tracks, make AI voices">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+          <span class="gallery-tab-label">Music</span>
         </button>
         <button class="gallery-tab" data-tab="queue">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
@@ -2150,6 +2158,7 @@ export function openGallery() {
         <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
         <div class="gallery-movie-container" id="gallery-movie-container" style="display:none;"></div>
         <div class="gallery-create-container" id="gallery-create-container" style="display:none;"></div>
+        <div class="gallery-create-container" id="gallery-music-container" style="display:none;"></div>
         <div class="gallery-queue-container" id="gallery-queue-container" style="display:none;"></div>
         <div class="gallery-styles-container" id="gallery-styles-container" style="display:none;">
           <div class="admin-card">
@@ -2316,6 +2325,7 @@ export function openGallery() {
       const editorContainer = document.getElementById('gallery-editor-container');
       const movieContainer = document.getElementById('gallery-movie-container');
       const createContainer = document.getElementById('gallery-create-container');
+      const musicContainer = document.getElementById('gallery-music-container');
       const queueContainer = document.getElementById('gallery-queue-container');
       const stylesContainer = document.getElementById('gallery-styles-container');
       const settingsContainer = document.getElementById('gallery-settings-container');
@@ -2324,6 +2334,7 @@ export function openGallery() {
       if (editorContainer) editorContainer.style.display = target === 'editor' ? 'flex' : 'none';
       if (movieContainer) movieContainer.style.display = target === 'movie' ? '' : 'none';
       if (createContainer) createContainer.style.display = target === 'create' ? '' : 'none';
+      if (musicContainer) musicContainer.style.display = target === 'music' ? '' : 'none';
       if (queueContainer) queueContainer.style.display = target === 'queue' ? '' : 'none';
       if (stylesContainer) stylesContainer.style.display = target === 'styles' ? '' : 'none';
       if (settingsContainer) settingsContainer.style.display = target === 'settings' ? '' : 'none';
@@ -2331,6 +2342,7 @@ export function openGallery() {
       // hitting /api/queue forever.
       if (target !== 'movie') stopMovieTab();
       if (target !== 'queue') stopQueueTab();
+      if (target !== 'music') stopMusicTab();
       if (target === 'images') {
         // Keep active edits alive when leaving the Edit tab. The edit
         // session is only torn down by the explicit Edit-tab close.
@@ -2341,9 +2353,26 @@ export function openGallery() {
         // tab does something useful instead of opening an empty grey pane.
         if (!isEditorOpen()) _renderEditorLanding();
       } else if (target === 'movie') {
-        renderMovieTab(document.getElementById('gallery-movie-container'));
+        // Movie Maker = clip generation on top, film assembly below — the
+        // whole make-clips-then-stitch flow in one tab. Two child hosts keep
+        // the create panel and the movie timeline from clobbering each other.
+        const mc = document.getElementById('gallery-movie-container');
+        if (mc) {
+          mc.replaceChildren();
+          const clipHost = document.createElement('div');
+          clipHost.id = 'gallery-movie-clipmaker';
+          const filmHost = document.createElement('div');
+          filmHost.id = 'gallery-movie-film';
+          filmHost.style.marginTop = '26px';
+          mc.appendChild(clipHost);
+          mc.appendChild(filmHost);
+          renderCreateTab(clipHost, 'video');
+          renderMovieTab(filmHost);
+        }
       } else if (target === 'create') {
-        renderCreateTab(document.getElementById('gallery-create-container'));
+        renderCreateTab(document.getElementById('gallery-create-container'), 'image');
+      } else if (target === 'music') {
+        renderMusicTab(document.getElementById('gallery-music-container'));
       } else if (target === 'queue') {
         renderQueueTab(document.getElementById('gallery-queue-container'));
       } else if (target === 'styles' || target === 'settings') {
@@ -3005,6 +3034,7 @@ function _showImagesTab() {
     'gallery-albums-container': 'none',
     'gallery-editor-container': 'none',
     'gallery-create-container': 'none',
+    'gallery-music-container': 'none',
     'gallery-queue-container': 'none',
     'gallery-movie-container': 'none',
     'gallery-styles-container': 'none',
@@ -3014,9 +3044,10 @@ function _showImagesTab() {
     const el = document.getElementById(id);
     if (el) el.style.display = disp;
   }
-  // And stop the pollers those tabs may have left running.
+  // And stop the pollers/recorders those tabs may have left running.
   stopMovieTab();
   stopQueueTab();
+  stopMusicTab();
 }
 
 export async function openGalleryImage(imageId) {
@@ -3077,8 +3108,12 @@ function _doCloseGallery() {
   clearTimeout(_searchDebounce);
   // The Movie and Queue tabs poll on a timer; closing the modal removes their
   // DOM but would leave the intervals running and hitting the API forever.
+  // The Music tab's voice recorder must also stop, or the mic stays hot after
+  // close (music PLAYBACK deliberately continues — stopMusicTab only stops
+  // the recorder).
   stopMovieTab();
   stopQueueTab();
+  stopMusicTab();
   if (_galleryResizeHandler) {
     window.removeEventListener('resize', _galleryResizeHandler);
     _galleryResizeHandler = null;
