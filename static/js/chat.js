@@ -1233,6 +1233,16 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         isAgentMode = true;
       }
       fd.append('mode', isAgentMode ? 'agent' : 'chat');
+      // Per-model chat settings (thinking on/off, temperature, response length)
+      // from the model-settings popover — applied for this turn only.
+      try {
+        if (window.modelSettings) {
+          const _ms = window.modelSettings.sendFields(window.__aegisCurrentModel);
+          if (_ms.think) fd.append('think', _ms.think);
+          if (_ms.gen_temperature != null) fd.append('gen_temperature', String(_ms.gen_temperature));
+          if (_ms.gen_max_tokens != null) fd.append('gen_max_tokens', String(_ms.gen_max_tokens));
+        }
+      } catch (_) {}
       if (el('web-toggle').checked) {
         if (!isAgentMode) {
           fd.append('use_web', 'true');

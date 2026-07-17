@@ -1170,6 +1170,18 @@ def run_post_response_tasks(
     ``_queue_background_extraction`` keeps them from overlapping the *next*
     turn's request too.
     """
+    # The chat UI's per-turn thinking override is for the USER's turn only.
+    # Clear it before spawning utility calls (auto-name, memory/skill
+    # extraction) — asyncio.create_task snapshots the current context, so
+    # without this a "thinking on" toggle would force a full reasoning pass on
+    # these background calls too, occupying the local GPU slot this function
+    # exists to protect.
+    try:
+        from src import llm_core as _llm_core
+        _llm_core.set_think_override(None)
+    except Exception:
+        pass
+
     _extraction_jobs: list = []
 
     # Memory extraction — only every 4th message pair to avoid excess LLM calls

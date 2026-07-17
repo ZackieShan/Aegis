@@ -73,6 +73,9 @@ you fit them to your machine:
 - A **local model engine** (llama.cpp + llama-swap) hot-swaps GGUFs through one endpoint with
   reliable **native tool calls**; drop a model in `models/` and serve it; the **context
   auto-tuner** (`/engine`) sizes each model's window to your GPU automatically.
+- **Per-model settings** — a sliders button by the model picker remembers, for each model:
+  **thinking** on / off / auto (toggle a reasoning model's visible thought process without
+  touching config), **temperature**, and **max response length**. Applied per message.
 
 **Put agents to work**
 - **Toolboxes** — summon themed tool sets: OSINT recon, market analysis, network troubleshooting, web crawl.

@@ -329,32 +329,50 @@ async function _renderVoices(section) {
   pickRow.appendChild(setDefault);
   section.appendChild(pickRow);
 
-  try {
-    const d = await _json('/api/tts/voices');
-    const voices = d.voices || [];
-    sel.replaceChildren();
-    voices.forEach(v => {
-      const id = typeof v === 'string' ? v : (v.id || v.name || '');
-      if (!id) return;
-      const o = document.createElement('option');
-      o.value = id;
-      o.textContent = typeof v === 'string' ? v : (v.label || v.name || id);
-      sel.appendChild(o);
-    });
-    if (!voices.length) {
-      const o = document.createElement('option');
-      o.value = ''; o.textContent = 'No voices — enable a TTS provider in Settings';
-      sel.appendChild(o);
-    }
-  } catch (_) { /* leave the empty select */ }
+  // The catalog includes cloned voices (the server auto-routes them), so it
+  // must refresh whenever the clone set changes — not just on first render.
+  // Generation counters: rapid clone/delete clicks overlap these fetches, and
+  // an older response landing last would resurrect a deleted voice (or
+  // duplicate rows below) — only the newest request may touch the DOM.
+  let voicesGen = 0;
+  const fillBuiltins = async () => {
+    const gen = ++voicesGen;
+    try {
+      const d = await _json('/api/tts/voices');
+      if (gen !== voicesGen) return;
+      const voices = d.voices || [];
+      const keep = sel.value;
+      sel.replaceChildren();
+      voices.forEach(v => {
+        const id = typeof v === 'string' ? v : (v.id || v.name || '');
+        if (!id) return;
+        const o = document.createElement('option');
+        o.value = id;
+        o.textContent = typeof v === 'string' ? v : (v.label || v.name || id);
+        sel.appendChild(o);
+      });
+      if (!voices.length) {
+        const o = document.createElement('option');
+        o.value = ''; o.textContent = 'No voices — enable a TTS provider in Settings';
+        sel.appendChild(o);
+      }
+      if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+    } catch (_) { /* leave the empty select */ }
+  };
 
   // Cloned voices: list + delete
   const clonedWrap = _el('div');
   section.appendChild(clonedWrap);
+  let clonedGen = 0;
   const refreshCloned = async () => {
-    clonedWrap.replaceChildren();
+    fillBuiltins();
+    const gen = ++clonedGen;
     try {
       const d = await _json('/api/tts/my-voices');
+      if (gen !== clonedGen) return;
+      // Clear only once the fresh list has arrived — clearing before the
+      // await let two overlapping refreshes append a double set of rows.
+      clonedWrap.replaceChildren();
       (d.voices || []).forEach(v => {
         const name = typeof v === 'string' ? v : (v.name || v.id || '');
         if (!name) return;
@@ -389,6 +407,8 @@ async function _renderVoices(section) {
           try {
             await _json('/api/tts/my-voices/' + encodeURIComponent(name), { method: 'DELETE' });
             refreshCloned();
+            // Keep the Settings → TTS panel's list and catalog in sync.
+            document.dispatchEvent(new CustomEvent('aegis-voices-changed'));
           } catch (e) { _voiceStatus(section, 'Delete failed: ' + e.message, true); }
         });
         row.appendChild(del);
@@ -442,6 +462,8 @@ async function _renderVoices(section) {
           + `then "Use this voice" to make Aegis speak as you.`);
         nameIn.value = '';
         refreshCloned();
+        // Keep the Settings → TTS panel's list and catalog in sync.
+        document.dispatchEvent(new CustomEvent('aegis-voices-changed'));
       } catch (e) {
         _voiceStatus(section, 'Save failed: ' + e.message, true);
       }

@@ -556,6 +556,41 @@ def setup_chat_routes(
         use_research = form_data.get("use_research")
         time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
+        # Per-model chat settings from the UI's model-settings popover. `think`
+        # is on|off|"" (auto — leave the engine default); gen_temperature and
+        # gen_max_tokens override the preset for this turn only. Applied to
+        # ctx.preset (a mutable dataclass) right after build_chat_context, and
+        # the think contextvar is read inside the llm_core payload builders.
+        _think_raw = str(form_data.get("think", "") or "").lower()
+        _think_override = True if _think_raw == "on" else (False if _think_raw == "off" else None)
+        try:
+            from src import llm_core as _llm_core
+            _llm_core.set_think_override(_think_override)
+        except Exception:
+            pass
+
+        def _num_or_none(key, cast, lo, hi):
+            raw = form_data.get(key)
+            if raw in (None, ""):
+                return None
+            try:
+                v = cast(raw)
+            except (TypeError, ValueError):
+                return None
+            return max(lo, min(hi, v))
+
+        _temp_override = _num_or_none("gen_temperature", float, 0.0, 2.0)
+        _maxtok_override = _num_or_none("gen_max_tokens", int, 64, 32768)
+
+        def _apply_gen_overrides(_ctx):
+            """Override the resolved preset's temperature/max_tokens with the
+            per-model UI choices, when supplied."""
+            if _ctx is None or getattr(_ctx, "preset", None) is None:
+                return
+            if _temp_override is not None:
+                _ctx.preset.temperature = _temp_override
+            if _maxtok_override is not None:
+                _ctx.preset.max_tokens = _maxtok_override
         # Issue #3229: API callers send JSON, not FormData.  Read from the
         # JSON body as fallback so callers who send {"allow_bash": true}
         # actually get bash enabled.
@@ -785,6 +820,8 @@ def setup_chat_routes(
             agent_mode=(chat_mode == "agent"),
             allow_tool_preprocessing=allow_tool_preprocessing,
         )
+        # Per-model UI overrides for temperature / max response length.
+        _apply_gen_overrides(ctx)
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 

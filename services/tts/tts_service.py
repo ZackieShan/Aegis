@@ -288,14 +288,50 @@ class TTSService:
         """Voice catalog for a provider (default: the active one)."""
         provider = provider or self._load_settings()["tts_provider"]
         if provider == "local":
-            return KOKORO_VOICES
+            return self._with_cloned(KOKORO_VOICES)
         if provider.startswith("endpoint:"):
             # A Chatterbox-serving endpoint speaks in the user's own cloned
             # voices, not the OpenAI names.
             if self._endpoint_serves_chatterbox(provider.split(":", 1)[1]):
                 return cloned_voice_catalog()
-            return OPENAI_VOICES
-        return []  # browser voices enumerate client-side; disabled has none
+            # Append rather than prepend: the settings picker falls back to
+            # the FIRST entry when switching providers, and defaulting a
+            # just-chosen API endpoint to a clone would silently auto-route
+            # every synthesis away from that endpoint.
+            return self._with_cloned(OPENAI_VOICES, prepend=False)
+        # Browser voices enumerate client-side, and read-aloud there never
+        # reaches the server — a cloned id would silently fall back to the OS
+        # default voice, so don't offer clones. Disabled has none.
+        return []
+
+    def _with_cloned(self, base: list, prepend: bool = True) -> list:
+        """Cloned voices merged into a provider's catalog. synthesize()
+        auto-routes any cloned-voice id to the Chatterbox endpoint whatever
+        the saved provider, so the picker should offer them wherever server
+        synthesis happens — but only while an endpoint actually serves
+        Chatterbox (otherwise the entry would promise a voice that errors).
+        The router matches by id, so a cloned id shadows a same-named
+        built-in; drop the shadowed entry rather than list it unreachable."""
+        cloned = cloned_voice_catalog()
+        if not cloned or not self._find_chatterbox_endpoint()[0]:
+            return base
+        cloned_ids = {v["id"] for v in cloned}
+        rest = [v for v in base if v["id"] not in cloned_ids]
+        return cloned + rest if prepend else rest + cloned
+
+    def is_routable_cloned_voice(self, voice: Optional[str]) -> bool:
+        """True when `voice` is a cloned sample that synthesize() can
+        auto-route to a Chatterbox endpoint even though the saved provider
+        can't speak on its own (e.g. 'local' without the optional kokoro
+        package). The global off switches still win — this must never
+        resurrect disabled TTS."""
+        settings = self._load_settings()
+        if settings.get("tts_enabled") is False or settings["tts_provider"] == "disabled":
+            return False
+        voice = (voice or "").strip()
+        if not voice or all(v.get("id") != voice for v in cloned_voice_catalog()):
+            return False
+        return bool(self._find_chatterbox_endpoint()[0])
 
     @staticmethod
     def _endpoint_serves_chatterbox(endpoint_id: str) -> bool:

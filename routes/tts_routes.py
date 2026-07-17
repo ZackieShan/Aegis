@@ -87,7 +87,11 @@ def setup_tts_routes(tts_service):
     async def synthesize_speech(request: TTSRequest):
         """Synthesize speech from text"""
         try:
-            if not tts_service.available:
+            # A cloned voice needs no working saved provider — synthesize()
+            # auto-routes it to the Chatterbox endpoint. Without this bypass,
+            # provider 'local' minus the optional kokoro package would 503 a
+            # voice the catalog just advertised.
+            if not tts_service.available and not tts_service.is_routable_cloned_voice(request.voice):
                 raise HTTPException(
                     status_code=503,
                     detail={"message": "TTS service not available"}
@@ -211,6 +215,25 @@ def setup_tts_routes(tts_service):
                     logger.warning("Could not delete voice file %s", p)
         if not removed:
             raise HTTPException(404, f"No cloned voice named '{slug}'")
+        # Deleting the active voice must not leave read-aloud pointing at a
+        # ghost id (no auto-route match → Kokoro rejects it → opaque 500s).
+        # Repoint the saved default at something that still speaks.
+        try:
+            from services.tts.tts_service import cloned_voice_catalog
+            from src.settings import load_settings, save_settings
+            s = load_settings()
+            if s.get("tts_voice") == slug:
+                provider = s.get("tts_provider", "disabled")
+                if provider == "local":
+                    s["tts_voice"] = "af_heart"
+                elif provider == "browser":
+                    s["tts_voice"] = ""  # OS default voice
+                else:
+                    remaining = [v["id"] for v in cloned_voice_catalog()]
+                    s["tts_voice"] = remaining[0] if remaining else "alloy"
+                save_settings(s)
+        except Exception:
+            logger.warning("Could not repoint tts_voice after deleting '%s'", slug, exc_info=True)
         try:
             tts_service.clear_cache()
         except Exception:

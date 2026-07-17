@@ -188,13 +188,17 @@ async def test_audio_generate_rejects_unknown_model(monkeypatch):
 
 # ── TTS voices ──
 
-def test_kokoro_voice_catalog():
-    from services.tts.tts_service import KOKORO_VOICES, TTSService
-    ids = [v["id"] for v in KOKORO_VOICES]
+def test_kokoro_voice_catalog(monkeypatch):
+    from services.tts import tts_service as ts
+    ids = [v["id"] for v in ts.KOKORO_VOICES]
     assert "af_heart" in ids and "bm_george" in ids
     assert len(ids) == len(set(ids))
-    svc = TTSService.__new__(TTSService)  # no cache-dir side effects needed
-    assert svc.list_voices("local") == KOKORO_VOICES
+    svc = ts.TTSService.__new__(ts.TTSService)  # no cache-dir side effects needed
+    # No clones → catalogs are the pure constants. Patched because
+    # _with_cloned otherwise reads the real VOICES_DIR + endpoint table,
+    # making this test depend on developer-machine state.
+    monkeypatch.setattr(ts, "cloned_voice_catalog", lambda: [])
+    assert svc.list_voices("local") == ts.KOKORO_VOICES
     assert svc.list_voices("endpoint:abc")[0]["id"] == "alloy"
     assert svc.list_voices("browser") == []
 
@@ -211,8 +215,11 @@ def test_cloned_voice_catalog_and_endpoint_detection(tmp_path, monkeypatch):
 
     svc = ts.TTSService.__new__(ts.TTSService)
     monkeypatch.setattr(ts.TTSService, "_endpoint_serves_chatterbox", staticmethod(lambda eid: eid == "cb"))
+    monkeypatch.setattr(ts.TTSService, "_find_chatterbox_endpoint", staticmethod(lambda: ("cb", "chatterbox-tts")))
     assert [v["id"] for v in svc.list_voices("endpoint:cb")] == ["grandma", "zac"]
-    assert svc.list_voices("endpoint:other")[0]["id"] == "alloy"
+    others = svc.list_voices("endpoint:other")
+    assert others[0]["id"] == "alloy"  # native endpoint voices stay first
+    assert [v["id"] for v in others[-2:]] == ["grandma", "zac"]  # clones appended
 
 
 def test_my_voice_name_validation():

@@ -978,10 +978,13 @@ async function initTtsSettings() {
       if (!_kokoroVoices) {
         try {
           var r = await fetch('/api/tts/voices?provider=local', { credentials: 'same-origin' });
-          _kokoroVoices = (await r.json()).voices || [];
-        } catch (e) { _kokoroVoices = []; }
+          var got = (await r.json()).voices || [];
+          // Memoize only a non-empty success: caching a transient failure as
+          // [] would pin the picker on the static OpenAI options all session.
+          if (got.length) _kokoroVoices = got;
+        } catch (e) { /* leave null so the next call retries */ }
       }
-      if (_kokoroVoices.length) { fillVoiceSelect(_kokoroVoices, keep || 'af_heart'); return true; }
+      if (_kokoroVoices && _kokoroVoices.length) { fillVoiceSelect(_kokoroVoices, keep || 'af_heart'); return true; }
       return false;
     }
     if (prov === 'browser') {
@@ -1147,7 +1150,13 @@ async function initTtsSettings() {
             var dr = await fetch('/api/tts/my-voices/' + encodeURIComponent(v.id), { method: 'DELETE', credentials: 'same-origin' });
             if (!dr.ok) throw new Error('HTTP ' + dr.status);
             refreshMyVoices();
-            loadVoicesFor(provSel.value, getVoice());
+            // The local-provider catalog now includes cloned voices, so the
+            // memoized copy is stale the moment the clone set changes. And
+            // never "keep" the voice that was just deleted — that would pin
+            // a phantom '(saved)' entry that can only fail to synthesize
+            // (the server repoints the saved default itself).
+            _kokoroVoices = null;
+            loadVoicesFor(provSel.value, getVoice() === v.id ? '' : getVoice());
           } catch (e) { mvMsg('Delete failed: ' + e.message, true); del.disabled = false; }
         });
         row.appendChild(del);
@@ -1167,9 +1176,10 @@ async function initTtsSettings() {
       var r = await fetch('/api/tts/my-voices', { method: 'POST', credentials: 'same-origin', body: fd });
       var d = await r.json().catch(function() { return {}; });
       if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
-      mvMsg('Voice "' + d.voice + '" cloned (' + (d.seconds ? d.seconds + 's sample' : 'sample saved') + ') — pick the Voice Cloning provider to use it.');
+      mvMsg('Voice "' + d.voice + '" cloned (' + (d.seconds ? d.seconds + 's sample' : 'sample saved') + ') — it’s now in the voice list above.');
       if (mvName) mvName.value = '';
       refreshMyVoices();
+      _kokoroVoices = null;
       loadVoicesFor(provSel.value, getVoice());
     } catch (e) { mvMsg('Cloning failed: ' + (e.message || e), true); }
   }
@@ -1212,6 +1222,14 @@ async function initTtsSettings() {
     });
   }
   refreshMyVoices();
+
+  // The Studio Voice Lab clones/deletes voices too — it announces changes so
+  // this panel's list and memoized catalog stay honest without a reload.
+  document.addEventListener('aegis-voices-changed', function() {
+    _kokoroVoices = null;
+    refreshMyVoices();
+    loadVoicesFor(provSel.value, getVoice());
+  });
 
   // Preview / test button
   var previewBtn = el('set-ttsPreviewBtn');

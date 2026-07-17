@@ -814,6 +814,11 @@ export function updateModelPicker() {
     _ensureDefaultPendingChat();
   }
 
+  // Publish the resolved model id so the per-model settings popover
+  // (modelSettings.js) knows which model its overrides apply to.
+  window.__aegisCurrentModel = modelId || '';
+  try { window.modelSettings && window.modelSettings.onModelChanged(); } catch (_) {}
+
   const displayName = modelId ? modelId.split('/').pop() : 'Select model';
   // The header indicator clips long names with ellipsis; show the full model
   // identifier on hover (#1982). No tooltip on the "Select model" placeholder.

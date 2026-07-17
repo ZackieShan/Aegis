@@ -1,6 +1,7 @@
 # src/llm_core.py
 import httpx
 import asyncio
+import contextvars
 import time
 import json
 import logging
@@ -15,6 +16,48 @@ from src.model_context import get_context_length, DEFAULT_CONTEXT, is_local_endp
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# Per-request "think" override from the chat UI's model-settings toggle.
+# None = leave the model/engine default alone; True/False = force reasoning on
+# or off for THIS request. It rides a contextvar so we don't have to thread it
+# through every generation call — each request is its own task, so setting it at
+# request entry keeps it request-local. Only applied to LOCAL, thinking-capable
+# models (a cloud provider ignores unknown params or errors).
+_THINK_OVERRIDE: "contextvars.ContextVar[Optional[bool]]" = contextvars.ContextVar(
+    "aegis_think_override", default=None
+)
+
+
+def set_think_override(value: Optional[bool]) -> None:
+    """Set the current request's thinking override (None clears it)."""
+    _THINK_OVERRIDE.set(value)
+
+
+def _apply_think_override(payload: Dict, url: str, model: str) -> None:
+    """If the chat UI forced thinking on/off, encode it in the payload for local
+    engines. llama.cpp reads chat_template_kwargs.enable_thinking; Ollama's
+    OpenAI-compat layer reads a top-level `think`. Runs AFTER the base
+    thinking-suppression logic so an explicit user choice wins."""
+    try:
+        want = _THINK_OVERRIDE.get()
+    except Exception:
+        want = None
+    if want is None:
+        return
+    if not is_local_endpoint(url) or not _supports_thinking(model):
+        return
+    # llama.cpp and Ollama use DIFFERENT knobs, and a localhost /v1 URL can't be
+    # told apart (llama-swap vs a custom-port Ollama). So set BOTH: llama.cpp
+    # reads chat_template_kwargs.enable_thinking and ignores `think`; Ollama
+    # (native /api and /v1) reads `think` and ignores chat_template_kwargs. Each
+    # engine harmlessly drops the knob it doesn't use, so the toggle works
+    # everywhere without guessing the engine from the URL.
+    payload["think"] = bool(want)
+    kwargs = payload.get("chat_template_kwargs")
+    if not isinstance(kwargs, dict):
+        kwargs = {}
+    kwargs["enable_thinking"] = bool(want)
+    payload["chat_template_kwargs"] = kwargs
 
 _LOCAL_MODEL_LOCK = asyncio.Lock()
 _LOCAL_MODEL_WAITING_FOREGROUND = 0
@@ -2016,6 +2059,9 @@ async def _llm_call_async_impl(
             model, messages_copy, temperature, max_tokens,
             stream=False, num_ctx=get_context_length(url, model),
         )
+        # A chat-UI thinking toggle also applies to native Ollama (it reads
+        # a top-level `think`).
+        _apply_think_override(payload, url, model)
     else:
         target_url = _normalize_openai_chat_url(url)
         h = _provider_headers(provider, headers)
@@ -2037,6 +2083,8 @@ async def _llm_call_async_impl(
             payload["think"] = False
         if provider == "mistral" and _supports_thinking(model):
             payload["reasoning_effort"] = _MISTRAL_REASONING_EFFORT
+        # A chat-UI thinking toggle overrides the above for local engines.
+        _apply_think_override(payload, url, model)
         _apply_local_cache_affinity(payload, url, session_id)
         _apply_local_generation_stability(payload, target_url, model)
 
@@ -2171,6 +2219,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
             model, messages_copy, temperature, max_tokens,
             stream=True, tools=tools, num_ctx=get_context_length(url, model),
         )
+        # A chat-UI thinking toggle also applies to native Ollama (top-level `think`).
+        _apply_think_override(payload, url, model)
     elif provider == "chatgpt-subscription":
         target_url = _normalize_chatgpt_subscription_url(url)
         h = _provider_headers(provider, headers)
@@ -2205,6 +2255,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         # <think> blocks. Ollama /v1 accepts "think": false as a top-level param.
         if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
             payload["think"] = False
+        # A chat-UI thinking toggle overrides the above for local engines.
+        _apply_think_override(payload, url, model)
         _apply_local_cache_affinity(payload, url, session_id)
         _apply_local_generation_stability(payload, target_url, model)
         h = _provider_headers(provider, headers)
