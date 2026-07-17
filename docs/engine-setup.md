@@ -119,6 +119,13 @@ baked to a `.voice.pt` beside its sample so repeat synthesis is fast.
   20+ minutes at "99% GPU" is this). Add `--offload-to-cpu` to that model's
   sd-server entry in `llama-swap.yaml`; measured on a 24 GB card it took the same
   edit from 25+ minutes to about a minute.
+- **A model narrates its private reasoning as the reply** ("The user is asking…",
+  checklists, "I'm ready") **or loops the same phrases until it hits the token limit:**
+  thinking-mode models (Qwen3.6 family especially — their template hard-starts
+  reasoning) need `--chat-template-kwargs "{\"enable_thinking\":false}"` on their
+  llama-server line, and quantized MoE models benefit from `--dry-multiplier 0.8`
+  (the DRY anti-repetition sampler) to prevent verbatim loops in long chats. Add
+  both to that model's entry; llama-swap hot-reloads the config.
 - **"context exceeded" 400s:** raise `-c` in `llama-swap.yaml` (or run `/engine tune`).
 - **Browser won't connect:** ensure Node is set up (`/doctor` → Browser), then restart
   Aegis so the built-in Browser MCP registers.

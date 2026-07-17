@@ -12,6 +12,12 @@
 # Key flags: --jinja enables OpenAI tool-call parsing; -fa on = flash attention
 # (halves KV memory); -c is the context window (use /engine in-app to auto-size
 # it to your GPU); --mmproj <projector> makes a model vision-capable.
+#
+# Thinking-mode models (Qwen3.6 family especially): add
+#   --chat-template-kwargs "{\"enable_thinking\":false}"
+# or the model's private reasoning streams out as the visible reply. Quantized
+# MoE models also want --dry-multiplier 0.8 (DRY sampler) so long chats can't
+# collapse into verbatim repetition loops.
 
 healthCheckTimeout: 300
 logLevel: info
