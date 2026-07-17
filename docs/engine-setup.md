@@ -93,6 +93,12 @@ up in the model picker.
 - **A model "spills" and generation crawls:** it doesn't fit VRAM at full offload.
   Lower `-ngl` (partial offload) or use a smaller quant. `/engine` recommends safe
   context sizes and skips partial-offload models.
+- **Image *edits* crawl while plain generation is fast:** the edit pass conditions
+  on the source image, which roughly doubles its working set — a diffusion model
+  that fits for text-to-image can silently page on edits (a 512×512 edit taking
+  20+ minutes at "99% GPU" is this). Add `--offload-to-cpu` to that model's
+  sd-server entry in `llama-swap.yaml`; measured on a 24 GB card it took the same
+  edit from 25+ minutes to about a minute.
 - **"context exceeded" 400s:** raise `-c` in `llama-swap.yaml` (or run `/engine tune`).
 - **Browser won't connect:** ensure Node is set up (`/doctor` → Browser), then restart
   Aegis so the built-in Browser MCP registers.

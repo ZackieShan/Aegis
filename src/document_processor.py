@@ -314,12 +314,16 @@ def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
     if configured:
         return _resolve_model(configured, owner=owner)
 
-    # Auto-detect: try known vision-capable models in priority order
+    # Auto-detect: try known vision-capable models in priority order. Local
+    # engine aliases first — a self-hosted install with qwen-vl served should
+    # never report "no vision model" (2026-07-16: it did, and Studio's AI Tag
+    # was dead on arrival).
     candidates = [
+        "qwen-vl", "qwen2.5-vl", "qwen2-vl", "llava", "pixtral",
+        "minicpm-v", "moondream",
         "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
         "claude-sonnet-4-5-20250929", "claude-opus-4-20250514",
         "gemini-2.0-flash", "gemini-2.5-pro",
-        "llava", "pixtral", "qwen2-vl",
     ]
     for candidate in candidates:
         try:

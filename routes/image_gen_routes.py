@@ -130,6 +130,129 @@ def setup_image_gen_routes() -> APIRouter:
         user = get_current_user(request)
         return {"models": list_image_models(user) + await _comfy_image_models()}
 
+    @router.post("/api/image/edit")
+    async def image_edit(request: Request):
+        """Instruction-edit an existing Photos image into a NEW Photos image.
+
+        Drives Studio → Create's stylize-a-photo flow: image_id + prompt
+        (+ optional model/style) queue an async sd-server img_gen job
+        (qwen-image-edit by default) and return a job id — poll
+        /api/video/status/{job_id} (the shared render-job registry) and the
+        result lands in Photos like any generation. The editor's
+        style-transfer route returns raw b64 for layer compositing; this one
+        exists so a kid-photo stylize lands in Photos with provenance
+        instead of vanishing into an editor session.
+        """
+        import base64
+
+        from routes.gallery.gallery_routes import (
+            _EDIT_MODEL_ID_RE, _first_visible_image_endpoint, _local_edit_size,
+        )
+        from src import style_presets
+        from core.database import SessionLocal, GalleryImage
+        from src.generated_images import resolve_generated_image_path
+
+        user = require_privilege(request, "can_generate_images")
+        body = await request.json()
+        prompt = str(body.get("prompt") or "").strip()
+        image_id = str(body.get("image_id") or "").strip()
+        if not prompt:
+            raise HTTPException(400, "Prompt is required")
+        if not image_id:
+            raise HTTPException(400, "image_id is required")
+
+        db = SessionLocal()
+        try:
+            row = db.query(GalleryImage).filter(GalleryImage.id == image_id).first()
+            ep = _first_visible_image_endpoint(db, user)
+        finally:
+            db.close()
+        # Same normalization as the serve route: someone else's row 404s.
+        if not row or (getattr(row, "owner", "") or "") != (user or ""):
+            raise HTTPException(404, "No matching gallery image")
+        ext = (row.filename or "").rsplit(".", 1)[-1].lower()
+        if ext not in ("png", "jpg", "jpeg", "webp"):
+            raise HTTPException(400, "That gallery item is not a still image")
+        image_bytes = resolve_generated_image_path(row.filename).read_bytes()
+
+        if not ep:
+            raise HTTPException(400, "No image endpoint configured — serve an edit model (e.g. qwen-image-edit) and it is picked up automatically.")
+        model = str(body.get("model") or "").strip()
+        if model and not _EDIT_MODEL_ID_RE.search(model):
+            raise HTTPException(400, f"'{model}' can't edit an existing photo — pick an edit-capable model (e.g. qwen-image-edit).")
+        if not model:
+            try:
+                cached = json.loads(getattr(ep, "cached_models", None) or "[]")
+            except Exception:
+                cached = []
+            model = next((str(m) for m in cached if _EDIT_MODEL_ID_RE.search(str(m))), "")
+        if not model:
+            raise HTTPException(400, "No edit-capable image model is served (e.g. qwen-image-edit).")
+
+        style = style_presets.resolve_style(str(body.get("style") or ""), user)
+        styled = style_presets.styled_prompt(style, prompt)
+
+        try:
+            import io
+            from PIL import Image
+            src_w, src_h = Image.open(io.BytesIO(image_bytes)).size
+        except Exception:
+            src_w = src_h = 768
+        # Same render-size cap the editor's edit path uses — larger edits
+        # spill the 24GB card into system RAM and crawl.
+        w, h = (int(x) for x in _local_edit_size(src_w, src_h).split("x"))
+        # Downscale the source to the render size BEFORE submitting, exactly
+        # like sd-server's own /v1/images/edits does at image-load time. A
+        # full-res reference makes the CPU-backed vision encoder + ref
+        # conditioning run at source resolution — measured: a 512x512 edit
+        # that renders in ~30s with a resized ref ran 25+ minutes without.
+        try:
+            import io
+            from PIL import Image
+            im = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((w, h), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            image_bytes = buf.getvalue()
+        except Exception:
+            logger.warning("image_edit: source downscale failed — submitting original size")
+
+        seed = body.get("seed")
+        try:
+            seed = int(seed)
+        except (TypeError, ValueError):
+            seed = -1
+        if seed < 0 and style and style.get("seed") is not None:
+            seed = int(style["seed"])
+        negative = str(body.get("negative_prompt") or "") or (style or {}).get("negative_prompt", "")
+
+        from src import video_generation
+        try:
+            job_id = await video_generation.start_image_edit_job(
+                image_b64=base64.b64encode(image_bytes).decode(),
+                prompt=styled,
+                model=model,
+                owner=user,
+                session_id=body.get("session_id"),
+                negative_prompt=negative,
+                width=w,
+                height=h,
+                seed=seed,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception:
+            logger.exception("image_edit: submit failed")
+            raise HTTPException(502, "The edit could not be started — is the image model served and the engine running?")
+        out = {
+            "job_id": job_id,
+            "status": "queued",
+            "model": model,
+            "source_image_id": image_id,
+        }
+        if style:
+            out["style"] = style.get("id")
+        return out
+
     @router.post("/api/image/enhance-prompt")
     async def enhance_prompt(request: Request):
         """Rewrite rough intent into a diffusion-ready scene description.

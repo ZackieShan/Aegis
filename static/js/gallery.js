@@ -13,7 +13,7 @@ import fileHandlerModule from './fileHandler.js';
 import settingsModule from './settings.js';
 import { renderMovieTab, stopMovieTab } from './movieMaker.js';
 import { renderQueueTab, stopQueueTab } from './jobQueue.js';
-import { renderCreateTab } from './studioCreate.js';
+import { renderCreateTab, setCreateSource } from './studioCreate.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -1422,7 +1422,11 @@ function _openDetail(img) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
         Edit
       </button>
-      ${_isVideoUrl(img.url) ? '' : `<button class="gallery-detail-back" id="gallery-animate-btn" title="Animate — turn this image into a short video clip" aria-label="Animate photo" style="display:inline-flex;align-items:center;gap:4px;">
+      ${_isVideoUrl(img.url) ? '' : `<button class="gallery-detail-back" id="gallery-stylize-btn" title="Stylize — reimagine this photo with an AI edit (prompt, style and model in Create)" aria-label="Stylize photo" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2m0 20v-2m7-7h-2M4 15H2m3.343-8.657L3.929 4.929m14.142 14.142-1.414-1.414M19.071 4.929l-1.414 1.414M6.343 17.657l-1.414 1.414"/><path d="m9 15 6-6 3 3-6 6-3.5.5z"/></svg>
+        Stylize
+      </button>
+      <button class="gallery-detail-back" id="gallery-animate-btn" title="Animate — turn this image into a short video clip (motion, length and model in Create)" aria-label="Animate photo" style="display:inline-flex;align-items:center;gap:4px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         Animate
       </button>`}
@@ -1798,32 +1802,17 @@ function _openDetail(img) {
   document.getElementById('gallery-edit-btn')?.addEventListener('click', _openInEditor);
   document.getElementById('gallery-edit-direct-btn')?.addEventListener('click', _openInEditor);
 
-  // Animate — image-to-video on an i2v-capable engine model (LTX). Fire and
-  // forget: the render takes minutes and the finished clip lands in the
-  // gallery via the normal video-job path, so no in-panel progress needed.
-  document.getElementById('gallery-animate-btn')?.addEventListener('click', async (ev) => {
-    const btn = ev.currentTarget;
-    const motion = window.prompt(
-      'Describe the motion for this clip:',
-      'subtle camera push-in, natural motion, cinematic'
-    );
-    if (motion === null) return;
-    btn.disabled = true;
-    try {
-      const r = await fetch('/api/video/generate', {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_id: img.id, prompt: motion.trim() || 'natural motion, cinematic', duration: 3 }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-      if (uiModule?.showToast) uiModule.showToast(`Animating with ${d.model} (${d.duration_s}s clip) — it appears in the Studio in a few minutes.`, 6000);
-    } catch (e) {
-      if (uiModule?.showError) uiModule.showError('Could not start the animation: ' + (e?.message || 'unknown'));
-    } finally {
-      btn.disabled = false;
-    }
-  });
+  // Animate / Stylize — both hand the photo to Create, where the full flow
+  // lives: prompt → style → model → length → Generate. The old path fired
+  // /api/video/generate from a window.prompt with a hardcoded 3s and no
+  // model choice, which is exactly the control the user kept asking for.
+  const _handToCreate = (kind) => {
+    setCreateSource({ id: img.id, url: img.url, prompt: img.prompt || '' }, kind);
+    detail.style.display = 'none';
+    document.querySelector('#gallery-modal .gallery-tab[data-tab="create"]')?.click();
+  };
+  document.getElementById('gallery-animate-btn')?.addEventListener('click', () => _handToCreate('video'));
+  document.getElementById('gallery-stylize-btn')?.addEventListener('click', () => _handToCreate('image'));
 
   // Rotate — server-side image rotation. Forces a fresh URL afterwards
   // so the browser doesn't show the old cached version. Shows a

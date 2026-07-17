@@ -12,6 +12,29 @@ let _models = { image: [], video: [] };
 let _styles = [];
 let _activeStyle = '';
 let _busy = false;
+let _source = null;           // {id, url, prompt} — a Photos still to animate/stylize
+
+/** Hand a Photos still to the Create tab (the Animate/Stylize buttons).
+ *  Call before switching to the tab — renderCreateTab reads it. */
+export function setCreateSource(source, kind) {
+  _source = source && source.id ? source : null;
+  if (kind === 'image' || kind === 'video') _kind = kind;
+}
+
+const _EDIT_MODEL_RE = /edit|inpaint|fill/i;
+
+function _kindModels() {
+  const all = _models[_kind] || [];
+  if (!_source) {
+    // Editing-only models can't generate from scratch — hide them until a
+    // source photo is attached.
+    return _kind === 'image' ? all.filter(m => !_EDIT_MODEL_RE.test(m.model)) : all;
+  }
+  if (_kind === 'video') {
+    return all.filter(m => m.i2v !== undefined ? m.i2v : /(?:^|[/\-_.])(?:ltx[0-9.]*|i2v)(?:$|[/\-_.])/i.test(m.model));
+  }
+  return all.filter(m => _EDIT_MODEL_RE.test(m.model));
+}
 
 function _el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -104,6 +127,7 @@ async function _generate(host) {
     if (_kind === 'video') {
       const dur = Number(document.getElementById('create-duration')?.value || 5);
       body.duration = Math.max(1, Math.min(16, isNaN(dur) ? 5 : dur));
+      if (_source) body.image_id = _source.id;
       const d = await _json('/api/video/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,6 +135,18 @@ async function _generate(host) {
       });
       _status(`Queued on ${d.model} — ${d.duration_s}s at ${d.fps}fps.`);
       // The render is now the Queue tab's story; take the user to it.
+      document.querySelector('#gallery-modal .gallery-tab[data-tab="queue"]')?.click();
+    } else if (_source) {
+      // Stylize the source photo — an async instruction edit, queued like a
+      // video render (the first run swaps in + cold-loads the edit model,
+      // which can take minutes; a held request would just time out).
+      body.image_id = _source.id;
+      const d = await _json('/api/image/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      _status(`Queued on ${d.model} — the edited photo lands in Photos when it finishes.`);
       document.querySelector('#gallery-modal .gallery-tab[data-tab="queue"]')?.click();
     } else {
       const size = document.getElementById('create-size')?.value || '';
@@ -148,7 +184,7 @@ function _fillModelSelect() {
   auto.value = '';
   auto.textContent = '— auto —';
   sel.appendChild(auto);
-  (_models[_kind] || []).forEach(m => {
+  _kindModels().forEach(m => {
     const o = document.createElement('option');
     o.value = m.model;
     o.textContent = m.label || (m.endpoint === 'comfyui' ? `${m.model} (ComfyUI)` : m.model);
@@ -178,14 +214,41 @@ function _render(host) {
   });
   host.appendChild(pills);
 
+  // Source photo (set by the Photos view's Animate/Stylize buttons): the
+  // prompt now describes what to DO to this image — motion for video,
+  // an edit instruction for image.
+  if (_source) {
+    const strip = _el('div', 'create-source');
+    const thumb = document.createElement('img');
+    thumb.className = 'create-source-thumb';
+    thumb.src = _source.url;
+    thumb.alt = 'Source photo';
+    strip.appendChild(thumb);
+    const label = _el('div', 'create-source-label',
+      _kind === 'video'
+        ? 'Animating this photo — describe the motion below.'
+        : 'Stylizing this photo — describe the change below.');
+    strip.appendChild(label);
+    const clear = _el('button', 'gallery-detail-back', '✕ Clear');
+    clear.type = 'button';
+    clear.title = 'Generate from scratch instead';
+    clear.addEventListener('click', () => { _source = null; _render(host); });
+    strip.appendChild(clear);
+    host.appendChild(strip);
+  }
+
   // Prompt + enhance
   const ta = document.createElement('textarea');
   ta.id = 'create-prompt';
   ta.className = 'create-prompt';
   ta.rows = 3;
-  ta.placeholder = _kind === 'video'
-    ? 'A lone rider crossing a red-rock desert at dusk, long shadows, slow tracking shot, hand-painted anime style with soft watercolor skies…'
-    : 'A weathered cowboy portrait at golden hour, warm rim light, painterly anime style, shallow depth of field…';
+  ta.placeholder = _source
+    ? (_kind === 'video'
+      ? 'subtle camera push-in, natural motion, cinematic…'
+      : 'turn it into a hand-painted watercolor illustration, soft pastel palette…')
+    : (_kind === 'video'
+      ? 'A lone rider crossing a red-rock desert at dusk, long shadows, slow tracking shot, hand-painted anime style with soft watercolor skies…'
+      : 'A weathered cowboy portrait at golden hour, warm rim light, painterly anime style, shallow depth of field…');
   ta.value = window.__createPromptDraft || '';
   ta.addEventListener('input', () => { window.__createPromptDraft = ta.value; });
   host.appendChild(ta);
@@ -242,7 +305,8 @@ function _render(host) {
     dur.min = '1'; dur.max = '16'; dur.step = '0.5'; dur.value = '5';
     dur.title = 'Seconds. Practical max ≈10s on LTX/HunyuanVideo (24fps), ≈16s on Wan (16fps) — the engine clamps to 257 frames.';
     opt('Seconds', dur);
-  } else {
+  } else if (!_source) {
+    // Edits keep the source photo's dimensions — a size picker would lie.
     const size = document.createElement('select');
     size.id = 'create-size';
     size.className = 'settings-select';

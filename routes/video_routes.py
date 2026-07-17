@@ -163,7 +163,12 @@ def setup_video_routes() -> APIRouter:
     @router.get("/api/video/models")
     async def video_models(request: Request):
         user = get_current_user(request)
-        return {"models": video_generation.list_video_models(user) + await _comfy_models()}
+        models = video_generation.list_video_models(user) + await _comfy_models()
+        # The Create tab filters to i2v-capable models when animating a
+        # still — classify server-side so the frontend needn't guess from ids.
+        for m in models:
+            m["i2v"] = _is_i2v(m.get("model") or "")
+        return {"models": models}
 
     @router.post("/api/video/generate")
     async def video_generate(request: Request):

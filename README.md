@@ -97,6 +97,10 @@ you fit them to your machine:
   any Studio still** into a clip (`/video image=last` or the Studio's Animate button). Chat uses
   your default model; Studio → Create lets you pick per render — Wan 2.2 (with 4-step Lightning
   LoRAs for clean hands), LTX-2, or HunyuanVideo 1.5.
+- **Stylize any photo** — the Stylize button on a Studio photo opens Create with the photo
+  attached: describe the change ("make it a watercolor"), pick a style and an edit model
+  (qwen-image-edit), and the result lands in Photos next to the original. Animate works the
+  same way — prompt, style, model, and clip length before anything renders.
 - **Movie maker** — stitch your clips into one film: drag to reorder, trim heads and tails,
   render. Clips of different sizes/framerates are matched automatically, and clips without
   audio are padded with silence so a mixed set still concatenates cleanly.

@@ -212,6 +212,7 @@ async def start_video_job(
     )
     _JOBS[job_id] = {
         "id": job_id,
+        "kind": "video",
         "queue_id": queue_id,
         "status": "queued",
         "prompt": prompt,
@@ -237,6 +238,95 @@ async def start_video_job(
     _JOBS[job_id]["_cancel_url"] = cancel_url
     asyncio.create_task(_poll_job(job_id, poll_url, headers))
     logger.info("Video job %s submitted (model=%s, %sx%s, %s frames)", job_id, model_id, width, height, video_frames)
+    return job_id
+
+
+async def start_image_edit_job(
+    image_b64: str,
+    prompt: str,
+    model: str,
+    owner: Optional[str] = None,
+    session_id: Optional[str] = None,
+    negative_prompt: str = "",
+    width: int = 512,
+    height: int = 512,
+    seed: int = -1,
+) -> str:
+    """Submit an instruction edit (qwen-image-edit family) to sd-server's
+    async /sdcpp/v1/img_gen and return a local job id in the same registry
+    video jobs use — status/cancel/queue behavior is identical.
+
+    Async on purpose: the synchronous /v1/images/edits call has to survive a
+    llama-swap model swap + a 21GB cold load + the CPU vision pass inside one
+    HTTP read timeout, and it demonstrably doesn't (first stylize after a
+    chat session timed out at 600s while the GPU kept rendering). A job
+    survives all of that, shows up in the unified queue, and is visible to
+    the GPU guard so chat can't evict it mid-render."""
+    import httpx
+
+    root, model_id, headers = await asyncio.to_thread(_upstream_root, model, owner)
+    submit_url = f"{root}/upstream/{model_id}/sdcpp/v1/img_gen"
+    payload = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt or "",
+        "width": int(width),
+        "height": int(height),
+        "seed": int(seed),
+        # Mirror sd-server's own /v1/images/edits mapping exactly: the source
+        # rides as ref_images[0] AND init_image (routes_openai.cpp does both),
+        # with auto-resize on so a mismatched ref can never run the vision
+        # encoder at full source resolution.
+        "ref_images": [image_b64],
+        "init_image": image_b64,
+        "auto_resize_ref_image": True,
+        "output_format": "png",
+    }
+
+    timeout = httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(submit_url, json=payload, headers=headers)
+        if r.status_code not in (200, 202):
+            raise ValueError(f"Edit submit failed ({r.status_code}): {r.text[:300]}")
+        envelope = r.json()
+    remote_id = str(envelope.get("id") or "")
+    if not remote_id:
+        raise ValueError(f"Image server returned no job id: {str(envelope)[:200]}")
+    poll_path = str(envelope.get("poll_url") or f"/sdcpp/v1/jobs/{remote_id}")
+    if poll_path.startswith(("http://", "https://")):
+        from urllib.parse import urlsplit
+        poll_path = urlsplit(poll_path).path or f"/sdcpp/v1/jobs/{remote_id}"
+
+    job_id = uuid.uuid4().hex[:12]
+    queue_id = job_queue.add(
+        "image",
+        prompt or "image edit",
+        owner=owner,
+        session_id=session_id,
+        external_id=job_id,
+        meta={"model": model_id, "width": int(width), "height": int(height)},
+    )
+    _JOBS[job_id] = {
+        "id": job_id,
+        "kind": "image",
+        "queue_id": queue_id,
+        "status": "queued",
+        "prompt": prompt,
+        "model": model_id,
+        "owner": owner,
+        "session_id": session_id,
+        "width": int(width),
+        "height": int(height),
+        "created": time.time(),
+        "remote_id": remote_id,
+        "video_url": None,
+        "image_id": None,
+        "error": None,
+        "progress": None,
+    }
+    _prune_jobs()
+    _JOBS[job_id]["_cancel_url"] = f"{root}/upstream/{model_id}/sdcpp/v1/jobs/{remote_id}/cancel"
+    asyncio.create_task(_poll_job(job_id, f"{root}/upstream/{model_id}{poll_path}", headers))
+    logger.info("Image edit job %s submitted (model=%s, %sx%s)", job_id, model_id, width, height)
     return job_id
 
 
@@ -314,12 +404,25 @@ async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
                 if isinstance(remote.get("progress"), (int, float)):
                     job["progress"] = remote["progress"]
                 result = remote.get("result") or {}
-                if result.get("b64_json"):
+                # vid_gen puts the payload at result.b64_json; img_gen nests
+                # it as result.images[{index, b64_json}].
+                b64 = result.get("b64_json")
+                if not b64:
+                    images = result.get("images") or []
+                    if isinstance(images, list) and images:
+                        b64 = (images[0] or {}).get("b64_json")
+                if b64:
                     # File + DB writes are blocking — keep them off the loop.
-                    await asyncio.to_thread(_finish_job, job, result)
+                    await asyncio.to_thread(_finish_job, job, result, b64)
                     return
                 if status in ("failed", "error", "canceled", "cancelled"):
-                    job["error"] = str(remote.get("error") or f"Video generation {status}")
+                    job["error"] = str(remote.get("error") or f"Generation {status}")
+                    job["status"] = "error"
+                    return
+                if status in ("completed", "done", "success"):
+                    # Terminal without a payload — never leave the job
+                    # spinning as "queued" forever.
+                    job["error"] = "Generation completed but returned no image data"
                     job["status"] = "error"
                     return
                 if not job.get("cancel_requested"):
@@ -351,22 +454,26 @@ async def _poll_job(job_id: str, poll_url: str, headers: dict) -> None:
         _mirror_queue(job)
 
 
-def _finish_job(job: Dict[str, Any], result: Dict[str, Any]) -> None:
-    ext = str(result.get("output_format") or "webm").lower()
+def _finish_job(job: Dict[str, Any], result: Dict[str, Any], b64: Optional[str] = None) -> None:
+    default_ext = "png" if job.get("kind") == "image" else "webm"
+    ext = str(result.get("output_format") or default_ext).lower()
     try:
-        raw = base64.b64decode(result["b64_json"])
+        raw = base64.b64decode(b64 if b64 is not None else result["b64_json"])
     except Exception:
-        job["error"] = "Video server returned undecodable data"
+        job["error"] = "The render server returned undecodable data"
         job["status"] = "error"
         return
     finish_job_bytes(job, raw, ext)
 
 
 def finish_job_bytes(job: Dict[str, Any], raw: bytes, ext: str) -> None:
-    """Write a finished clip to disk + gallery and mark the job done. Shared
+    """Write a finished render to disk + gallery and mark the job done. Shared
     by the sd-server poller (b64 results) and the ComfyUI runner (raw bytes)."""
-    ext = str(ext or "webm").lower()
-    if ext not in ("webm", "mp4", "avi", "webp"):
+    ext = str(ext or "").lower()
+    if job.get("kind") == "image":
+        if ext not in ("png", "jpg", "jpeg", "webp"):
+            ext = "png"
+    elif ext not in ("webm", "mp4", "avi", "webp"):
         ext = "webm"
 
     # Store MP4, not webm/avi: browsers play both, but phones, editors and
@@ -387,16 +494,18 @@ def finish_job_bytes(job: Dict[str, Any], raw: bytes, ext: str) -> None:
 
     image_id = ""
     try:
-        from src.database import SessionLocal, GalleryImage
+        from core.database import SessionLocal, GalleryImage
         image_id = str(uuid.uuid4())
         db = SessionLocal()
+        quality = ("edit" if job.get("kind") == "image"
+                   else f"{job.get('video_frames')}f@{job.get('fps')}fps")
         db.add(GalleryImage(
             id=image_id,
             filename=filename,
             prompt=job.get("prompt"),
             model=job.get("model"),
             size=f"{job.get('width')}x{job.get('height')}",
-            quality=f"{job.get('video_frames')}f@{job.get('fps')}fps",
+            quality=quality,
             session_id=job.get("session_id"),
             owner=job.get("owner"),
         ))
