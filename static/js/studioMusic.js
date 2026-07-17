@@ -323,7 +323,31 @@ async function _renderVoices(section) {
         const name = typeof v === 'string' ? v : (v.name || v.id || '');
         if (!name) return;
         const row = _el('div', 'voice-row');
-        row.appendChild(_el('span', 'music-meta', `🎙 ${name} (cloned)`));
+        row.appendChild(_el('span', 'music-meta', `🎙 ${name} (cloned · ready)`));
+        // Test synthesizes with this voice — the backend auto-routes cloned
+        // voices to the Chatterbox endpoint, whatever the saved provider is.
+        const test = _el('button', '', '▶ Test'); test.type = 'button';
+        test.title = 'Hear this voice (the first playback takes ~20s while the voice engine warms up)';
+        test.addEventListener('click', () => _previewVoice(section, name));
+        row.appendChild(test);
+        const use = _el('button', '', 'Use this voice'); use.type = 'button';
+        use.title = 'Make this the voice for read-aloud and Voice Mode replies';
+        use.addEventListener('click', async () => {
+          try {
+            const cur = await _json('/api/auth/settings');
+            cur.tts_voice = name;
+            await _json('/api/auth/settings', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cur),
+            });
+            _voiceStatus(section, `Aegis now speaks as "${name}".`);
+          } catch (e) {
+            const msg = /admin/i.test(e.message)
+              ? 'Setting the default voice needs an admin account — an admin can pick it in Settings → Text to Speech.'
+              : 'Could not save: ' + e.message;
+            _voiceStatus(section, msg, true);
+          }
+        });
+        row.appendChild(use);
         const del = _el('button', '', 'Delete'); del.type = 'button';
         del.addEventListener('click', async () => {
           try {
@@ -368,14 +392,18 @@ async function _renderVoices(section) {
       const blob = new Blob(_recChunks, { type: (_rec && _rec.mimeType) || 'audio/webm' });
       if (blob.size < 8000) { _voiceStatus(section, 'Too short — read a couple of sentences.', true); return; }
       try {
-        _voiceStatus(section, 'Saving voice…');
+        _voiceStatus(section, 'Converting and saving your sample…');
         const fd = new FormData();
         fd.append('name', name);
         fd.append('file', blob, 'sample.webm');
         const r = await fetch('/api/tts/my-voices', { method: 'POST', credentials: 'same-origin', body: fd });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.detail?.message || d.detail || `Save failed (${r.status})`);
-        _voiceStatus(section, `Voice "${name}" saved — it appears under cloned voices (first synthesis is slow while the model loads).`);
+        const secs = d.seconds ? ` (${d.seconds}s sample)` : '';
+        _voiceStatus(section,
+          `✓ Voice "${name}" saved${secs} and ready — nothing else to do. `
+          + `Press its ▶ Test button to hear it (the very first playback takes ~20s while the voice engine warms up; after that it's fast), `
+          + `then "Use this voice" to make Aegis speak as you.`);
         nameIn.value = '';
         refreshCloned();
       } catch (e) {

@@ -225,6 +225,23 @@ class TTSService:
         voice = (voice or "").strip() or settings["tts_voice"]
         speed = _safe_speed(settings.get("tts_speed", "1"))
 
+        # Cloned voices exist only on a Chatterbox-serving endpoint. If the
+        # requested voice is one of the user's clones and the saved provider is
+        # something else (Kokoro, browser, another endpoint), auto-route this
+        # request — so testing or reading aloud in "your" voice Just Works
+        # without flipping providers in Settings first.
+        if voice and any(v.get("id") == voice for v in cloned_voice_catalog()):
+            already_cb = provider.startswith("endpoint:") and \
+                self._endpoint_serves_chatterbox(provider.split(":", 1)[1])
+            if not already_cb:
+                cb_ep, cb_model = self._find_chatterbox_endpoint()
+                if cb_ep:
+                    provider, model = f"endpoint:{cb_ep}", cb_model
+                    logger.info(f"TTS: cloned voice '{voice}' — auto-routing to Chatterbox endpoint {cb_ep}")
+                else:
+                    logger.warning(f"TTS: cloned voice '{voice}' requested but no Chatterbox endpoint is serving")
+                    return None
+
         if provider in ("disabled", "browser"):
             return None
 
@@ -294,6 +311,26 @@ class TTSService:
             return any("chatterbox" in str(m).lower() for m in cached)
         except Exception:
             return False
+
+    @staticmethod
+    def _find_chatterbox_endpoint():
+        """(endpoint_id, model_id) of the first enabled endpoint serving a
+        Chatterbox model, or (None, None). Used to auto-route cloned voices."""
+        try:
+            import json
+            from core.database import SessionLocal, ModelEndpoint
+            db = SessionLocal()
+            try:
+                for ep in db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True).all():  # noqa: E712
+                    cached = json.loads(getattr(ep, "cached_models", None) or "[]") or []
+                    for m in cached:
+                        if "chatterbox" in str(m).lower():
+                            return ep.id, str(m)
+            finally:
+                db.close()
+        except Exception:
+            pass
+        return None, None
 
     def set_voice(self, voice: str):
         """Legacy no-op — voice is now managed via admin settings."""
