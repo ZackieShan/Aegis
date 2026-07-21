@@ -858,6 +858,15 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
     from src.llm_core import httpx_get_kimi_aware
     base = resolve_url(_normalize_base(base_url))
     provider = _safe_detect_provider(base)
+    # LOCAL endpoints (llama-swap, Ollama) serve deliberately mixed modalities:
+    # the user's own tts/image/video aliases live beside chat models, and app
+    # features DEPEND on them staying in cached_models (the cloned-voice
+    # auto-route and the Settings "Voice Cloning" provider both look for
+    # chatterbox/qwen3-tts there). The _is_chat_model filter exists to keep
+    # remote API catalogs (OpenAI's dall-e/tts-1/whisper noise) out of the
+    # chat picker — filtering a local engine's list broke voice cloning on
+    # every model refresh (2026-07-17).
+    _keep_all = any(h in base for h in ("127.0.0.1", "localhost", "0.0.0.0"))
     if provider == "chatgpt-subscription":
         from src.chatgpt_subscription import fetch_available_models
         if api_key:
@@ -912,7 +921,7 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
                 for _e in _PROVIDER_CURATED.get(_ck, []):
                     if _e not in set(models) and not any(m.startswith(_e) for m in models):
                         models.append(_e)
-            return [m for m in models if _is_chat_model(m)]
+            return models if _keep_all else [m for m in models if _is_chat_model(m)]
     except httpx.HTTPStatusError as e:
         if e.response is not None and _is_loading_model_response(e.response):
             logger.info("Endpoint still loading model at %s", _redact_url_for_log(url))
@@ -939,7 +948,7 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
             data = r.json()
             models = _ollama_model_names(data)
             if models:
-                return [m for m in models if _is_chat_model(m)]
+                return models if _keep_all else [m for m in models if _is_chat_model(m)]
     except Exception as e:
         logger.debug(f"Ollama /api/tags probe failed for {base}: {e}")
     # Fall back to curated list if the provider has a URL-based match (e.g. z.ai has no /models endpoint)

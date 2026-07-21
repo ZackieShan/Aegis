@@ -1753,6 +1753,14 @@ function _fmtCtx(n) { return n >= 1024 ? (n / 1024).toFixed(0) + 'K' : String(n)
 async function _cmdEngine(args) {
   const sub = (args[0] || '').toLowerCase();
 
+  // No args (or `/engine edit`) opens the visual context editor — the UI for
+  // what `/engine set` does on the command line. Falls through to the text
+  // status if the panel module didn't load.
+  if ((!sub || sub === 'edit' || sub === 'ui') && window.enginePanel) {
+    window.enginePanel.open();
+    return true;
+  }
+
   if (sub === 'set' && args[1] && args[2]) {
     const model = args[1], ctx = parseInt(args[2], 10);
     if (!ctx) { slashReplyMd('Usage: `/engine set <model> <tokens>` — e.g. `/engine set qwen3-coder-30b 65536`'); return true; }
@@ -1802,12 +1810,13 @@ async function _cmdEngine(args) {
 
   if (sub === 'help') {
     slashReplyMd([
-      '**Engine tuner** — right-size each model\'s token window to your GPU automatically.',
+      '**Engine tuner** — right-size each model\'s token window to your GPU.',
       '',
-      '`/engine` — show VRAM + current vs recommended context',
+      '`/engine` — open the visual context editor (set each model\'s window)',
+      '`/engine status` — quick text view: VRAM + current vs recommended',
       '`/engine tune` — apply the recommended size to every model',
       '`/engine tune <model>` — auto-tune just one',
-      '`/engine set <model> <tokens>` — set it yourself',
+      '`/engine set <model> <tokens>` — set one from the command line',
       '`/engine unload` — free engine VRAM now (models reload on next use)',
       '',
       'No YAML editing, no restart — llama-swap hot-reloads the change.',

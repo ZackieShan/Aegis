@@ -240,3 +240,145 @@ def test_kokoro_british_voices_use_b_pipeline():
     assert p._pipe_for("bf_emma") == "PIPE_B"
     assert p._pipe_for("af_heart") == "PIPE_A"
     assert p._pipe_for("") == "PIPE_A"
+
+
+# ── VibeVoice narration (2026-07-17) ──
+
+def test_vibevoice_graph_shape():
+    g = comfyui_workflows.vibevoice_narrate_graph(
+        "[1]: Hello.\n[2]: Hi there.", speaker_voices={1: "a.wav", 2: "b.wav"}, seed=7)
+    node = next(n for n in g.values() if n["class_type"] == "VibeVoiceMultipleSpeakersNode")
+    assert node["inputs"]["model"] == "VibeVoice-Large"
+    # sdpa is pinned (no flash-attn/sage in the ComfyUI venv) and the LLM runs
+    # 4-bit — full bf16 wouldn't share the 24GB card with anything else.
+    assert node["inputs"]["attention_type"] == "sdpa"
+    assert node["inputs"]["quantize_llm"] == "4bit"
+    assert node["inputs"]["free_memory_after_generate"] is True
+    assert node["inputs"]["use_sampling"] is False
+    assert node["inputs"]["cfg_scale"] == 1.3
+    node_id = next(k for k, n in g.items() if n["class_type"] == "VibeVoiceMultipleSpeakersNode")
+    save = next(n for n in g.values() if n["class_type"] == "SaveAudioMP3")
+    assert save["inputs"]["audio"] == [node_id, 0]
+    # Both speakers cloned through LoadAudio nodes.
+    loads = {k: n for k, n in g.items() if n["class_type"] == "LoadAudio"}
+    assert {n["inputs"]["audio"] for n in loads.values()} == {"a.wav", "b.wav"}
+    assert node["inputs"]["speaker1_voice"][1] == 0
+    assert g[node["inputs"]["speaker1_voice"][0]]["inputs"]["audio"] == "a.wav"
+    assert g[node["inputs"]["speaker2_voice"][0]]["inputs"]["audio"] == "b.wav"
+
+
+def test_vibevoice_graph_speaker_edges():
+    # Unmapped speakers stay synthetic (no LoadAudio, no speakerN_voice input);
+    # out-of-range or empty mappings are dropped, not crashed on.
+    g = comfyui_workflows.vibevoice_narrate_graph(
+        "[1]: solo", speaker_voices={2: "b.wav", 5: "x.wav", 3: ""}, seed=1)
+    node = next(n for n in g.values() if n["class_type"] == "VibeVoiceMultipleSpeakersNode")
+    assert "speaker1_voice" not in node["inputs"]
+    assert "speaker2_voice" in node["inputs"]
+    assert "speaker3_voice" not in node["inputs"]
+    assert "speaker5_voice" not in node["inputs"]
+    assert sum(1 for n in g.values() if n["class_type"] == "LoadAudio") == 1
+    # Negative seeds clamp to >= 0 (the node's INT floor).
+    g2 = comfyui_workflows.vibevoice_narrate_graph("[1]: hi", seed=-1)
+    n2 = next(n for n in g2.values() if n["class_type"] == "VibeVoiceMultipleSpeakersNode")
+    assert n2["inputs"]["seed"] == 0
+
+
+def test_vibevoice_graph_requires_script():
+    with pytest.raises(ValueError):
+        comfyui_workflows.vibevoice_narrate_graph("   ")
+
+
+def test_vibevoice_catalog_gated_and_kinds(monkeypatch):
+    spec = comfyui_workflows.COMFY_AUDIO_MODELS["comfy-vibevoice-narrate"]
+    assert spec["builder"] is comfyui_workflows.vibevoice_narrate_graph
+    assert any(f.startswith("vibevoice/VibeVoice-Large/") for f in spec["required_files"])
+    assert any(f.startswith("vibevoice/tokenizer/") for f in spec["required_files"])
+    monkeypatch.setattr(comfyui_workflows.os.path, "exists", lambda p: False)
+    assert comfyui_workflows.available_audio_models() == []
+    monkeypatch.setattr(comfyui_workflows.os.path, "exists", lambda p: True)
+    assert "comfy-vibevoice-narrate" in comfyui_workflows.available_audio_models()
+    assert comfyui_workflows.audio_model_kind("comfy-vibevoice-narrate") == "narration"
+    assert comfyui_workflows.audio_model_kind("comfy-acestep1.5-song") == "song"
+    assert comfyui_workflows.audio_model_kind("comfy-nope") == "song"
+
+
+@pytest.mark.asyncio
+async def test_song_route_rejects_narration_model(monkeypatch):
+    """A narration model routed into the tags/lyrics call shape would
+    TypeError inside the builder — the route must bounce it up front."""
+    from fastapi import HTTPException
+    import routes.audio_routes as ar
+    monkeypatch.setattr(ar, "require_privilege", lambda req, priv: "")
+    call = _audio_route("/api/audio/generate")
+    with pytest.raises(HTTPException) as e:
+        await call(_Req({"tags": "jazz", "model": "comfy-vibevoice-narrate"}))
+    assert e.value.status_code == 400
+    assert "narrate" in str(e.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_narrate_route_requires_script(monkeypatch):
+    from fastapi import HTTPException
+    import routes.audio_routes as ar
+    monkeypatch.setattr(ar, "require_privilege", lambda req, priv: "")
+    call = _audio_route("/api/audio/narrate")
+    with pytest.raises(HTTPException) as e:
+        await call(_Req({"speakers": {"1": "zac"}}))
+    assert e.value.status_code == 400
+    assert "script" in str(e.value.detail).lower()
+
+
+@pytest.mark.asyncio
+async def test_narrate_route_rejects_song_model(monkeypatch):
+    from fastapi import HTTPException
+    import routes.audio_routes as ar
+    monkeypatch.setattr(ar, "require_privilege", lambda req, priv: "")
+    call = _audio_route("/api/audio/narrate")
+    with pytest.raises(HTTPException) as e:
+        await call(_Req({"script": "[1]: hi", "model": "comfy-acestep1.5-song"}))
+    assert e.value.status_code == 400
+    assert "not a narration model" in str(e.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_narrate_route_speaker_validation(tmp_path, monkeypatch):
+    """Voice names resolve through the Voice Lab slug inside VOICES_DIR only;
+    unknown names 404, bad speaker keys 400."""
+    from fastapi import HTTPException
+    import routes.audio_routes as ar
+    import src.constants as sconstants
+    from src import comfyui_workflows as cw
+    monkeypatch.setattr(ar, "require_privilege", lambda req, priv: "")
+    monkeypatch.setattr(sconstants, "VOICES_DIR", str(tmp_path))
+    monkeypatch.setattr(cw, "available_audio_models",
+                        lambda: ["comfy-vibevoice-narrate"])
+    call = _audio_route("/api/audio/narrate")
+
+    with pytest.raises(HTTPException) as e:
+        await call(_Req({"script": "[1]: hi", "speakers": {"1": "ghost"}}))
+    assert e.value.status_code == 404
+
+    with pytest.raises(HTTPException) as e:
+        await call(_Req({"script": "[1]: hi", "speakers": {"9": "zac"}}))
+    assert e.value.status_code == 400
+
+    with pytest.raises(HTTPException) as e:
+        await call(_Req({"script": "[1]: hi", "speakers": {"one": "zac"}}))
+    assert e.value.status_code == 400
+
+    # Happy path: a real sample resolves and the job is queued.
+    (tmp_path / "zac.wav").write_bytes(b"RIFFxxxx")
+    from src import comfyui_client as cc
+    monkeypatch.setattr(cc, "is_up", lambda timeout=2.0: True)
+    seen = {}
+
+    async def fake_start(**kw):
+        seen.update(kw)
+        return "job123"
+
+    monkeypatch.setattr(cc, "start_narrate_job", fake_start)
+    resp = await call(_Req({"script": "[1]: hi", "speakers": {"1": "Zac"}, "seed": 5}))
+    assert resp["job_id"] == "job123" and resp["speakers"] == [1]
+    assert seen["speaker_voice_paths"][1].endswith("zac.wav")
+    assert seen["seed"] == 5

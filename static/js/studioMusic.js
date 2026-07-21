@@ -1,9 +1,11 @@
 /**
  * Studio → Music: the Music Maker.
  *
- * Three sections, all controls visible:
+ * Four sections, all controls visible:
  *   1. Song Composer — the audio maker panel (tags, lyrics, cover reference,
  *      seconds, seed, model) rendered by studioCreate with the kind locked.
+ *   1b. Narrate — long-form multi-speaker speech (VibeVoice) with cloned
+ *      voices per speaker; only shows when the model files are on disk.
  *   2. Tracks — a real player over everything in the library's Music section:
  *      play/pause per row, prev/next, seek, auto-advance. The <audio> element
  *      lives OUTSIDE the modal DOM, so a song keeps playing while you browse
@@ -257,6 +259,98 @@ async function _renderTracks(section) {
   _syncUI();
 }
 
+// ── narration (VibeVoice long-form multi-speaker) ─────────────────────────────
+async function _renderNarrate(section) {
+  section.replaceChildren();
+  let avail = [];
+  try {
+    const d = await _json('/api/audio/models');
+    avail = d.narrate || [];
+  } catch (_) { /* engine down — section stays hidden */ }
+  if (!avail.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  section.appendChild(_el('h3', '', 'Narrate'));
+  section.appendChild(_el('div', 'music-sub',
+    'Long-form speech (audiobooks, podcasts — up to 4 speakers) on '
+    + (avail[0].label || avail[0].model) + '. Label lines "[1]: …" / "[2]: …" '
+    + 'and give each speaker a cloned voice from the Voice Lab; unassigned '
+    + 'speakers get a generated voice. Long scripts render for a while — '
+    + 'watch the Queue tab.'));
+
+  const ta = document.createElement('textarea');
+  ta.className = 'create-prompt';
+  ta.rows = 6;
+  ta.placeholder = '[1]: Welcome back to the show. Today we have a special guest.\n[2]: Thanks for having me — great to be here.';
+  ta.value = window.__narrateScriptDraft || '';
+  ta.addEventListener('input', () => { window.__narrateScriptDraft = ta.value; });
+  section.appendChild(ta);
+
+  // Speaker → cloned-voice pickers (the same store the Voice Lab records into).
+  let voices = [];
+  try {
+    const d = await _json('/api/tts/my-voices');
+    voices = (d.voices || [])
+      .map(v => (typeof v === 'string' ? v : (v.id || v.name || '')))
+      .filter(Boolean);
+  } catch (_) { /* cloning engine may not be set up — auto voices still work */ }
+  const row = _el('div', 'voice-row');
+  const sels = {};
+  for (let n = 1; n <= 4; n++) {
+    const wrap = _el('label', 'music-meta', `Speaker ${n} `);
+    const sel = document.createElement('select');
+    const auto = document.createElement('option');
+    auto.value = ''; auto.textContent = 'auto voice';
+    sel.appendChild(auto);
+    voices.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = `🎙 ${v}`;
+      sel.appendChild(o);
+    });
+    sels[n] = sel;
+    wrap.appendChild(sel);
+    row.appendChild(wrap);
+  }
+  section.appendChild(row);
+
+  const bar = _el('div', 'voice-row');
+  const go = _el('button', '', '🎙 Narrate');
+  go.type = 'button';
+  bar.appendChild(go);
+  section.appendChild(bar);
+  const status = _el('div', 'voice-status', '');
+  section.appendChild(status);
+  const say = (msg, isErr) => {
+    status.textContent = msg || '';
+    status.style.color = isErr ? 'var(--accent-error, #e5484d)' : '';
+  };
+
+  go.addEventListener('click', async () => {
+    const script = ta.value.trim();
+    if (!script) { say('Write the script first — "[1]: line" per speaker.', true); return; }
+    const speakers = {};
+    Object.entries(sels).forEach(([n, sel]) => { if (sel.value) speakers[n] = sel.value; });
+    go.disabled = true;
+    const orig = go.textContent;
+    go.textContent = 'Queuing…';
+    try {
+      await _json('/api/audio/narrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script, speakers }),
+      });
+      say('Queued — the narration lands in Tracks when it finishes.');
+      window.dispatchEvent(new CustomEvent('studio-job-queued', { detail: { kind: 'audio' } }));
+      document.querySelector('#gallery-modal .gallery-tab[data-tab="queue"]')?.click();
+    } catch (e) {
+      say('Narration failed: ' + e.message, true);
+    } finally {
+      go.disabled = false;
+      go.textContent = orig;
+    }
+  });
+}
+
 // ── voice lab ─────────────────────────────────────────────────────────────────
 function _voiceStatus(section, msg, isErr) {
   const s = section.querySelector('.voice-status');
@@ -486,6 +580,9 @@ export async function renderMusicTab(host) {
   const composer = _el('div', 'music-section');
   host.appendChild(composer);
 
+  const narrate = _el('div', 'music-section');
+  host.appendChild(narrate);
+
   const tracks = _el('div', 'music-section');
   host.appendChild(tracks);
 
@@ -493,6 +590,7 @@ export async function renderMusicTab(host) {
   host.appendChild(voices);
 
   await renderCreateTab(composer, 'audio');
+  await _renderNarrate(narrate);
   await _renderTracks(tracks);
   await _renderVoices(voices);
 }

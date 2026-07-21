@@ -136,8 +136,8 @@ def _models_group(doc: Dict) -> Dict[str, Any]:
                                extra_actions=[_api("Free VRAM now", "/api/engine/unload")] if running else None))
             ctxs = ", ".join(f"{m['model'].split('-')[0]} {m['current_ctx']//1024 or m['current_ctx']}K"
                              for m in models[:3])
-            items.append(_item("context", "Context auto-tuner", "ok",
-                               f"windows sized to your GPU ({ctxs})", _cmd("/engine"),
+            items.append(_item("context", "Context windows", "ok",
+                               f"set each model's token window ({ctxs}) — click to edit", _cmd("/engine"),
                                extra_actions=[_api("Auto-tune now", "/api/engine/tune")]))
         else:
             items.append(_item("engine", "Local model engine (llama.cpp)", "off",

@@ -55,6 +55,16 @@ OPENAI_VOICES = [
 
 CLONED_SAMPLE_EXTS = (".wav", ".mp3", ".flac", ".ogg")
 
+# Model ids that speak the user's cloned voices. Chatterbox came first; the
+# Qwen3-TTS engine serves the same samples faster. Substring match — llama-swap
+# ids are exact, but API providers may prefix/namespace theirs.
+CLONE_CAPABLE_TTS_MODELS = ("chatterbox", "qwen3-tts")
+
+
+def _is_clone_capable_model(model_id) -> bool:
+    m = str(model_id or "").lower()
+    return any(marker in m for marker in CLONE_CAPABLE_TTS_MODELS)
+
 
 def cloned_voice_catalog() -> list:
     """The user's cloned voices — one per sample file in VOICES_DIR (the same
@@ -225,11 +235,11 @@ class TTSService:
         voice = (voice or "").strip() or settings["tts_voice"]
         speed = _safe_speed(settings.get("tts_speed", "1"))
 
-        # Cloned voices exist only on a Chatterbox-serving endpoint. If the
-        # requested voice is one of the user's clones and the saved provider is
-        # something else (Kokoro, browser, another endpoint), auto-route this
-        # request — so testing or reading aloud in "your" voice Just Works
-        # without flipping providers in Settings first.
+        # Cloned voices exist only on a cloning endpoint (Chatterbox or
+        # Qwen3-TTS). If the requested voice is one of the user's clones and
+        # the saved provider is something else (Kokoro, browser, another
+        # endpoint), auto-route this request — so testing or reading aloud in
+        # "your" voice Just Works without flipping providers in Settings first.
         if voice and any(v.get("id") == voice for v in cloned_voice_catalog()):
             already_cb = provider.startswith("endpoint:") and \
                 self._endpoint_serves_chatterbox(provider.split(":", 1)[1])
@@ -335,37 +345,80 @@ class TTSService:
 
     @staticmethod
     def _endpoint_serves_chatterbox(endpoint_id: str) -> bool:
-        try:
-            import json
-            from core.database import SessionLocal, ModelEndpoint
-            db = SessionLocal()
+        """True when the endpoint serves any voice-cloning model (Chatterbox
+        or Qwen3-TTS) — the name is historical; other modules import it."""
+        # Retry once: a transient DB error (e.g. sqlite locked during app
+        # startup) must not silently demote a cloned voice to "not serving" —
+        # that surfaced as opaque 500s on the chat play button (2026-07-17).
+        import time as _time
+        for attempt in (1, 2):
             try:
-                ep = db.query(ModelEndpoint).filter(ModelEndpoint.id == endpoint_id).first()
-                cached = json.loads(getattr(ep, "cached_models", None) or "[]") if ep else []
-            finally:
-                db.close()
-            return any("chatterbox" in str(m).lower() for m in cached)
-        except Exception:
-            return False
+                import json
+                from core.database import SessionLocal, ModelEndpoint
+                db = SessionLocal()
+                try:
+                    ep = db.query(ModelEndpoint).filter(ModelEndpoint.id == endpoint_id).first()
+                    cached = json.loads(getattr(ep, "cached_models", None) or "[]") if ep else []
+                finally:
+                    db.close()
+                return any(_is_clone_capable_model(m) for m in cached)
+            except Exception:
+                logger.warning("Chatterbox endpoint check failed (attempt %d)", attempt, exc_info=True)
+                _time.sleep(0.25)
+        return False
 
     @staticmethod
     def _find_chatterbox_endpoint():
-        """(endpoint_id, model_id) of the first enabled endpoint serving a
-        Chatterbox model, or (None, None). Used to auto-route cloned voices."""
-        try:
-            import json
-            from core.database import SessionLocal, ModelEndpoint
-            db = SessionLocal()
+        """(endpoint_id, model_id) of the best enabled endpoint serving a
+        voice-cloning model (Chatterbox or Qwen3-TTS), or (None, None). Used
+        to auto-route cloned voices. The name is historical; other modules
+        import it. When several clone-capable models are served, the user's
+        saved endpoint/model choice wins (exact match), then the first
+        marker hit in endpoint order — so picking 'qwen3-tts' in Settings
+        actually routes clones through Qwen rather than whichever engine the
+        DB scan happens to hit first."""
+        import time as _time
+        for attempt in (1, 2):
             try:
-                for ep in db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True).all():  # noqa: E712
-                    cached = json.loads(getattr(ep, "cached_models", None) or "[]") or []
-                    for m in cached:
-                        if "chatterbox" in str(m).lower():
-                            return ep.id, str(m)
-            finally:
-                db.close()
-        except Exception:
-            pass
+                import json
+                from core.database import SessionLocal, ModelEndpoint
+
+                preferred_ep = preferred_model = None
+                try:
+                    from src.settings import load_settings
+                    saved = load_settings()
+                    prov = str(saved.get("tts_provider") or "")
+                    if prov.startswith("endpoint:"):
+                        preferred_ep = prov.split(":", 1)[1]
+                    saved_model = str(saved.get("tts_model") or "").strip().lower()
+                    if _is_clone_capable_model(saved_model):
+                        preferred_model = saved_model
+                except Exception:
+                    pass
+
+                db = SessionLocal()
+                try:
+                    best = None  # ((model_rank, endpoint_rank), endpoint_id, model_id)
+                    for ep in db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True).all():  # noqa: E712
+                        cached = json.loads(getattr(ep, "cached_models", None) or "[]") or []
+                        for m in cached:
+                            if not _is_clone_capable_model(m):
+                                continue
+                            rank = (
+                                0 if str(m).lower() == preferred_model else 1,
+                                0 if ep.id == preferred_ep else 1,
+                            )
+                            if best is None or rank < best[0]:
+                                best = (rank, ep.id, str(m))
+                    if best:
+                        return best[1], best[2]
+                    # Query succeeded and genuinely found nothing — no retry.
+                    return None, None
+                finally:
+                    db.close()
+            except Exception:
+                logger.warning("Chatterbox endpoint lookup failed (attempt %d)", attempt, exc_info=True)
+                _time.sleep(0.25)
         return None, None
 
     def set_voice(self, voice: str):

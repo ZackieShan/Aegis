@@ -87,7 +87,8 @@ def setup_audio_routes() -> APIRouter:
                 return []
             return [
                 {"model": m, "endpoint": "comfyui",
-                 "label": comfyui_workflows.COMFY_AUDIO_MODELS[m].get("label", m)}
+                 "label": comfyui_workflows.COMFY_AUDIO_MODELS[m].get("label", m),
+                 "kind": comfyui_workflows.audio_model_kind(m)}
                 for m in comfyui_workflows.available_audio_models()
             ]
         except Exception:
@@ -95,7 +96,14 @@ def setup_audio_routes() -> APIRouter:
 
     @router.get("/api/audio/models")
     async def audio_models(request: Request):
-        return {"models": await _comfy_models()}
+        # "models" stays song-only — it feeds the Song Composer's model picker,
+        # where a narration model would silently produce spoken tags. Narration
+        # availability rides alongside for the Narrate UI.
+        entries = await _comfy_models()
+        return {
+            "models": [e for e in entries if e["kind"] == "song"],
+            "narrate": [e for e in entries if e["kind"] == "narration"],
+        }
 
     @router.post("/api/audio/reference")
     async def audio_reference(request: Request, file: UploadFile = File(...)):
@@ -184,6 +192,10 @@ def setup_audio_routes() -> APIRouter:
         model = str(body.get("model") or "").strip() or "comfy-acestep1.5-song"
         if model not in comfyui_workflows.COMFY_AUDIO_MODELS:
             raise HTTPException(400, f"Unknown audio model '{model}'.")
+        if comfyui_workflows.audio_model_kind(model) != "song":
+            # Narration builders take script/speaker kwargs, not tags/lyrics —
+            # routing one here would TypeError inside the graph builder.
+            raise HTTPException(400, f"'{model}' is a narration model — use /api/audio/narrate.")
         served = comfyui_workflows.available_audio_models()
         if model not in served:
             raise HTTPException(400, "The ACE-Step model files are missing from models/audio/.")
@@ -213,6 +225,82 @@ def setup_audio_routes() -> APIRouter:
             "job_id": job_id, "status": "queued", "model": model,
             "seconds": seconds, "has_lyrics": bool(lyrics),
             "cover": bool(reference),
+        }
+
+    @router.post("/api/audio/narrate")
+    async def audio_narrate(request: Request):
+        """Long-form multi-speaker narration on VibeVoice-Large.
+
+        Body: {"script": "[1]: line\\n[2]: line…", "speakers": {"1": "zac"},
+        "seed": n?}. Speaker voices name cloned samples from the Voice Lab
+        (data/voices/<slug>.wav — the same store /api/tts/my-voices writes);
+        unmapped speakers get a synthetic voice. Returns a job id polled via
+        /api/video/status/{id}, same as songs."""
+        user = require_privilege(request, "can_generate_images")
+        body = await request.json()
+        script = str(body.get("script") or body.get("text") or "").strip()
+        if not script:
+            raise HTTPException(400, "Write the script — '[1]: line' / '[2]: line' speaker labels, up to 4 speakers.")
+        if len(script) > 200_000:
+            raise HTTPException(400, "Script is too long (200k characters max).")
+
+        from src import comfyui_client, comfyui_workflows
+        model = str(body.get("model") or "").strip() or "comfy-vibevoice-narrate"
+        if comfyui_workflows.audio_model_kind(model) != "narration":
+            raise HTTPException(400, f"'{model}' is not a narration model.")
+        if model not in comfyui_workflows.available_audio_models():
+            raise HTTPException(400, "The VibeVoice model files are missing from models/vibevoice/.")
+
+        # Speaker → cloned-voice mapping. Slug through the same rule the Voice
+        # Lab saves under, and resolve inside VOICES_DIR only — a voice name
+        # can never become a path.
+        from routes.tts_routes import _voice_slug
+        from src.constants import VOICES_DIR
+        speakers = body.get("speakers") or {}
+        if not isinstance(speakers, dict):
+            raise HTTPException(400, "speakers must map speaker numbers to voice names, e.g. {\"1\": \"zac\"}.")
+        voice_paths = {}
+        for key, name in speakers.items():
+            try:
+                num = int(key)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"Speaker key '{key}' is not a number (use 1-4).")
+            if not (1 <= num <= 4):
+                raise HTTPException(400, "Speaker numbers run 1-4.")
+            if not name:
+                continue
+            slug = _voice_slug(str(name))
+            path = os.path.join(VOICES_DIR, f"{slug}.wav") if slug else ""
+            if not (slug and os.path.exists(path)):
+                raise HTTPException(404, f"No cloned voice named '{name}' — record one in Studio → Music → Voice Lab.")
+            voice_paths[num] = path
+
+        seed = body.get("seed")
+        try:
+            seed = int(seed)
+        except (TypeError, ValueError):
+            seed = -1
+
+        import asyncio
+        if not await asyncio.to_thread(comfyui_client.is_up):
+            raise HTTPException(502, "ComfyUI isn't running — narration renders on the ComfyUI engine.")
+        try:
+            job_id = await comfyui_client.start_narrate_job(
+                script=script,
+                model=model,
+                owner=user,
+                session_id=body.get("session_id"),
+                seed=seed,
+                speaker_voice_paths=voice_paths,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception:
+            logger.exception("audio_narrate: submit failed")
+            raise HTTPException(502, "Narration could not be started.")
+        return {
+            "job_id": job_id, "status": "queued", "model": model,
+            "speakers": sorted(voice_paths),
         }
 
     return router

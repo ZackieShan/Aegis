@@ -1053,6 +1053,13 @@ async function initTtsSettings() {
       cbOpt.textContent = 'chatterbox-tts (voice cloning)';
       modelSelect.appendChild(cbOpt);
     }
+    // Qwen3-TTS is the second cloning engine behind the same endpoint.
+    if (modelSelect && ![].some.call(modelSelect.options, function(o) { return o.value === 'qwen3-tts'; })) {
+      var qwOpt = document.createElement('option');
+      qwOpt.value = 'qwen3-tts';
+      qwOpt.textContent = 'qwen3-tts (voice cloning, fast)';
+      modelSelect.appendChild(qwOpt);
+    }
   } catch (e) { console.warn('Failed to load endpoints for TTS', e); }
 
   try {

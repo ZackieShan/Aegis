@@ -333,13 +333,29 @@ def list_models(recommend: bool = True) -> List[Dict[str, Any]]:
         if not (cur and mpath):
             continue  # only manage entries that actually have -c and -m
         full_offload = not ngl or int(ngl.group(1)) >= 60
+        # --cpu-moe / --n-cpu-moe keep an MoE's expert weights in system RAM, so
+        # only attention + shared layers sit in VRAM. The full GGUF size is then
+        # NOT the VRAM footprint, and recommend_context (which subtracts the whole
+        # file from VRAM) would wrongly conclude "weights fill VRAM". Treat these
+        # as manually-tuned: the KV cache is the only real VRAM cost, so there's
+        # usually lots of room to raise the context.
+        cpu_moe = ("--cpu-moe" in body) or ("--n-cpu-moe" in body)
         entry = {
             "model": b["name"],
             "current_ctx": int(cur.group(2)),
             "ngl": int(ngl.group(1)) if ngl else 99,
             "full_offload": full_offload,
+            "cpu_moe": cpu_moe,
         }
-        if recommend and full_offload:
+        if recommend and cpu_moe:
+            entry["recommended"] = None
+            entry["reason"] = ("MoE experts run in RAM (--cpu-moe) — the KV cache is the only "
+                               "real VRAM cost, so you can usually raise this a lot; set it manually")
+            try:
+                entry["n_ctx_train"] = gguf_meta(mpath.group(1)).get("n_ctx_train")
+            except Exception:
+                pass
+        elif recommend and full_offload:
             mm = _MMPROJ_RE.search(body)
             rec = recommend_context(mpath.group(1), mm.group(1) if mm else None, vram_mb=vram)
             entry.update(rec)

@@ -310,6 +310,70 @@ def setup_image_gen_routes() -> APIRouter:
             return {"ok": False, "error": "The model returned nothing"}
         return {"ok": True, "prompt": cleaned, "model": model}
 
+    @router.get("/api/image/ops")
+    async def image_ops(request: Request):
+        """Still-image post-op catalog (empty when ComfyUI is down)."""
+        import asyncio
+        from src import comfyui_client, comfyui_workflows
+        try:
+            if not await asyncio.to_thread(comfyui_client.is_up):
+                return {"ops": []}
+            return {"ops": [
+                {"op": o, "label": comfyui_workflows.COMFY_IMAGE_OPS[o]["label"]}
+                for o in comfyui_workflows.available_image_ops()
+            ]}
+        except Exception:
+            return {"ops": []}
+
+    @router.post("/api/image/enhance")
+    async def image_enhance(request: Request):
+        """Run a ComfyUI post-op (upscale / restore) on a gallery still.
+        Returns a job id pollable at /api/video/status/{id} (shared registry)."""
+        user = require_privilege(request, "can_generate_images")
+        body = await request.json()
+        op = str(body.get("op") or "").strip()
+        image_id = str(body.get("image_id") or "").strip()
+        if not image_id:
+            raise HTTPException(400, "image_id (a gallery still) is required")
+        from src import comfyui_client, comfyui_workflows
+        if op not in comfyui_workflows.COMFY_IMAGE_OPS:
+            raise HTTPException(400, f"Unknown op '{op}' — one of: {', '.join(comfyui_workflows.COMFY_IMAGE_OPS)}")
+        if op not in comfyui_workflows.available_image_ops():
+            raise HTTPException(400, "That op's model files are missing from models/.")
+        import asyncio
+        if not await asyncio.to_thread(comfyui_client.is_up):
+            raise HTTPException(502, "ComfyUI isn't running — post-ops render on the ComfyUI engine.")
+
+        from core.database import SessionLocal, GalleryImage
+        from src.generated_images import resolve_generated_image_path
+        db = SessionLocal()
+        try:
+            row = db.query(GalleryImage).filter(GalleryImage.id == image_id).first()
+        finally:
+            db.close()
+        if not row or (getattr(row, "owner", "") or "") != (user or ""):
+            raise HTTPException(404, "No matching gallery image")
+        if (row.filename or "").rsplit(".", 1)[-1].lower() not in ("png", "jpg", "jpeg", "webp"):
+            raise HTTPException(400, "That gallery item is not a still image")
+        src_path = str(resolve_generated_image_path(row.filename))
+
+        params = {}
+        if op == "redraw":
+            # Structure-preserving re-render wants a target description; fall
+            # back to the source image's own prompt.
+            params["prompt"] = str(body.get("prompt") or getattr(row, "prompt", "") or "")
+        try:
+            job_id = await comfyui_client.start_image_op_job(
+                op, src_path, owner=user, session_id=body.get("session_id"),
+                seed=int(body.get("seed") or -1), **params,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception:
+            logger.exception("image_enhance: submit failed")
+            raise HTTPException(502, "Post-op could not be started — check the ComfyUI engine.")
+        return {"job_id": job_id, "status": "queued", "op": op, "source_image_id": image_id}
+
     @router.post("/api/image/generate")
     async def image_generate(request: Request):
         user = require_privilege(request, "can_generate_images")

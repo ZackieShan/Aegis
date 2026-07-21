@@ -1442,7 +1442,35 @@ function _openDetail(img) {
       <button class="gallery-detail-back" id="gallery-animate-btn" title="Animate — turn this image into a short video clip (motion, length and model in Create)" aria-label="Animate photo" style="display:inline-flex;align-items:center;gap:4px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         Animate
+      </button>
+      <button class="gallery-detail-back" id="gallery-op-upscale4x-btn" title="Upscale 4x — sharpen and enlarge this photo (Nomos DAT); the result lands in Studio as a new image" aria-label="Upscale photo 4x" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        Upscale 4x
+      </button>
+      <button class="gallery-detail-back" id="gallery-op-restore-btn" title="Restore — diffusion detail/face restoration (SUPIR); slower but rebuilds detail; the result lands in Studio as a new image" aria-label="Restore photo" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 3"/><path d="M21 3v6h-6"/></svg>
+        Restore
+      </button>
+      <button class="gallery-detail-back" id="gallery-op-redraw-btn" title="Redraw — re-render this photo with the same structure (canny ControlNet over Qwen-Image); uses the photo's prompt; the result lands in Studio as a new image" aria-label="Redraw photo" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        Redraw
       </button>`}
+      ${_isVideoUrl(img.url) ? `<button class="gallery-detail-back" id="gallery-op-foley-btn" title="Add sound — fast synced foley/effects track (MMAudio); the result lands in Studio as a new clip" aria-label="Add sound" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        Add sound
+      </button>
+      <button class="gallery-detail-back" id="gallery-op-foleyhq-btn" title="Add sound HQ — highest-quality foley (HunyuanVideo-Foley); slower than Add sound; the result lands in Studio as a new clip" aria-label="Add sound HQ" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+        Sound HQ
+      </button>
+      <button class="gallery-detail-back" id="gallery-op-upscale-btn" title="Restore & upscale — diffusion video restoration (SeedVR2); the result lands in Studio as a new clip" aria-label="Upscale video" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        Upscale
+      </button>
+      <button class="gallery-detail-back" id="gallery-op-interp-btn" title="Smooth 2x — double the framerate with frame interpolation (GIMM-VFI); the result lands in Studio as a new clip" aria-label="Smooth motion" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg>
+        Smooth 2x
+      </button>` : ''}
       <button class="gallery-detail-back" id="gallery-chat-photo-btn" title="${img.session_id ? 'Open source chat' : 'Start a new chat with this photo'}" aria-label="${img.session_id ? 'Open source chat' : 'Discuss photo'}" style="display:inline-flex;align-items:center;gap:4px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
         ${img.session_id ? 'Open chat' : 'Discuss'}
@@ -1833,6 +1861,59 @@ function _openDetail(img) {
   };
   document.getElementById('gallery-animate-btn')?.addEventListener('click', () => _handToCreate('video'));
   document.getElementById('gallery-stylize-btn')?.addEventListener('click', () => _handToCreate('image'));
+
+  // Video post-ops: foley / upscale / interpolate run on the ComfyUI engine
+  // and drop the result into Studio as a NEW clip (the original is kept).
+  const _runVideoOp = async (op, btn) => {
+    if (btn) { btn.disabled = true; }
+    try {
+      const r = await fetch('/api/video/enhance', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_id: img.id, op, prompt: op === 'foley' ? (img.prompt || '') : '' }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail?.message || d.detail || `HTTP ${r.status}`);
+      uiModule.showToast('Queued — the result will appear in Studio when it finishes (watch the job queue).');
+    } catch (e) {
+      uiModule.showToast('Could not start: ' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; }
+    }
+  };
+  const foleyBtn = document.getElementById('gallery-op-foley-btn');
+  const upscaleBtn = document.getElementById('gallery-op-upscale-btn');
+  const interpBtn = document.getElementById('gallery-op-interp-btn');
+  foleyBtn?.addEventListener('click', () => _runVideoOp('foley', foleyBtn));
+  const foleyHqBtn = document.getElementById('gallery-op-foleyhq-btn');
+  foleyHqBtn?.addEventListener('click', () => _runVideoOp('foley-hq', foleyHqBtn));
+  upscaleBtn?.addEventListener('click', () => _runVideoOp('upscale', upscaleBtn));
+  interpBtn?.addEventListener('click', () => _runVideoOp('interpolate', interpBtn));
+
+  // Still-image post-ops share the pattern but hit /api/image/enhance.
+  const _runImageOp = async (op, btn) => {
+    if (btn) { btn.disabled = true; }
+    try {
+      const r = await fetch('/api/image/enhance', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_id: img.id, op }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail?.message || d.detail || `HTTP ${r.status}`);
+      uiModule.showToast('Queued — the result will appear in Studio when it finishes (watch the job queue).');
+    } catch (e) {
+      uiModule.showToast('Could not start: ' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; }
+    }
+  };
+  const up4xBtn = document.getElementById('gallery-op-upscale4x-btn');
+  const restoreBtn = document.getElementById('gallery-op-restore-btn');
+  const redrawBtn = document.getElementById('gallery-op-redraw-btn');
+  up4xBtn?.addEventListener('click', () => _runImageOp('upscale4x', up4xBtn));
+  restoreBtn?.addEventListener('click', () => _runImageOp('restore', restoreBtn));
+  redrawBtn?.addEventListener('click', () => _runImageOp('redraw', redrawBtn));
 
   // Rotate — server-side image rotation. Forces a fresh URL afterwards
   // so the browser doesn't show the old cached version. Shows a

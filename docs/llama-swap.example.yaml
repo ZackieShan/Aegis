@@ -18,6 +18,12 @@
 # or the model's private reasoning streams out as the visible reply. Quantized
 # MoE models also want --dry-multiplier 0.8 (DRY sampler) so long chats can't
 # collapse into verbatim repetition loops.
+#
+# Big MoE that won't fit VRAM: add --cpu-moe to keep the expert weights in
+# system RAM (attention + KV stay on the GPU). The KV cache is then the only
+# real VRAM cost, so you can run a large -c even on a 24GB card — e.g. a
+# 35B-A3B at q8 KV is ~2.5GB at 64K, ~5GB at 128K. Use the in-app Engine panel
+# (/engine) to set the window; auto-tune skips --cpu-moe models on purpose.
 
 healthCheckTimeout: 300
 logLevel: info

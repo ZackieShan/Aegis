@@ -214,8 +214,10 @@ def setup_video_routes() -> APIRouter:
             raise HTTPException(400, f"'{model}' can't animate a still image — use an image-to-video model (e.g. ltx2.3-video).")
 
         is_comfy = model in comfyui_workflows.COMFY_VIDEO_MODELS
-        if is_comfy and init_b64:
-            raise HTTPException(400, f"'{model}' doesn't take an init image yet.")
+        if is_comfy and init_b64 and not _is_i2v(model):
+            raise HTTPException(400, f"'{model}' doesn't take an init image.")
+        if is_comfy and _is_i2v(model) and not init_b64:
+            raise HTTPException(400, f"'{model}' animates a still — pick an image first (image_id or init image).")
 
         # Dimensions must suit video latents (multiples of 16). When animating
         # a still, default to its aspect ratio inside a render-safe budget.
@@ -243,6 +245,7 @@ def setup_video_routes() -> APIRouter:
                     video_frames=video_frames,
                     fps=fps,
                     seed=seed,
+                    init_image_b64=init_b64 if _is_i2v(model) else None,
                 )
             else:
                 job_id = await video_generation.start_video_job(
@@ -282,6 +285,113 @@ def setup_video_routes() -> APIRouter:
         if (job.get("owner") or "") != (user or ""):
             raise HTTPException(403, "Not your job")
         return job
+
+    def _resolve_source_video(image_id: str, user):
+        """A gallery VIDEO row (owner-checked) → absolute path, or 404/400."""
+        from core.database import SessionLocal, GalleryImage
+        from src.generated_images import resolve_generated_image_path
+        db = SessionLocal()
+        try:
+            row = db.query(GalleryImage).filter(GalleryImage.id == image_id).first()
+        finally:
+            db.close()
+        if not row or (getattr(row, "owner", "") or "") != (user or ""):
+            raise HTTPException(404, "No matching gallery video")
+        ext = (row.filename or "").rsplit(".", 1)[-1].lower()
+        if ext not in ("mp4", "webm", "mov", "m4v", "avi"):
+            raise HTTPException(400, "That gallery item is not a video")
+        return str(resolve_generated_image_path(row.filename))
+
+    def _probe_video(path: str):
+        """(duration_s, fps, short_edge) via the bundled ffmpeg — best effort."""
+        import re as _re
+        import subprocess
+        import imageio_ffmpeg
+        dur = fps_v = short = None
+        try:
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+            p = subprocess.run([exe, "-i", path], capture_output=True, text=True, timeout=30)
+            out = p.stderr or ""
+            m = _re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out)
+            if m:
+                dur = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+            m = _re.search(r"(\d+(?:\.\d+)?)\s*fps", out)
+            if m:
+                fps_v = float(m.group(1))
+            m = _re.search(r"\b(\d{2,5})x(\d{2,5})\b", out)
+            if m:
+                short = min(int(m.group(1)), int(m.group(2)))
+        except Exception:
+            logger.warning("Video probe failed for %s", path, exc_info=True)
+        return dur, fps_v, short
+
+    @router.get("/api/video/ops")
+    async def video_ops(request: Request):
+        """Post-op catalog for gallery videos (empty when ComfyUI is down)."""
+        import asyncio
+        from src import comfyui_client, comfyui_workflows
+        try:
+            if not await asyncio.to_thread(comfyui_client.is_up):
+                return {"ops": []}
+            return {"ops": [
+                {"op": o, "label": comfyui_workflows.COMFY_VIDEO_OPS[o]["label"]}
+                for o in comfyui_workflows.available_video_ops()
+            ]}
+        except Exception:
+            return {"ops": []}
+
+    @router.post("/api/video/enhance")
+    async def video_enhance(request: Request):
+        """Run a ComfyUI post-op (foley / upscale / interpolate) on a gallery
+        video. Returns a job id pollable at /api/video/status/{id}."""
+        user = require_privilege(request, "can_generate_images")
+        body = await request.json()
+        op = str(body.get("op") or "").strip()
+        image_id = str(body.get("image_id") or "").strip()
+        if not image_id:
+            raise HTTPException(400, "image_id (a gallery video) is required")
+        from src import comfyui_client, comfyui_workflows
+        if op not in comfyui_workflows.COMFY_VIDEO_OPS:
+            raise HTTPException(400, f"Unknown op '{op}' — one of: {', '.join(comfyui_workflows.COMFY_VIDEO_OPS)}")
+        if op not in comfyui_workflows.available_video_ops():
+            raise HTTPException(400, "That op's model files are missing from models/.")
+        import asyncio
+        if not await asyncio.to_thread(comfyui_client.is_up):
+            raise HTTPException(502, "ComfyUI isn't running — post-ops render on the ComfyUI engine.")
+
+        src_path = _resolve_source_video(image_id, user)
+        dur, src_fps, short = _probe_video(src_path)
+        params = {}
+        if op in ("foley", "foley-hq"):
+            # Both foley engines slice raw frames by true duration; cap at 30s.
+            params["duration"] = round(min(dur or 8.0, 30.0), 2)
+        elif op == "upscale":
+            target = body.get("resolution")
+            try:
+                target = int(target) if target else None
+            except (TypeError, ValueError):
+                target = None
+            params["resolution"] = target or min(1080, (short or 480) * 2)
+        elif op == "interpolate":
+            factor = 2
+            params["factor"] = factor
+            params["fps_out"] = round((src_fps or 16.0) * factor, 2)
+        try:
+            job_id = await comfyui_client.start_video_op_job(
+                op,
+                src_path,
+                owner=user,
+                session_id=body.get("session_id"),
+                prompt=str(body.get("prompt") or ""),
+                seed=int(body.get("seed") or -1),
+                **params,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception:
+            logger.exception("video_enhance: submit failed")
+            raise HTTPException(502, "Post-op could not be started — check the ComfyUI engine.")
+        return {"job_id": job_id, "status": "queued", "op": op, "source_image_id": image_id, **params}
 
     @router.get("/api/video/status/{job_id}")
     async def video_status(request: Request, job_id: str):

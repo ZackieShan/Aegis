@@ -142,6 +142,22 @@ class TestProbeEndpointParsing:
         assert "http://localhost:11434/v1/models" in seen
         assert "http://localhost:11434/api/tags" in seen
 
+    def test_local_endpoint_keeps_non_chat_models(self, monkeypatch):
+        """llama-swap serves tts/image/video aliases beside chat models, and
+        the cloned-voice auto-route reads them from cached_models — the
+        _is_chat_model filter must not strip a LOCAL endpoint's list
+        (2026-07-17: every refresh silently broke voice cloning)."""
+        _patch_resolve(monkeypatch)
+        payload = {"data": [{"id": "qwen3-coder-30b"}, {"id": "chatterbox-tts"}, {"id": "qwen3-tts"}]}
+        monkeypatch.setattr(
+            model_routes.httpx, "get",
+            lambda url, headers=None, timeout=None, verify=None, **kwargs: _resp(200, json=payload),
+        )
+        assert _probe_endpoint("http://127.0.0.1:9090/v1") == [
+            "qwen3-coder-30b", "chatterbox-tts", "qwen3-tts"]
+        # Remote APIs still get the noise filter (OpenAI's tts-1/whisper etc.).
+        assert _probe_endpoint("https://api.example.com/v1") == ["qwen3-coder-30b"]
+
     def test_empty_list_with_no_curation_returns_empty(self, monkeypatch):
         _patch_resolve(monkeypatch)
         monkeypatch.setattr(

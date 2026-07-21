@@ -59,8 +59,10 @@ you fit them to your machine:
   capability works the same regardless of which you pick; only speed and quality scale.
 - **Cookbook scans your hardware** and rates every model against it — perfect / good /
   marginal fit plus an expected token speed — so you never have to guess what will run.
-- **The engine right-sizes itself.** `/engine` reads each model's real memory cost and your
-  free VRAM, then tunes every context window automatically — no YAML, no OOM roulette.
+- **The engine right-sizes itself — or you do.** `/engine` opens a context editor: it reads
+  each model's real memory cost and your free VRAM, auto-sizes every window, and lets you set
+  any model's token limit by hand (MoE-aware — it knows `--cpu-moe` experts live in RAM, so a
+  big model can still run a huge context). No YAML, no OOM roulette.
 - **CPU-only works.** llama.cpp and Ollama run smaller models with no GPU at all, and any
   OpenAI-compatible endpoint can stand in where local horsepower runs out — your choice.
 - **Media scales too.** Image and video sizes, steps, and quantizations are all adjustable,

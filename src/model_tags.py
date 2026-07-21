@@ -103,6 +103,21 @@ def classify(name: str, *, is_lora: bool = False) -> Dict[str, List[str]]:
             bf("fast image drafts (step-distilled)")
         else:
             bf("photoreal images & text rendering")
+    elif _has(n, "z-image", "z_image", "zimage"):
+        cap("text-to-image")
+        bf("fast photoreal drafts (8-step)")
+    elif _word(n, "chroma"):
+        cap("text-to-image")
+        bf("uncensored art & photoreal")
+    elif _has(n, "noobai", "illustrious"):
+        cap("text-to-image")
+        bf("anime & illustration (danbooru tags)")
+    elif _word(n, "krea", "krea2"):
+        cap("text-to-image")
+        bf("2K stills with a natural aesthetic")
+    elif _has(n, "ideogram"):
+        cap("text-to-image")
+        bf("posters, logos & legible in-image text")
 
     # ── perception / understanding ───────────────────────────────────────────
     if _word(n, "vl") or _has(n, "vision", "llava", "minicpm-v", "pixtral", "moondream"):

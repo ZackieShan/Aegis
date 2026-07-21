@@ -26,10 +26,44 @@ logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 3.0
 _JOB_DEADLINE_S = 1800
+# VibeVoice narration can legitimately run much longer than a clip render.
+_NARRATE_DEADLINE_S = 5400
 
 
 def base_url() -> str:
     return (os.getenv("COMFYUI_URL") or "http://127.0.0.1:8188").rstrip("/")
+
+
+def input_dir() -> str:
+    """ComfyUI's input directory — where LoadImage/LoadVideo/LoadAudio read
+    from (same resolution rule as routes/audio_routes)."""
+    env = os.getenv("COMFYUI_INPUT_DIR")
+    if env:
+        return env
+    from src.engine_tuner import _engine_dir
+    return os.path.join(_engine_dir(), "comfyui", "ComfyUI", "input")
+
+
+def stage_input_bytes(data: bytes, ext: str) -> str:
+    """Write bytes into ComfyUI's input dir under a fresh aegis_in_* name and
+    return the bare filename (what Load* nodes take)."""
+    d = input_dir()
+    os.makedirs(d, exist_ok=True)
+    name = f"aegis_in_{uuid.uuid4().hex[:12]}.{ext.lstrip('.')}"
+    with open(os.path.join(d, name), "wb") as f:
+        f.write(data)
+    return name
+
+
+def stage_input_file(path: str) -> str:
+    """Copy an existing file into ComfyUI's input dir; returns the staged name."""
+    import shutil
+    d = input_dir()
+    os.makedirs(d, exist_ok=True)
+    ext = os.path.basename(path).rsplit(".", 1)[-1].lower()
+    name = f"aegis_in_{uuid.uuid4().hex[:12]}.{ext}"
+    shutil.copyfile(path, os.path.join(d, name))
+    return name
 
 
 def is_up(timeout: float = 2.0) -> bool:
@@ -61,22 +95,28 @@ async def start_video_job(
     video_frames: int = 33,
     fps: int = 16,
     seed: int = -1,
+    init_image_b64: Optional[str] = None,
 ) -> str:
     """Queue a ComfyUI video workflow and return an Aegis job id (same
-    registry as sd-server jobs). Raises ValueError when the submit fails."""
+    registry as sd-server jobs). Raises ValueError when the submit fails.
+    `init_image_b64` (image-to-video workflows) is staged into ComfyUI's
+    input dir and handed to the builder as a LoadImage filename."""
     import httpx
     from src import comfyui_workflows, video_generation
 
     if seed is None or seed < 0:
         seed = uuid.uuid4().int % (2**31 - 1)
-    graph = comfyui_workflows.build_video_graph(
-        model,
+    params: Dict[str, Any] = dict(
         prompt=prompt,
         negative_prompt=negative_prompt or "",
         width=int(width), height=int(height),
         video_frames=int(video_frames), fps=int(fps),
         seed=int(seed),
     )
+    if init_image_b64:
+        import base64
+        params["init_image"] = stage_input_bytes(base64.b64decode(init_image_b64), "png")
+    graph = comfyui_workflows.build_video_graph(model, **params)
     if graph is None:
         raise ValueError(f"Unknown ComfyUI workflow '{model}'")
 
@@ -203,14 +243,214 @@ async def start_song_job(
     return job_id
 
 
-async def _poll_job(job_id: str, remote_id: str) -> None:
+async def start_narrate_job(
+    script: str,
+    model: str = "comfy-vibevoice-narrate",
+    owner: Optional[str] = None,
+    session_id: Optional[str] = None,
+    seed: int = -1,
+    speaker_voice_paths: Optional[Dict[int, str]] = None,
+) -> str:
+    """Queue a VibeVoice long-form narration and return an Aegis job id (same
+    registry as song/video jobs). `script` uses "[N]: line" speaker labels;
+    `speaker_voice_paths` maps speaker number → an ABSOLUTE wav/mp3 path (a
+    data/voices clone sample) that gets staged into ComfyUI's input dir here —
+    that speaker is voice-cloned, unmapped speakers get synthetic voices.
+    Narration runs on a longer leash than clips: a 4-bit VibeVoice pass emits
+    minutes of audio per wall-clock minute, so a long script can legitimately
+    outlive the default 30-minute poll deadline."""
+    import httpx
+    from src import comfyui_workflows, video_generation
+
+    if seed is None or seed < 0:
+        seed = uuid.uuid4().int % (2**31 - 1)
+    staged = {int(n): stage_input_file(p) for n, p in (speaker_voice_paths or {}).items()}
+    graph = comfyui_workflows.build_audio_graph(
+        model, script=script, speaker_voices=staged, seed=int(seed),
+    )
+    if graph is None:
+        raise ValueError(f"Unknown ComfyUI audio workflow '{model}'")
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
+        r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
+        if r.status_code != 200:
+            raise ValueError(f"ComfyUI submit failed ({r.status_code}): {r.text[:300]}")
+        envelope = r.json()
+    remote_id = str(envelope.get("prompt_id") or "")
+    if not remote_id:
+        raise ValueError(f"ComfyUI returned no prompt id: {str(envelope)[:200]}")
+
+    title = " ".join(script.split())[:120]
+    job_id = uuid.uuid4().hex[:12]
+    queue_id = job_queue.add(
+        "audio",
+        f"Narration: {title}" if title else "Narration",
+        owner=owner,
+        session_id=session_id,
+        external_id=job_id,
+        meta={"model": model, "engine": "comfyui", "speakers": sorted(staged)},
+    )
+    video_generation._JOBS[job_id] = {
+        "id": job_id,
+        "kind": "audio",
+        "queue_id": queue_id,
+        "status": "queued",
+        "prompt": title,
+        "model": model,
+        "owner": owner,
+        "session_id": session_id,
+        "cloned_speakers": sorted(staged),
+        "created": time.time(),
+        "remote_id": remote_id,
+        "engine": "comfyui",
+        "video_url": None,
+        "image_id": None,
+        "error": None,
+        "progress": None,
+    }
+    video_generation._prune_jobs()
+    asyncio.create_task(_poll_job(job_id, remote_id, deadline_s=_NARRATE_DEADLINE_S))
+    logger.info("ComfyUI narration job %s queued (%d chars, %d cloned voices)",
+                job_id, len(script), len(staged))
+    return job_id
+
+
+async def start_video_op_job(
+    op: str,
+    source_path: str,
+    owner: Optional[str] = None,
+    session_id: Optional[str] = None,
+    prompt: str = "",
+    seed: int = -1,
+    **op_params: Any,
+) -> str:
+    """Queue a video post-op (foley / upscale / interpolate) over an existing
+    clip. The source file is staged into ComfyUI's input dir; the finished
+    clip lands in the gallery like any other video job."""
+    import httpx
+    from src import comfyui_workflows, video_generation
+
+    if seed is None or seed < 0:
+        seed = uuid.uuid4().int % (2**31 - 1)
+    staged = stage_input_file(source_path)
+    params: Dict[str, Any] = dict(video_file=staged, seed=int(seed), **op_params)
+    if op in ("foley", "foley-hq"):
+        params["prompt"] = prompt or ""
+    graph = comfyui_workflows.build_video_op_graph(op, **params)
+    if graph is None:
+        raise ValueError(f"Unknown video op '{op}'")
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
+        r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
+        if r.status_code != 200:
+            raise ValueError(f"ComfyUI submit failed ({r.status_code}): {r.text[:300]}")
+        envelope = r.json()
+    remote_id = str(envelope.get("prompt_id") or "")
+    if not remote_id:
+        raise ValueError(f"ComfyUI returned no prompt id: {str(envelope)[:200]}")
+
+    label = comfyui_workflows.COMFY_VIDEO_OPS.get(op, {}).get("label", op)
+    job_id = uuid.uuid4().hex[:12]
+    queue_id = job_queue.add(
+        "video",
+        f"{label}: {prompt or os.path.basename(source_path)}",
+        owner=owner,
+        session_id=session_id,
+        external_id=job_id,
+        meta={"model": f"comfy-op-{op}", "engine": "comfyui", "op": op},
+    )
+    video_generation._JOBS[job_id] = {
+        "id": job_id,
+        "queue_id": queue_id,
+        "status": "queued",
+        "prompt": f"{label}",
+        "model": f"comfy-op-{op}",
+        "owner": owner,
+        "session_id": session_id,
+        "created": time.time(),
+        "remote_id": remote_id,
+        "engine": "comfyui",
+        "video_url": None,
+        "image_id": None,
+        "error": None,
+        "progress": None,
+    }
+    video_generation._prune_jobs()
+    asyncio.create_task(_poll_job(job_id, remote_id))
+    logger.info("ComfyUI video op %s queued (%s on %s)", job_id, op, os.path.basename(source_path))
+    return job_id
+
+
+async def start_image_op_job(
+    op: str,
+    source_path: str,
+    owner: Optional[str] = None,
+    session_id: Optional[str] = None,
+    seed: int = -1,
+    **op_params: Any,
+) -> str:
+    """Queue an image post-op (upscale / restore) over an existing still.
+    Same job registry as everything else; the result lands in the gallery."""
+    import httpx
+    from src import comfyui_workflows, video_generation
+
+    if seed is None or seed < 0:
+        seed = uuid.uuid4().int % (2**31 - 1)
+    staged = stage_input_file(source_path)
+    graph = comfyui_workflows.build_image_op_graph(op, image_file=staged, seed=int(seed), **op_params)
+    if graph is None:
+        raise ValueError(f"Unknown image op '{op}'")
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
+        r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
+        if r.status_code != 200:
+            raise ValueError(f"ComfyUI submit failed ({r.status_code}): {r.text[:300]}")
+        envelope = r.json()
+    remote_id = str(envelope.get("prompt_id") or "")
+    if not remote_id:
+        raise ValueError(f"ComfyUI returned no prompt id: {str(envelope)[:200]}")
+
+    label = comfyui_workflows.COMFY_IMAGE_OPS.get(op, {}).get("label", op)
+    job_id = uuid.uuid4().hex[:12]
+    queue_id = job_queue.add(
+        "image",
+        f"{label}: {os.path.basename(source_path)}",
+        owner=owner,
+        session_id=session_id,
+        external_id=job_id,
+        meta={"model": f"comfy-op-{op}", "engine": "comfyui", "op": op},
+    )
+    video_generation._JOBS[job_id] = {
+        "id": job_id,
+        "kind": "image",
+        "queue_id": queue_id,
+        "status": "queued",
+        "prompt": label,
+        "model": f"comfy-op-{op}",
+        "owner": owner,
+        "session_id": session_id,
+        "created": time.time(),
+        "remote_id": remote_id,
+        "engine": "comfyui",
+        "video_url": None,
+        "image_id": None,
+        "error": None,
+        "progress": None,
+    }
+    video_generation._prune_jobs()
+    asyncio.create_task(_poll_job(job_id, remote_id))
+    logger.info("ComfyUI image op %s queued (%s on %s)", job_id, op, os.path.basename(source_path))
+    return job_id
+
+
+async def _poll_job(job_id: str, remote_id: str, deadline_s: float = _JOB_DEADLINE_S) -> None:
     import httpx
     from src import video_generation
 
     job = video_generation._JOBS.get(job_id)
     if not job:
         return
-    deadline = time.time() + _JOB_DEADLINE_S
+    deadline = time.time() + deadline_s
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)) as client:
             while time.time() < deadline:
@@ -248,6 +488,8 @@ async def _poll_job(job_id: str, remote_id: str) -> None:
                     return
                 if job.get("kind") == "audio":
                     fileinfo = _first_audio_output(entry.get("outputs") or {})
+                elif job.get("kind") == "image":
+                    fileinfo = _first_image_output(entry.get("outputs") or {})
                 else:
                     fileinfo = _first_video_output(entry.get("outputs") or {})
                 if not fileinfo:
@@ -269,7 +511,7 @@ async def _poll_job(job_id: str, remote_id: str) -> None:
                 await asyncio.to_thread(video_generation.finish_job_bytes, job, vr.content, ext)
                 await free_vram()
                 return
-        job["error"] = f"Video generation exceeded the {_JOB_DEADLINE_S // 60}-minute cap"
+        job["error"] = f"Video generation exceeded the {int(deadline_s) // 60}-minute cap"
         job["status"] = "error"
     except Exception as e:
         logger.exception("ComfyUI job %s poller crashed", job_id)

@@ -6,6 +6,7 @@ re-route that one synthesis to the Chatterbox endpoint (with its model id) —
 otherwise Voice Lab's Test button and read-aloud in "your" voice silently
 produce the wrong voice or nothing.
 """
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import services.tts.tts_service as tts_mod
@@ -110,6 +111,90 @@ def test_is_routable_cloned_voice_respects_off_switches():
         with patch.object(svc, "_load_settings", return_value=_settings("local")), \
              patch.object(type(svc), "_find_chatterbox_endpoint", staticmethod(lambda: (None, None))):
             assert svc.is_routable_cloned_voice("zac") is False
+
+
+def _fake_session_local(endpoints):
+    """A SessionLocal stand-in whose queries return `endpoints` — lets the
+    REAL _find_chatterbox_endpoint / _endpoint_serves_chatterbox run."""
+    class _Query:
+        def __init__(self, items):
+            self._items = items
+
+        def filter(self, *a, **k):
+            return self
+
+        def all(self):
+            return self._items
+
+        def first(self):
+            return self._items[0] if self._items else None
+
+    class _DB:
+        def query(self, *a, **k):
+            return _Query(endpoints)
+
+        def close(self):
+            pass
+
+    return _DB
+
+
+def test_qwen3_tts_only_endpoint_satisfies_autoroute():
+    """Qwen3-TTS is the second cloning engine (2026-07-17): with ONLY a
+    qwen3-tts-serving endpoint in the DB, the real endpoint finder must
+    still route a cloned voice there."""
+    svc = get_tts_service()
+    ep = SimpleNamespace(id="ep-qwen", is_enabled=True, cached_models='["kokoro", "qwen3-tts"]')
+    calls = {}
+
+    def fake_api(text, endpoint_id, model, voice, speed=1.0):
+        calls.update(endpoint=endpoint_id, model=model, voice=voice)
+        return b"RIFFfakeaudio"
+
+    with patch.object(svc, "_load_settings", return_value=_settings("local")), \
+         patch.object(tts_mod, "cloned_voice_catalog", return_value=[{"id": "zac", "label": "zac"}]), \
+         patch("core.database.SessionLocal", _fake_session_local([ep])), \
+         patch.object(svc, "_synthesize_api", side_effect=fake_api):
+        out = svc.synthesize("hello", use_cache=False, voice="zac")
+
+    assert out == b"RIFFfakeaudio"
+    assert calls["endpoint"] == "ep-qwen"
+    assert calls["model"] == "qwen3-tts"
+    assert calls["voice"] == "zac"
+
+
+def test_endpoint_serves_chatterbox_matches_qwen3_tts():
+    """The serving check (name is historical) must accept either cloning
+    engine's model id."""
+    svc = get_tts_service()
+    ep = SimpleNamespace(id="ep-qwen", is_enabled=True, cached_models='["qwen3-tts"]')
+    with patch("core.database.SessionLocal", _fake_session_local([ep])):
+        assert type(svc)._endpoint_serves_chatterbox("ep-qwen") is True
+    ep_plain = SimpleNamespace(id="ep-api", is_enabled=True, cached_models='["tts-1"]')
+    with patch("core.database.SessionLocal", _fake_session_local([ep_plain])):
+        assert type(svc)._endpoint_serves_chatterbox("ep-api") is False
+
+
+def test_saved_clone_model_wins_over_scan_order():
+    """With BOTH engines served, the user's saved tts_model (exact match)
+    must decide the route — picking qwen3-tts in Settings routes clones
+    through Qwen even though chatterbox-tts scans first."""
+    svc = get_tts_service()
+    ep = SimpleNamespace(id="ep-swap", is_enabled=True,
+                         cached_models='["chatterbox-tts", "qwen3-tts"]')
+    with patch("core.database.SessionLocal", _fake_session_local([ep])), \
+         patch("src.settings.load_settings",
+               return_value={"tts_provider": "local", "tts_model": "qwen3-tts"}):
+        assert type(svc)._find_chatterbox_endpoint() == ("ep-swap", "qwen3-tts")
+    with patch("core.database.SessionLocal", _fake_session_local([ep])), \
+         patch("src.settings.load_settings",
+               return_value={"tts_provider": "local", "tts_model": "chatterbox-tts"}):
+        assert type(svc)._find_chatterbox_endpoint() == ("ep-swap", "chatterbox-tts")
+    # A non-clone saved model falls back to scan order.
+    with patch("core.database.SessionLocal", _fake_session_local([ep])), \
+         patch("src.settings.load_settings",
+               return_value={"tts_provider": "local", "tts_model": "kokoro"}):
+        assert type(svc)._find_chatterbox_endpoint() == ("ep-swap", "chatterbox-tts")
 
 
 def test_openai_endpoint_catalog_includes_clones_and_shadows_collisions():
