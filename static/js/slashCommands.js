@@ -1526,6 +1526,23 @@ async function _cmdWinamp(args) {
   return true;
 }
 
+// Aegis 98 easter egg — the full Windows 98 desktop mode (module in
+// static/js/win98.js + skin in static/win98.css; same state as the
+// Settings → Appearance toggle and the "Aegis 98" theme preset).
+async function _cmdWin98(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const w98 = window.aegis98;
+  if (!w98) { slashReplyMd('Aegis 98 is unavailable — its module failed to load.'); return true; }
+  if (sub === 'off' || (w98.enabled && sub !== 'on')) {
+    w98.disable();
+    slashReplyMd('🪟 **Aegis 98** has shut down. It is now safe to return to the future — `/win98` reboots it.');
+  } else {
+    w98.enable();
+    slashReplyMd('🪟 Welcome to **Aegis 98**. Double-click the desktop icons, hit **Start**, and party like it\'s 1999. `/win98 off` (or Start → Shut Down) returns you to the future. Pro tip: `/bonzi` and `/winamp` complete the vibe.');
+  }
+  return true;
+}
+
 // Local observability — show recent LLM/agent calls (model, latency, tools).
 async function _cmdTraces(args) {
   await typewriterReply('Reading recent traces…');
@@ -7052,6 +7069,13 @@ const COMMANDS = {
     help: 'Toggle the Aegis Amp — a Y2K-skinned floating player for Studio songs (/winamp, /winamp off)',
     handler: (args) => _cmdWinamp(args),
     usage: '/winamp'
+  },
+  win98: {
+    alias: ['98', 'desktop', 'windows98'],
+    category: 'Tools',
+    help: 'Boot Aegis 98 — the full Windows 98 desktop mode (/win98, /win98 off)',
+    handler: (args) => _cmdWin98(args),
+    usage: '/win98'
   },
   traces: {
     alias: ['observability', 'trace'],

@@ -1,0 +1,158 @@
+/* Aegis theme skin for the organizer — active only when embedded in normal
+ * Aegis (body.theme-aegis, applied by theme.js, which also inherits Aegis's
+ * --bg/--fg/--panel/--border/--accent/--font-ui tokens onto :root). Replaces
+ * 98.css's beveled Win98 look with Aegis's flat look. Standalone and Aegis
+ * Win98 mode keep the original Win98 styling (this file does nothing there). */
+
+/* ---- base: typography + surfaces ---- */
+body.theme-aegis,
+body.theme-aegis .desktop {
+  background: var(--bg, #0a0512);
+  color: var(--fg, #cbb8ec);
+  font-family: var(--font-ui, 'Inter', system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+body.theme-aegis,
+body.theme-aegis * {
+  font-family: var(--font-ui, 'Inter', system-ui, sans-serif) !important;
+  -webkit-font-smoothing: antialiased !important;
+}
+body.theme-aegis .mono,
+body.theme-aegis code,
+body.theme-aegis pre,
+body.theme-aegis .browse-list {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
+}
+body.theme-aegis code {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+  border-radius: 4px;
+}
+
+/* ---- windows / panels ---- */
+body.theme-aegis .window,
+body.theme-aegis .window-body,
+body.theme-aegis fieldset,
+body.theme-aegis .plan-list,
+body.theme-aegis .browse-window {
+  background: var(--panel, #120a1c);
+  color: var(--fg);
+  border: 1px solid var(--border, #3a2657);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: none;
+}
+body.theme-aegis .window-body { border: 0; border-radius: 0; }
+body.theme-aegis .title-bar {
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  color: var(--fg);
+  border: 0;
+  border-radius: var(--radius-md, 12px) var(--radius-md, 12px) 0 0;
+}
+body.theme-aegis .title-bar-text { color: var(--fg); font-weight: 600; }
+
+/* ---- buttons ---- */
+body.theme-aegis button,
+body.theme-aegis .explore-btn,
+body.theme-aegis input[type="button"],
+body.theme-aegis input[type="submit"] {
+  background: color-mix(in srgb, var(--fg) 8%, var(--panel));
+  color: var(--fg);
+  border: 1px solid var(--border, #3a2657);
+  border-radius: var(--radius-sm, 8px);
+  box-shadow: none;
+  min-height: 28px;
+  padding: 4px 12px;
+  transition: background .12s ease, border-color .12s ease;
+}
+body.theme-aegis button:hover:not(:disabled),
+body.theme-aegis .explore-btn:hover {
+  background: color-mix(in srgb, var(--accent) 24%, var(--panel));
+  border-color: var(--accent, #b45de0);
+}
+body.theme-aegis button:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 34%, var(--panel));
+}
+body.theme-aegis button:disabled { opacity: .5; }
+/* primary/CTA buttons (execute, "looks good") pop in the accent */
+body.theme-aegis #btnExecute,
+body.theme-aegis #cBtnExecute,
+body.theme-aegis #mBtnExecute {
+  background: var(--accent, #b45de0);
+  border-color: var(--accent, #b45de0);
+  color: #fff;
+}
+
+/* ---- form fields ---- */
+/* Native controls (checkbox/radio/scrollbars) must follow the Aegis theme,
+   otherwise they render as light widgets on the dark panel. */
+body.theme-aegis { color-scheme: dark; }
+body.theme-aegis.aegis-light { color-scheme: light; }
+body.theme-aegis input[type="checkbox"],
+body.theme-aegis input[type="radio"] {
+  accent-color: var(--accent, #b45de0);
+}
+/* NOTE: password included — the API-key fields are type="password" and were
+   being left with the stock white Win98 styling. */
+body.theme-aegis input[type="text"],
+body.theme-aegis input[type="password"],
+body.theme-aegis input[type="number"],
+body.theme-aegis input[type="search"],
+body.theme-aegis select,
+body.theme-aegis textarea {
+  background: var(--bg, #0a0512);
+  color: var(--fg);
+  border: 1px solid var(--border, #3a2657);
+  border-radius: var(--radius-sm, 8px);
+  box-shadow: none;
+  padding: 4px 8px;
+}
+body.theme-aegis input:focus,
+body.theme-aegis select:focus,
+body.theme-aegis textarea:focus {
+  outline: none;
+  border-color: var(--accent, #b45de0);
+}
+
+/* ---- tables / stats ---- */
+body.theme-aegis table,
+body.theme-aegis .stat-table {
+  border-color: var(--border, #3a2657);
+  color: var(--fg);
+}
+body.theme-aegis .stat-table td,
+body.theme-aegis table td,
+body.theme-aegis table th {
+  border-color: var(--border, #3a2657);
+}
+/* 98.css gives legends an opaque Win98 background, which reads as a stray
+   highlighted box against the dark Aegis panel. Flatten it. */
+body.theme-aegis fieldset legend {
+  background: transparent !important;
+  color: color-mix(in srgb, var(--fg) 78%, transparent);
+  font-weight: 600;
+  padding: 0 6px;
+  text-transform: none;
+}
+
+/* ---- app chrome: wizard tabs, plan rows, hints ---- */
+body.theme-aegis .wizard-tabs { border-color: var(--border, #3a2657); }
+body.theme-aegis .wtab { color: color-mix(in srgb, var(--fg) 60%, transparent); }
+body.theme-aegis .wtab.active { color: var(--accent, #b45de0); font-weight: 600; }
+body.theme-aegis .plan-row { border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+body.theme-aegis .plan-row .to { color: var(--accent, #b45de0); }
+body.theme-aegis .hint,
+body.theme-aegis .small { color: color-mix(in srgb, var(--fg) 65%, transparent); }
+body.theme-aegis .tag { border-radius: var(--radius-xs, 5px); }
+
+/* ---- browse (folder picker) ---- */
+body.theme-aegis .browse-row.selected { background: var(--accent, #b45de0); color: #fff; }
+
+/* ---- scrollbars ---- */
+body.theme-aegis ::-webkit-scrollbar { width: 12px; height: 12px; }
+body.theme-aegis ::-webkit-scrollbar-thumb {
+  background: var(--border, #3a2657);
+  border-radius: var(--radius-full, 999px);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+body.theme-aegis ::-webkit-scrollbar-track { background: transparent; }

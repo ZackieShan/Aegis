@@ -5293,6 +5293,9 @@ body.bg-pattern-sparkles {
     @media (min-width: 769px) {
       #calendar-modal,
       #gallery-modal,
+      #organizer-photos-modal,
+      #organizer-cinema-modal,
+      #organizer-music-modal,
       #tasks-modal,
       #memory-modal,
       #doclib-modal,

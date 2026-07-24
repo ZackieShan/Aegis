@@ -304,7 +304,7 @@ def test_long_prefix_bash_commands_not_flagged(monkeypatch, caplog):
     signature must not truncate them into one bucket."""
     _patch_common(monkeypatch)
     calls = {"n": 0}
-    prefix = "cd C:/Users/zacar/aegis/aegis && venv/Scripts/python.exe -m pytest"
+    prefix = "cd <repo-root> && venv/Scripts/python.exe -m pytest"
 
     async def _fake_stream(_candidates, messages, **kwargs):
         i = calls["n"]

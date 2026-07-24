@@ -43,6 +43,7 @@ _ENDPOINT_SETTING_FIELDS = {
     "utility_endpoint_id":  ("utility_model",   "Utility Model"),
     "research_endpoint_id": ("research_model",  "Deep Research"),
     "task_endpoint_id":     ("task_model",       "Background Tasks"),
+    "coder_endpoint_id":    ("coder_model",      "Coder Model"),
 }
 
 _ENDPOINT_FALLBACK_FIELDS = {

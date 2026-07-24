@@ -86,6 +86,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         is_document_pdf_preview = path.startswith("/api/document/") and path.endswith("/render-pdf")
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
+        # Organizer sub-app: its own HTML/CSS/JS/fonts and same-origin API are
+        # served through the proxy under /organizer/*. It uses inline styles
+        # (and possibly inline scripts) and must reach its own API with the
+        # auth cookie, so it gets a self-scoped policy instead of the app-wide
+        # nonce CSP that would block it. NOT sandboxed (unlike canvas preview),
+        # precisely because a sandbox opaque origin would drop the cookie.
+        is_organizer = path == "/organizer" or path.startswith("/organizer/")
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -119,6 +126,18 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "img-src 'self' data: blob: https:; "
                 "connect-src 'self'; "
                 "frame-ancestors 'none'"
+            )
+        elif is_organizer:
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "font-src 'self' data:; "
+                "img-src 'self' data: blob:; "
+                "media-src 'self' blob:; "
+                "connect-src 'self'; "
+                "frame-ancestors 'self'"
             )
         elif is_tool_render:
             # Skip framing headers for tools.

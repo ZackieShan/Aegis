@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Photo Organizer 1.0</title>
+<link rel="stylesheet" href="98.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="theme-aegis.css">
+</head>
+<body>
+<div class="desktop" id="desktop">
+
+  <!-- ===================== desktop icons ===================== -->
+  <div id="deskIcons">
+    <div class="desk-icon" data-app="winWizard" tabindex="0">
+      <div class="glyph">&#128247;</div>
+      <div class="lbl">Photo Organizer</div>
+    </div>
+    <div class="desk-icon" data-app="winExplore" tabindex="0">
+      <div class="glyph">&#128269;</div>
+      <div class="lbl">Explore Photos</div>
+    </div>
+    <div class="desk-icon" data-app="winCinema" tabindex="0">
+      <div class="glyph">&#127916;</div>
+      <div class="lbl">Cinema Organizer</div>
+    </div>
+    <div class="desk-icon" data-app="winMusic" tabindex="0">
+      <div class="glyph glyph-music">&#127925;</div>
+      <div class="lbl">Music Organizer</div>
+    </div>
+  </div>
+
+  <!-- ===================== wizard window ===================== -->
+  <div class="window app-window" id="winWizard"
+       data-task="Photo Organizer" data-icon="&#128247;"
+       data-defx="36" data-defy="12" data-defw="1020" data-defh="700"
+       data-minw="660" data-minh="430">
+    <div class="title-bar">
+      <div class="title-bar-text">&#128247; Photo Organizer 1.0</div>
+      <div class="title-bar-controls">
+        <button aria-label="Minimize"></button>
+        <button aria-label="Maximize"></button>
+        <button aria-label="Close"></button>
+      </div>
+    </div>
+    <div class="window-body">
+
+      <div class="wizard-tabs" id="wizardTabs">
+        <span class="wtab" data-step="1">1. Scan</span><span class="wsep">&rarr;</span>
+        <span class="wtab" data-step="2">2. Results</span><span class="wsep">&rarr;</span>
+        <span class="wtab" data-step="3">3. Organize</span><span class="wsep">&rarr;</span>
+        <span class="wtab" data-step="4">4. Plan</span><span class="wsep">&rarr;</span>
+        <span class="wtab" data-step="5">5. Execute</span>
+        <button id="btnExplore" class="explore-btn" title="Query your photo database">&#128269; Explore photos</button>
+      </div>
+
+      <!-- ================= STEP 1: SCAN ================= -->
+      <section id="step1" class="step">
+        <fieldset>
+          <legend>Source folder</legend>
+          <div class="field-row-stacked">
+            <label for="scanPath">Folder to scan (read-only):</label>
+            <div class="path-row">
+              <input id="scanPath" type="text" value="D:\Photos" spellcheck="false">
+              <button id="btnBrowseScan" type="button" data-browse-target="scanPath"
+                      title="Pick a folder with the folder browser">&#128193; Browse&hellip;</button>
+            </div>
+          </div>
+          <div class="field-row">
+            <label for="scanMax">Max files (blank = all):</label>
+            <input id="scanMax" type="text" style="width:90px" spellcheck="false">
+            <span class="hint">useful for a quick test on huge libraries</span>
+          </div>
+          <div class="field-row" style="justify-content:flex-end; margin-top:6px">
+            <button id="btnScan" class="big-btn">&#128269; Scan</button>
+          </div>
+        </fieldset>
+
+        <fieldset id="scanProgressBox" class="hidden">
+          <legend>Scanning&hellip;</legend>
+          <div class="progress"><div class="progress-fill" id="scanBar"></div></div>
+          <div class="progress-text"><span id="scanText">0 / 0</span><span id="scanPct"></span></div>
+          <div class="mono small ellipsis" id="scanFile"></div>
+          <div class="field-row" style="margin-top:6px">
+            <button id="btnScanCancel" disabled>Cancel</button>
+          </div>
+        </fieldset>
+
+        <fieldset id="scanCancelNote" class="hidden">
+          <legend>Scan cancelled</legend>
+          <div id="scanCancelText">Scan cancelled.</div>
+          <div class="field-row" style="margin-top:6px">
+            <button id="btnScanResume">&#8635; Resume scan</button>
+            <span class="hint">already-scanned files are skipped instantly (database cache)</span>
+          </div>
+        </fieldset>
+
+        <div class="step-nav">
+          <button id="toStep2" disabled>Next: Results &rarr;</button>
+        </div>
+      </section>
+
+      <!-- ================= STEP 2: RESULTS ================= -->
+      <section id="step2" class="step hidden">
+        <div id="dateWarn" class="date-warn hidden"></div>
+        <div class="panel-grid">
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Summary</div></div>
+            <div class="window-body" id="sumBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Cameras</div></div>
+            <div class="window-body" id="camBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Locations</div></div>
+            <div class="window-body" id="locBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Duplicates</div></div>
+            <div class="window-body" id="dupBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">By type</div></div>
+            <div class="window-body" id="typeBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Date quality</div></div>
+            <div class="window-body" id="qualityBody"></div>
+          </div>
+        </div>
+        <div class="window panel panel-wide">
+          <div class="title-bar"><div class="title-bar-text">Sample thumbnails</div></div>
+          <div class="window-body"><div class="thumb-grid" id="thumbGrid"></div></div>
+        </div>
+        <div class="step-nav">
+          <button id="backTo1">&larr; Rescan</button>
+          <button id="toStep3" class="default big-btn">Next: How would you like to organize? &rarr;</button>
+        </div>
+      </section>
+
+      <!-- ================= STEP 3: ORGANIZE ================= -->
+      <section id="step3" class="step hidden">
+        <div class="window panel panel-wide">
+          <div class="title-bar"><div class="title-bar-text">How would you like to organize?</div></div>
+          <div class="window-body">
+
+            <fieldset>
+              <legend>Folder structure</legend>
+              <div class="field-row-stacked">
+                <label for="preset">Preset:</label>
+                <select id="preset">
+                  <option value="camera_year_locmonth" selected>Camera &rarr; Year &rarr; Location, Month</option>
+                  <option value="year_month">Year &rarr; Month</option>
+                  <option value="year_locmonth">Year &rarr; Location, Month</option>
+                  <option value="loc_year_month">Location &rarr; Year &rarr; Month</option>
+                  <option value="year_camera">Year &rarr; Camera</option>
+                  <option value="custom">Custom (up to 3 levels)&hellip;</option>
+                </select>
+              </div>
+              <div class="field-row" id="customLevels" style="margin-top:6px; display:none">
+                <label>Level 1</label>
+                <select id="lvl1"></select>
+                <label>Level 2</label>
+                <select id="lvl2"></select>
+                <label>Level 3</label>
+                <select id="lvl3"></select>
+              </div>
+              <div class="hint" id="presetExample" style="margin-top:6px"></div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Filenames</legend>
+              <div class="field-row-stacked">
+                <label for="nameTemplate">Filename template:</label>
+                <select id="nameTemplate">
+                  <option value="orig" selected>Keep original name (e.g. DCS001.jpg)</option>
+                  <option value="date">{date} &rarr; 2013-12-25_10-30-00.jpg</option>
+                  <option value="date_camera">{date}_{camera} &rarr; 2013-12-25_NikonD700_DSC001.jpg</option>
+                  <option value="location_seq">{location}_{seq} &rarr; RochesterNY_0001.jpg</option>
+                  <option value="custom">Custom token string&hellip;</option>
+                </select>
+              </div>
+              <div class="field-row-stacked" id="customTplRow" style="display:none; margin-top:6px">
+                <label for="customTpl">Custom template:</label>
+                <input id="customTpl" type="text" value="{date}_{camera}_{orig}" spellcheck="false">
+              </div>
+              <div class="hint" style="margin-top:6px">
+                Tokens: <code>{date}</code> 2013-12-25 &middot; <code>{time}</code> 10-30-00 &middot;
+                <code>{camera}</code> NikonD700 &middot; <code>{location}</code> RochesterNY &middot;
+                <code>{year}</code> 2013 &middot; <code>{month}</code> 12 &middot;
+                <code>{seq}</code> 0001 &middot; <code>{orig}</code> original name
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Duplicates</legend>
+              <div class="field-row-stacked">
+                <label><input type="radio" name="dupeMode" value="best" checked>
+                  Keep only the best copy in the main tree (highest resolution, then largest file); move the rest to <code>_Duplicates\&lt;group&gt;\</code></label>
+                <label><input type="radio" name="dupeMode" value="separate">
+                  Move all duplicates into <code>_Duplicates\&lt;group&gt;\</code> alongside the organized tree (keep every file)</label>
+                <label><input type="radio" name="dupeMode" value="ignore">
+                  Ignore duplicates (organize everything normally)</label>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Action &amp; target</legend>
+              <div class="field-row">
+                <label><input type="radio" name="action" value="move" checked> Move files</label>
+                <label><input type="radio" name="action" value="copy"> Copy files (safer)</label>
+              </div>
+              <div class="field-row">
+                <label><input type="checkbox" id="removeEmpty"> Remove now-empty source folders after a move</label>
+              </div>
+              <div class="field-row-stacked" style="margin-top:6px">
+                <label for="targetRoot">Target root folder:</label>
+                <div class="path-row">
+                  <input id="targetRoot" type="text" spellcheck="false">
+                  <button id="btnBrowseTarget" type="button" data-browse-target="targetRoot"
+                          title="Pick a folder with the folder browser">&#128193; Browse&hellip;</button>
+                </div>
+              </div>
+            </fieldset>
+
+          </div>
+        </div>
+        <div class="step-nav">
+          <button id="backTo2">&larr; Back</button>
+          <button id="toStep4" class="default big-btn">Build plan preview &rarr;</button>
+        </div>
+      </section>
+
+      <!-- ================= STEP 4: PLAN ================= -->
+      <section id="step4" class="step hidden">
+        <div class="window panel panel-wide">
+          <div class="title-bar"><div class="title-bar-text">Plan preview</div></div>
+          <div class="window-body">
+            <div id="planStats" class="plan-stats"></div>
+            <div class="sunken-list" id="planList"></div>
+          </div>
+        </div>
+        <div class="step-nav">
+          <button id="backTo3">&larr; Change options</button>
+          <button id="btnExecute" class="default big-btn danger">&#10004; Looks good &mdash; organize my photos</button>
+        </div>
+      </section>
+
+      <!-- ================= STEP 5: EXECUTE ================= -->
+      <section id="step5" class="step hidden">
+        <fieldset id="execProgressBox">
+          <legend>Organizing&hellip;</legend>
+          <div class="progress"><div class="progress-fill" id="execBar"></div></div>
+          <div class="progress-text"><span id="execText">0 / 0</span><span id="execPct"></span></div>
+          <div class="mono small ellipsis" id="execFile"></div>
+          <div class="sunken-list log-list" id="execLog"></div>
+          <div class="field-row" style="margin-top:6px">
+            <button id="btnExecCancel" disabled>Cancel</button>
+          </div>
+        </fieldset>
+
+        <div class="window panel panel-wide hidden" id="doneWindow">
+          <div class="title-bar"><div class="title-bar-text">&#127881; Done</div></div>
+          <div class="window-body" id="doneBody"></div>
+        </div>
+
+        <div class="step-nav">
+          <button id="btnStartOver" class="hidden">Start over</button>
+        </div>
+      </section>
+
+    </div>
+    <div class="status-bar">
+      <p class="status-bar-field" id="statusState">Ready</p>
+      <p class="status-bar-field ellipsis" id="statusPath"></p>
+      <p class="status-bar-field" id="statusCount"></p>
+    </div>
+  </div>
+
+  <!-- ===================== explore window ===================== -->
+  <div class="window app-window hidden" id="winExplore"
+       data-task="Explore Photos" data-icon="&#128269;"
+       data-defx="130" data-defy="48" data-defw="940" data-defh="640"
+       data-minw="620" data-minh="420">
+    <div class="title-bar">
+      <div class="title-bar-text">&#128269; Explore your photo database</div>
+      <div class="title-bar-controls">
+        <button aria-label="Minimize"></button>
+        <button aria-label="Maximize"></button>
+        <button aria-label="Close"></button>
+      </div>
+    </div>
+    <div class="window-body">
+
+      <fieldset>
+        <legend>Find photos</legend>
+        <div class="field-row">
+          <button id="btnOnThisDay">&#128197; On this day in history</button>
+          <label><input type="checkbox" id="exDupes"> duplicates only</label>
+          <label><input type="checkbox" id="exGps"> has GPS</label>
+        </div>
+        <div class="field-row" style="margin-top:6px">
+          <label>Month</label>
+          <select id="exMonth"><option value="">Any</option></select>
+          <label>Day</label>
+          <select id="exDay"><option value="">Any</option></select>
+          <label>Year</label>
+          <input id="exYear" type="text" style="width:60px" placeholder="Any">
+          <label>or from</label>
+          <input id="exDateFrom" type="text" style="width:100px" placeholder="YYYY-MM-DD">
+          <label>to</label>
+          <input id="exDateTo" type="text" style="width:100px" placeholder="YYYY-MM-DD">
+        </div>
+        <div class="field-row" style="margin-top:6px">
+          <label>Time of day</label>
+          <select id="exHourFrom"></select>
+          <label>to</label>
+          <select id="exHourTo"></select>
+          <span class="hint">e.g. 18 to 21 = evening shots across all days; 22 to 2 wraps overnight</span>
+        </div>
+        <div class="field-row" style="margin-top:6px">
+          <label>Place</label>
+          <input id="exPlace" type="text" style="width:160px" placeholder="e.g. rochester">
+          <label>Camera</label>
+          <select id="exCamera"><option value="">Any camera</option></select>
+          <label>Type</label>
+          <select id="exType">
+            <option value="">Any type</option>
+            <option value="photo">Photos</option>
+            <option value="raw">RAW</option>
+            <option value="video">Videos</option>
+            <option value="sidecar">Sidecars</option>
+          </select>
+          <label>File</label>
+          <select id="exExt"><option value="">Any extension</option></select>
+          <label>Date quality</label>
+          <select id="exQuality">
+            <option value="">Any quality</option>
+            <option value="suspect">⚠ Needs review</option>
+            <option value="exif">EXIF (trusted)</option>
+            <option value="exif_suspect">EXIF rejected</option>
+            <option value="filename">From filename</option>
+            <option value="container">From container</option>
+            <option value="mtime">From file date</option>
+            <option value="mtime_suspect">File date (suspect)</option>
+            <option value="unknown">Unknown date</option>
+          </select>
+          <label>Sort</label>
+          <select id="exSort">
+            <option value="date_asc">oldest first</option>
+            <option value="date_desc">newest first</option>
+            <option value="size">largest first</option>
+          </select>
+          <button id="btnSearch" class="default" style="margin-left:auto">Search</button>
+        </div>
+      </fieldset>
+
+      <div id="exCount" class="ex-count">Run a search to explore your photos.</div>
+      <div class="thumb-grid ex-grid" id="exGrid"></div>
+      <div class="field-row" id="exPager" style="margin-top:6px; display:none">
+        <button id="exPrev">&larr; Prev</button>
+        <span id="exPageInfo" class="hint"></span>
+        <button id="exNext">Next &rarr;</button>
+      </div>
+
+      <div class="step-nav">
+        <span class="hint">Tip: click a photo for a big preview; the &#128193; button opens its folder.</span>
+        <button id="exBack">&#10006; Close window</button>
+      </div>
+
+    </div>
+    <div class="status-bar">
+      <p class="status-bar-field" id="exStatus">Explore</p>
+      <p class="status-bar-field ellipsis" id="exStatusPath"></p>
+      <p class="status-bar-field" id="exStatusCount"></p>
+    </div>
+  </div>
+
+  <!-- ===================== cinema organizer ===================== -->
+  <div class="window app-window hidden" id="winCinema"
+       data-task="Cinema Organizer" data-icon="&#127916;"
+       data-defx="120" data-defy="40" data-defw="760" data-defh="620"
+       data-minw="560" data-minh="420">
+    <div class="title-bar">
+      <div class="title-bar-text">&#127916; Cinema Organizer 1.0</div>
+      <div class="title-bar-controls">
+        <button aria-label="Minimize"></button>
+        <button aria-label="Maximize"></button>
+        <button aria-label="Close"></button>
+      </div>
+    </div>
+    <div class="window-body">
+
+      <!-- source & scan -->
+      <fieldset>
+        <legend>Source folder</legend>
+        <div class="field-row-stacked">
+          <label for="cScanPath">Movie/TV folder to scan (read-only):</label>
+          <div class="path-row">
+            <input id="cScanPath" type="text" value="D:\Movies" spellcheck="false">
+            <button id="cBtnBrowseScan" type="button" data-browse-target="cScanPath"
+                    title="Pick a folder with the folder browser">&#128193; Browse&hellip;</button>
+          </div>
+        </div>
+        <div class="field-row">
+          <label for="cScanMax">Max files (blank = all):</label>
+          <input id="cScanMax" type="text" style="width:90px" spellcheck="false">
+        </div>
+        <div class="field-row">
+          <label><input type="checkbox" id="cHash" checked>
+            Hash files for exact duplicates (slow &mdash; skipped for files &ge; 2 GB)</label>
+        </div>
+        <div class="field-row">
+          <label for="cTmdbKey">TMDB API key (optional, for genres):</label>
+          <input id="cTmdbKey" type="password" style="flex:1" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="field-row">
+          <label for="cTmdbToken">TMDB read token (optional, preferred):</label>
+          <input id="cTmdbToken" type="password" style="flex:1" spellcheck="false" autocomplete="off">
+          <button id="cBtnSaveKey">Save</button>
+          <button id="cBtnClearKey">Clear</button>
+        </div>
+        <div class="field-row">
+          <span class="hint">free key: themoviedb.org &rarr; Settings &rarr; API &mdash; without a key everything lands in <code>Unclassified</code></span>
+          <span id="cKeyMsg" class="hint"></span>
+        </div>
+        <div class="field-row" style="justify-content:flex-end; margin-top:6px">
+          <button id="cBtnScan" class="big-btn">&#128269; Scan</button>
+        </div>
+      </fieldset>
+
+      <fieldset id="cScanProgressBox" class="hidden">
+        <legend>Scanning&hellip;</legend>
+        <div class="progress"><div class="progress-fill" id="cScanBar"></div></div>
+        <div class="progress-text"><span id="cScanText">0 / 0</span><span id="cScanPct"></span></div>
+        <div class="mono small ellipsis" id="cScanFile"></div>
+        <div class="field-row" style="margin-top:6px">
+          <button id="cBtnScanCancel">Cancel</button>
+        </div>
+      </fieldset>
+
+      <fieldset id="cScanCancelNote" class="hidden">
+        <legend>Scan cancelled</legend>
+        <div id="cScanCancelText">Scan cancelled.</div>
+        <div class="field-row" style="margin-top:6px">
+          <button id="cBtnScanResume">&#8635; Resume scan</button>
+          <span class="hint">re-runs the scan from the top</span>
+        </div>
+      </fieldset>
+
+      <!-- results -->
+      <div id="cResults" class="hidden">
+        <div class="panel-grid">
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Summary</div></div>
+            <div class="window-body" id="cSumBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Genres</div></div>
+            <div class="window-body" id="cGenreBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Quality</div></div>
+            <div class="window-body" id="cQualityBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Duplicates &amp; clutter</div></div>
+            <div class="window-body" id="cDupBody"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- organize -->
+      <fieldset id="cOrganize" class="hidden">
+        <legend>Organize</legend>
+        <div class="hint" style="margin-bottom:6px">
+          Posters, artwork, .nfo and subtitles (incl. <code>.en.srt</code>)
+          travel <b>with</b> their video. Buckets: <code>_Duplicates\</code>
+          <code>_Samples\</code> <code>_Clutter\</code>
+          <code>_Unidentified\</code> &mdash; best copy per duplicate group
+          wins (quality, then size).
+        </div>
+        <div class="field-row">
+          <span>Folder layout:</span>
+          <label><input type="radio" name="cLayout" value="plex" checked>
+            Plex standard &mdash; <code>Movies\Title (Year)\</code> &middot;
+            <code>TV\Show\Season 01\</code></label>
+          <label><input type="radio" name="cLayout" value="genre">
+            Genre tree &mdash; <code>Genre\Sub\&hellip;</code></label>
+        </div>
+        <div class="field-row">
+          <label><input type="radio" name="cAction" value="move" checked> Move files</label>
+          <label><input type="radio" name="cAction" value="copy"> Copy files (safer)</label>
+        </div>
+        <div class="field-row" style="margin-top:6px">
+          <span>This library holds:</span>
+          <label><input type="radio" name="cExpectKind" value="any" checked> Movies &amp; TV</label>
+          <label><input type="radio" name="cExpectKind" value="movie"> Movies only</label>
+          <label><input type="radio" name="cExpectKind" value="tv"> TV only</label>
+        </div>
+        <div class="field-row" style="margin-top:6px">
+          <label><input type="checkbox" id="cSplitByKind" checked>
+            Split into <code>Movies\</code> and <code>TV\</code> at the top
+            <span class="hint">(genre tree only)</span></label>
+          <label><input type="checkbox" id="cMovieYearFolder">
+            Extra year folder for movies
+            <span class="hint">(genre tree only)</span></label>
+        </div>
+        <div class="hint" style="margin-top:2px">
+          Season 0 / extras land in <code>Specials\</code> either way.
+        </div>
+        <div class="field-row" style="margin-top:6px">
+          <label><input type="checkbox" id="cWriteNfo" checked>
+            Write <code>.nfo</code> metadata files (title/year/genre for
+            Plex&nbsp;&amp;&nbsp;Kodi; skipped when a release already ships one;
+            undoable)</label>
+        </div>
+        <div class="hint" style="margin-top:2px">
+          Picking &ldquo;Movies only&rdquo; or &ldquo;TV only&rdquo; keeps strays out of the
+          wrong tree: TV found in a movie library goes to <code>_TV\</code>, and movies
+          found in a TV library go to <code>_Movies\</code>, ready to move to their real home.
+        </div>
+        <div class="field-row-stacked" style="margin-top:6px">
+          <label for="cTargetRoot">Target root folder:</label>
+          <div class="path-row">
+            <input id="cTargetRoot" type="text" spellcheck="false">
+            <button id="cBtnBrowseTarget" type="button" data-browse-target="cTargetRoot"
+                    title="Pick a folder with the folder browser">&#128193; Browse&hellip;</button>
+          </div>
+        </div>
+        <div class="field-row" style="justify-content:flex-end; margin-top:6px">
+          <button id="cToPlan" class="default big-btn">Build plan preview &rarr;</button>
+        </div>
+      </fieldset>
+
+      <!-- plan -->
+      <div id="cPlan" class="hidden">
+        <div class="window panel panel-wide">
+          <div class="title-bar"><div class="title-bar-text">Plan preview</div></div>
+          <div class="window-body">
+            <div id="cPlanStats" class="plan-stats"></div>
+            <div class="sunken-list" id="cPlanList"></div>
+          </div>
+        </div>
+        <div class="field-row" style="justify-content:flex-end; margin-top:6px">
+          <button id="cBtnExecute" class="default big-btn danger">&#10004; Looks good &mdash; organize my videos</button>
+        </div>
+      </div>
+
+      <!-- execute -->
+      <fieldset id="cExecBox" class="hidden">
+        <legend>Organizing&hellip;</legend>
+        <div class="progress"><div class="progress-fill" id="cExecBar"></div></div>
+        <div class="progress-text"><span id="cExecText">0 / 0</span><span id="cExecPct"></span></div>
+        <div class="mono small ellipsis" id="cExecFile"></div>
+        <div class="sunken-list log-list" id="cExecLog"></div>
+        <div class="field-row" style="margin-top:6px">
+          <button id="cBtnExecCancel">Cancel</button>
+        </div>
+      </fieldset>
+
+      <div class="window panel panel-wide hidden" id="cDoneWindow">
+        <div class="title-bar"><div class="title-bar-text">&#127881; Done</div></div>
+        <div class="window-body" id="cDoneBody"></div>
+      </div>
+
+      <div class="field-row" style="margin-top:6px">
+        <button id="cBtnStartOver" class="hidden">Start over</button>
+      </div>
+
+    </div>
+    <div class="status-bar">
+      <p class="status-bar-field" id="cStatusState">Ready</p>
+      <p class="status-bar-field ellipsis" id="cStatusPath"></p>
+      <p class="status-bar-field" id="cStatusCount"></p>
+    </div>
+  </div>
+
+  <!-- ===================== music organizer ===================== -->
+  <div class="window app-window hidden" id="winMusic"
+       data-task="Music Organizer" data-icon="&#127925;"
+       data-defx="160" data-defy="60" data-defw="780" data-defh="620"
+       data-minw="580" data-minh="430">
+    <div class="title-bar">
+      <div class="title-bar-text">&#127925; Music Organizer 1.0</div>
+      <div class="title-bar-controls">
+        <button aria-label="Minimize"></button>
+        <button aria-label="Maximize"></button>
+        <button aria-label="Close"></button>
+      </div>
+    </div>
+    <div class="window-body">
+
+      <!-- source & scan -->
+      <fieldset>
+        <legend>Source folder</legend>
+        <div class="field-row-stacked">
+          <label for="mScanPath">Music folder to scan (read-only):</label>
+          <div class="path-row">
+            <input id="mScanPath" type="text" value="D:\Music" spellcheck="false">
+            <button id="mBtnBrowseScan" type="button" data-browse-target="mScanPath"
+                    title="Pick a folder with the folder browser">&#128193; Browse&hellip;</button>
+          </div>
+        </div>
+        <div class="field-row">
+          <label for="mScanMax">Max files (blank = all):</label>
+          <input id="mScanMax" type="text" style="width:90px" spellcheck="false">
+        </div>
+        <div class="field-row">
+          <label><input type="checkbox" id="mHash" checked>
+            Hash files for exact duplicates (slow &mdash; skipped for files &ge; 2 GB)</label>
+        </div>
+        <div class="field-row">
+          <label><input type="checkbox" id="mFingerprint">
+            Fingerprint near-duplicates via AcoustID (needs fpcalc.exe)</label>
+          <span id="mFpBadge" class="badge badge-off">fingerprinting disabled</span>
+        </div>
+        <div class="field-row" style="justify-content:flex-end; margin-top:6px">
+          <button id="mBtnScan" class="big-btn">&#128269; Scan</button>
+        </div>
+      </fieldset>
+
+      <!-- API keys -->
+      <fieldset>
+        <legend>API keys (optional)</legend>
+        <div class="field-row">
+          <label for="mAcoustidKey">AcoustID API key:</label>
+          <input id="mAcoustidKey" type="password" style="flex:1" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="field-row">
+          <label for="mDiscogsToken">Discogs token:</label>
+          <input id="mDiscogsToken" type="password" style="flex:1" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="field-row">
+          <label for="mLastfmKey">Last.fm API key:</label>
+          <input id="mLastfmKey" type="password" style="flex:1" spellcheck="false" autocomplete="off">
+          <button id="mBtnSaveKeys">Save</button>
+          <button id="mBtnClearKeys">Clear</button>
+        </div>
+        <div class="field-row">
+          <span class="hint">MusicBrainz + Cover Art Archive need no key &mdash;
+            keys only add fingerprint lookups and genre fallbacks</span>
+          <span id="mKeysMsg" class="hint"></span>
+        </div>
+      </fieldset>
+
+      <fieldset id="mScanProgressBox" class="hidden">
+        <legend>Scanning&hellip;</legend>
+        <div class="progress"><div class="progress-fill" id="mScanBar"></div></div>
+        <div class="progress-text"><span id="mScanText">0 / 0</span><span id="mScanPct"></span></div>
+        <div class="mono small ellipsis" id="mScanFile"></div>
+        <div class="field-row" style="margin-top:6px">
+          <button id="mBtnScanCancel">Cancel</button>
+        </div>
+      </fieldset>
+
+      <fieldset id="mScanCancelNote" class="hidden">
+        <legend>Scan cancelled</legend>
+        <div id="mScanCancelText">Scan cancelled.</div>
+        <div class="field-row" style="margin-top:6px">
+          <button id="mBtnScanResume">&#8635; Resume scan</button>
+          <span class="hint">re-runs the scan from the top</span>
+        </div>
+      </fieldset>
+
+      <!-- results -->
+      <div id="mResults" class="hidden">
+        <div class="panel-grid">
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Summary</div></div>
+            <div class="window-body" id="mSumBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Codecs</div></div>
+            <div class="window-body" id="mCodecBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Genres</div></div>
+            <div class="window-body" id="mGenreBody"></div>
+          </div>
+          <div class="window panel">
+            <div class="title-bar"><div class="title-bar-text">Duplicates &amp; upgrades</div></div>
+            <div class="window-body" id="mDupBody"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- organize -->
+      <fieldset id="mOrganize" class="hidden">
+        <legend>Organize</legend>
+        <div class="hint" style="margin-bottom:6px">
+          Loose singles: <code>Artist\_Singles\Title.ext</code> &middot;
+          special buckets: <code>_Duplicates\Gxx\</code> <code>_Unidentified\</code><br>
+          Best copy per duplicate group wins (lossless &gt; high-bitrate lossy,
+          then art/tags/duration); losers are quarantined, never deleted.
+        </div>
+        <div class="field-row">
+          <label>Folder layout:</label>
+          <label><input type="radio" name="mLayout" value="artist" checked>
+            Artist &rsaquo; Album &mdash; <code>Artist\Album\NN - Title.ext</code></label>
+          <label><input type="radio" name="mLayout" value="genre">
+            Genre tree &mdash; <code>Genre\Sub\Artist\Year - Album\</code></label>
+        </div>
+        <div class="field-row">
+          <label>Multi-disc albums:</label>
+          <label><input type="radio" name="mDiscStyle" value="subfolder" checked>
+            Disc subfolders (<code>CD1\02 - Song.flac</code>)</label>
+          <label><input type="radio" name="mDiscStyle" value="merge">
+            Merge into album folder (<code>1-02 - Song.flac</code>)</label>
+        </div>
+        <div class="field-row">
+          <label>Duplicates:</label>
+          <label><input type="radio" name="mDupeHandling" value="quarantine" checked>
+            Keep best copy in main tree; losers &rarr; <code>_Duplicates\Gxx\</code></label>
+          <label><input type="radio" name="mDupeHandling" value="keep">
+            Keep every copy (organize all files)</label>
+        </div>
+        <div class="field-row">
+          <label><input type="radio" name="mAction" value="move" checked> Move files</label>
+          <label><input type="radio" name="mAction" value="copy"> Copy files (safer)</label>
+        </div>
+        <div class="field-row-stacked" style="margin-top:6px">
+          <label for="mTargetRoot">Target root folder:</label>
+          <div class="path-row">
+            <input id="mTargetRoot" type="text" spellcheck="false">
+            <button id="mBtnBrowseTarget" type="button" data-browse-target="mTargetRoot"
+                    title="Pick a folder with the folder browser">&#128193; Browse&hellip;</button>
+          </div>
+        </div>
+        <div class="field-row" style="justify-content:flex-end; margin-top:6px">
+          <button id="mToPlan" class="default big-btn">Build plan preview &rarr;</button>
+        </div>
+      </fieldset>
+
+      <!-- plan -->
+      <div id="mPlan" class="hidden">
+        <div class="window panel panel-wide">
+          <div class="title-bar"><div class="title-bar-text">Plan preview</div></div>
+          <div class="window-body">
+            <div id="mPlanStats" class="plan-stats"></div>
+            <div class="sunken-list" id="mPlanList"></div>
+          </div>
+        </div>
+        <div class="field-row" style="justify-content:flex-end; margin-top:6px">
+          <button id="mBtnExecute" class="default big-btn danger">&#10004; Looks good &mdash; organize my music</button>
+        </div>
+      </div>
+
+      <!-- execute -->
+      <fieldset id="mExecBox" class="hidden">
+        <legend>Organizing&hellip;</legend>
+        <div class="progress"><div class="progress-fill" id="mExecBar"></div></div>
+        <div class="progress-text"><span id="mExecText">0 / 0</span><span id="mExecPct"></span></div>
+        <div class="mono small ellipsis" id="mExecFile"></div>
+        <div class="sunken-list log-list" id="mExecLog"></div>
+        <div class="field-row" style="margin-top:6px">
+          <button id="mBtnExecCancel">Cancel</button>
+        </div>
+      </fieldset>
+
+      <div class="window panel panel-wide hidden" id="mDoneWindow">
+        <div class="title-bar"><div class="title-bar-text">&#127881; Done</div></div>
+        <div class="window-body" id="mDoneBody"></div>
+      </div>
+
+      <div class="field-row" style="margin-top:6px">
+        <button id="mBtnStartOver" class="hidden">Start over</button>
+      </div>
+
+    </div>
+    <div class="status-bar">
+      <p class="status-bar-field" id="mStatusState">Ready</p>
+      <p class="status-bar-field ellipsis" id="mStatusPath"></p>
+      <p class="status-bar-field" id="mStatusCount"></p>
+    </div>
+  </div>
+
+  <!-- ===================== about ===================== -->
+  <div class="window app-window hidden" id="winAbout"
+       data-task="About" data-icon="&#8505;"
+       data-defx="300" data-defy="190" data-defw="400" data-defh="230"
+       data-minw="320" data-minh="190">
+    <div class="title-bar">
+      <div class="title-bar-text">&#8505; About Photo Organizer</div>
+      <div class="title-bar-controls">
+        <button aria-label="Close"></button>
+      </div>
+    </div>
+    <div class="window-body" style="font-size:12px">
+      <p><b>&#128247; AI Photo Organizer 1.0</b> &mdash; Windows 98 desktop edition</p>
+      <p>Scans your photo library, finds exact &amp; near duplicates, fixes
+      unreliable dates (EXIF &rarr; filename &rarr; container &rarr; file date),
+      and organizes everything into a clean Camera &rarr; Year &rarr; Location
+      tree. Every run is undoable.</p>
+      <p class="hint">Local-only. Your photos never leave this machine.</p>
+    </div>
+  </div>
+
+  <!-- snap preview outline -->
+  <div id="snapPreview" class="hidden"></div>
+
+  <!-- ===================== taskbar ===================== -->
+  <div id="taskbar">
+    <button id="startBtn"><span class="start-flag">&#8862;</span> Start</button>
+    <div id="taskButtons"></div>
+    <div id="taskClock">--:--</div>
+  </div>
+  <div id="startMenu" class="hidden">
+    <div class="sm-side">PhotoOrganizer<b>98</b></div>
+    <div class="sm-items">
+      <div class="sm-item" data-app="winWizard">&#128247; Photo Organizer</div>
+      <div class="sm-item" data-app="winExplore">&#128269; Explore Photos</div>
+      <div class="sm-item" data-app="winCinema">&#127916; Cinema Organizer</div>
+      <div class="sm-item" data-app="winMusic">&#127925; Music Organizer</div>
+      <div class="sm-sep"></div>
+      <div class="sm-item" data-app="winAbout">&#8505; About&hellip;</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- folder browse modal (browse.js) -->
+<div class="browse-overlay hidden" id="browseOverlay">
+  <div class="window browse-window" role="dialog" aria-modal="true"
+       aria-label="Browse For Folder">
+    <div class="title-bar">
+      <div class="title-bar-text">&#128193; Browse For Folder</div>
+      <div class="title-bar-controls">
+        <button aria-label="Close" id="browseClose"></button>
+      </div>
+    </div>
+    <div class="window-body">
+      <div class="field-row">
+        <label for="browseDrives">Drive:</label>
+        <select id="browseDrives" style="width:96px"></select>
+        <button id="browseUp" type="button" title="Up one level">&#11014; Up</button>
+      </div>
+      <div class="sunken-list browse-list" id="browseList" tabindex="0"></div>
+      <div class="field-row" style="margin-top:6px">
+        <label for="browsePath">Folder:</label>
+        <input id="browsePath" type="text" spellcheck="false" style="flex:1">
+      </div>
+      <div class="field-row">
+        <span class="hint" id="browseMsg"></span>
+      </div>
+      <div class="field-row" style="justify-content:flex-end; margin-top:2px">
+        <button id="browseOk" type="button" class="default" style="min-width:84px">OK</button>
+        <button id="browseCancel" type="button" style="min-width:84px">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- big preview overlay -->
+<div class="preview-overlay hidden" id="previewOverlay">
+  <div class="window preview-window">
+    <div class="title-bar">
+      <div class="title-bar-text ellipsis" id="previewTitle">Preview</div>
+      <div class="title-bar-controls">
+        <button aria-label="Close" id="previewClose"></button>
+      </div>
+    </div>
+    <div class="window-body preview-body">
+      <img id="previewImg" alt="">
+      <div class="mono small" id="previewPath"></div>
+      <div class="field-row" style="justify-content:center; margin-top:6px">
+        <button id="previewReveal">&#128193; Open file location</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="wm.js"></script>
+<script src="browse.js"></script>
+<script src="app.js"></script>
+<script src="cinema.js"></script>
+<script src="music.js"></script>
+<script src="singleapp.js"></script>
+<script src="theme.js"></script>
+</body>
+</html>

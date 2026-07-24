@@ -868,6 +868,12 @@ from routes.canvas_routes import setup_canvas_routes
 app.include_router(setup_canvas_routes())
 logger.info("Code canvas routes initialized")
 
+# Organizer — vendored photo/cinema/music sub-app, reverse-proxied under
+# /organizer/* behind admin auth (runs as a managed loopback subprocess).
+from routes.organizer_routes import setup_organizer_routes
+app.include_router(setup_organizer_routes())
+logger.info("Organizer routes initialized")
+
 # User Preferences
 from routes.prefs_routes import setup_prefs_routes
 app.include_router(setup_prefs_routes())
@@ -1110,6 +1116,15 @@ async def _startup_event():
     app.state._startup_tasks = _startup_tasks
     if upload_cleanup_func:
         upload_cleanup_task = asyncio.create_task(upload_cleanup_func())
+    # Launch the vendored Organizer sub-app as a managed loopback subprocess
+    # (reverse-proxied under /organizer/* behind admin auth). Spawned off the
+    # event loop so a slow child start never stalls Aegis startup.
+    try:
+        from src import organizer_bridge
+        _startup_tasks.append(
+            asyncio.create_task(asyncio.to_thread(organizer_bridge.ensure_started)))
+    except Exception as e:
+        logger.warning(f"Organizer bridge start skipped: {e}")
     # Always-on monitor that auto-continues the agent when a background bash
     # job (#!bg) finishes — re-invokes the turn with the job output.
     try:
@@ -1355,6 +1370,12 @@ async def _shutdown_event():
         await mcp_manager.disconnect_all()
     except Exception as e:
         logger.warning(f"MCP shutdown error: {e}")
+    # Stop the Organizer subprocess
+    try:
+        from src import organizer_bridge
+        organizer_bridge.stop()
+    except Exception as e:
+        logger.warning(f"Organizer bridge stop error: {e}")
     logger.info("Application shutdown complete")
 
 

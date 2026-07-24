@@ -91,6 +91,25 @@ you fit them to your machine:
 - **Coding agent** (`/code`) — edits real files in a git-aware workspace.
 - **Code Canvas** (`/canvas`) — generate code, edit it inline, tell the AI what to change, and **run it**.
 - **Repo → Wiki** (`/wiki`) — turn any local repo into a structured Overview / Architecture / module guide.
+- A **Coder Model** setting (Settings → AI Defaults) pins both to the model you want —
+  or leave it on auto-pick (local endpoints first, coder-named models preferred).
+
+**Organize your media library**
+- Three windowed tools — **Photos**, **Movies & TV**, **Music** — that run side by side
+  and turn a jumbled drive into a clean, Plex-ready library. Read-only scans; nothing
+  moves without a previewed, **fully undoable** plan; duplicates are quarantined, never deleted.
+- **Photos** — EXIF scan, exact + perceptual dedupe, date repair, date/camera/place folder
+  schemes, local-vision-model captioning & tagging, and a searchable Explore view.
+- **Movies & TV** — filename + TMDB identification, Plex-standard `Movies\Title (Year)\` and
+  `TV\Show\Season 01\` layouts (`Specials\` for season 0), posters/NFO/subtitles travel with
+  their video, `.nfo` metadata generation, and strays quarantined (`_Movies\` in a TV library,
+  `_TV\` in a movie library).
+- **Music** — 5-stage dedupe ladder (byte → payload → fingerprint → tags → filename) with a
+  one-click **"Clean duplicates now"** first pass, MusicBrainz/AcoustID/Discogs identification,
+  Artist › Album or genre-tree layouts, cover-art backfill, and **Fix missing tags** — writes
+  identified values into empty tag fields only, backed up and undoable.
+- An optional **local-LLM plan review** explains every batch in plain English before you hit
+  Execute, with deterministic safety flags the model can't override.
 
 **Create & converse**
 - **Studio** (`/studio`) — one home for all your media, organized as explicit makers:
@@ -194,6 +213,18 @@ one-click delete (that's the Aegis Amp easter egg in the corner):
 ![The Studio Media library with photos, songs and videos](docs/media/studio-media.png)
 
 ![Photo detail view](docs/media/image-detail.png)
+
+**The Organizer suite.** Photos, Movies & TV, and Music are separate tool windows —
+run them side by side, each with its own scan / dedupe / identify / organize pipeline
+(and every file move previewed and undoable):
+
+![Photos and Music organizer tools running side by side](docs/media/organizer-side-by-side.png)
+
+**Movies & TV.** TMDB identification plus Plex-standard layouts; posters, subtitles
+and `.nfo` metadata stay with their video, and a movie that wanders into your TV
+library gets quarantined to `_Movies\` for you to rehome:
+
+![The Movies & TV organizer tool](docs/media/organizer-movies-tv.png)
 
 **The Music Maker.** Compose (style tags + lyrics, or cover a reference track), then
 play everything you've made in a real track player — playback keeps going while you

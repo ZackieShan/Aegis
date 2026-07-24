@@ -156,6 +156,10 @@ DEFAULT_SETTINGS = {
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],
+    # Coder model: drives Code Canvas and the /code (Aider) agent. Empty =
+    # auto-pick (local endpoints first, then coder-named models).
+    "coder_endpoint_id": "",
+    "coder_model": "",
     "teacher_model": "",
     "teacher_enabled": False,
     "teacher_tier2_enabled": False,
@@ -278,6 +282,7 @@ _PER_USER_KEYS = {
     "default_endpoint_id", "default_model", "default_model_fallbacks",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
+    "coder_endpoint_id", "coder_model",
 }
 
 

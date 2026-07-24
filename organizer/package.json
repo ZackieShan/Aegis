@@ -1,0 +1,9 @@
+{
+  "name": "ai-photo-organizer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Photo Organizer (Phase 1) - local Win98-themed photo organizer, stdlib Python server",
+  "scripts": {
+    "dev": "python server.py"
+  }
+}

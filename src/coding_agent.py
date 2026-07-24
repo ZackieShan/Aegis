@@ -147,7 +147,8 @@ def _list_candidates(owner: str = "") -> List[Dict[str, Any]]:
                     continue
                 for m in (_json.loads(ep.cached_models) if ep.cached_models else []) or []:
                     out.append({
-                        "endpoint": ep.name, "model": m, "base_url": base,
+                        "endpoint": ep.name, "endpoint_id": str(ep.id),
+                        "model": m, "base_url": base,
                         "api_key": api_key or "dummy", "local": _is_local(base),
                         "supports_tools": bool(ep.supports_tools),
                     })
@@ -180,12 +181,32 @@ def _pick_endpoint(owner: str = "", model_hint: Optional[str] = None) -> Optiona
     cands = _list_candidates(owner)
     if not cands:
         return None
+
+    def _match(hint: str, pool: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        h = hint.strip().lower()
+        return [c for c in pool if c["model"].lower() == h] or \
+               [c for c in pool if h in c["model"].lower()]
+
+    # explicit hint (e.g. "/code model <name>") always wins
     if model_hint:
-        h = model_hint.strip().lower()
-        pool = [c for c in cands if c["model"].lower() == h] or \
-               [c for c in cands if h in c["model"].lower()]
+        pool = _match(model_hint, cands)
         if pool:
             return sorted(pool, key=_rank)[0]
+    # admin "Coder Model" AI Default (Settings → AI Defaults); used by both
+    # the /code agent and Code Canvas. Falls through to auto-pick when unset
+    # or when the configured model isn't currently served by any endpoint.
+    try:
+        from src.settings import get_user_setting
+        cfg_model = str(get_user_setting("coder_model", owner, "") or "").strip()
+        if cfg_model:
+            pool = _match(cfg_model, cands)
+            cfg_ep = str(get_user_setting("coder_endpoint_id", owner, "") or "").strip()
+            if pool and cfg_ep:
+                pool = [c for c in pool if c.get("endpoint_id") == cfg_ep] or pool
+            if pool:
+                return sorted(pool, key=_rank)[0]
+    except Exception:
+        pass
     return sorted(cands, key=_rank)[0]
 
 

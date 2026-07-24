@@ -1,0 +1,10 @@
+# local secrets + runtime state (never commit)
+cinema_config.json
+music_config.json
+*.db
+*.db.bak
+*.db-shm
+*.db-wal
+undo_log_*.json
+scan_req.json
+results_snapshot.json

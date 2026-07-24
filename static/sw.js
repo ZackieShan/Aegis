@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'aegis-v402';
+const CACHE_NAME = 'aegis-v406';
 
 // Core shell precached on install so repeat opens are instant without any
 // network wait. Keep this list in sync with the <script type="module"> tags
@@ -15,10 +15,14 @@ const CACHE_NAME = 'aegis-v402';
 const PRECACHE = [
   '/',
   '/static/style.css',
+  '/static/win98.css',
   '/static/fonts/Inter-Regular.woff2',
   '/static/fonts/Inter-Medium.woff2',
   '/static/fonts/Inter-SemiBold.woff2',
+  '/static/fonts/ms_sans_serif.woff2',
+  '/static/fonts/ms_sans_serif_bold.woff2',
   '/static/app.js',
+  '/static/js/organizer.js',
   '/static/js/storage.js',
   '/static/js/ui.js',
   '/static/js/markdown.js',
@@ -64,6 +68,7 @@ const PRECACHE = [
   '/static/js/censor.js',
   '/static/js/bonzi.js',
   '/static/js/winamp.js',
+  '/static/js/win98.js',
   '/static/js/settings.js',
   '/static/js/admin.js',
   '/static/js/init.js',
@@ -119,6 +124,11 @@ self.addEventListener('fetch', (e) => {
 
   // Never touch API calls or non-GET.
   if (url.pathname.startsWith('/api/') || e.request.method !== 'GET') return;
+
+  // Organizer sub-app is served live through an authed proxy to a loopback
+  // subprocess (a file-mover). Never cache any of it — a stale UI, or stale
+  // scan/plan status driving destructive file ops, would be dangerous.
+  if (url.pathname === '/organizer' || url.pathname.startsWith('/organizer/')) return;
 
   // HTML navigation: stale-while-revalidate the app shell — but ONLY for the
   // SPA root. Other navigations (e.g. a deep-linked /static/*.html page) must

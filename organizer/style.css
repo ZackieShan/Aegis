@@ -1,0 +1,554 @@
+/* AI Photo Organizer - Win98 desktop shell + widgets on top of 98.css */
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: #008080;
+  font-family: "Pixelated MS Sans Serif", Tahoma, "MS Sans Serif", Arial, sans-serif;
+  -webkit-font-smoothing: none;
+  overflow: hidden;
+}
+
+.hidden { display: none !important; }
+.mono { font-family: "Courier New", monospace; }
+.small { font-size: 11px; }
+.hint { color: #404040; font-size: 11px; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+code { font-family: "Courier New", monospace; background: #dfdfdf; padding: 0 2px; }
+
+body.wm-drag { user-select: none; }
+
+/* ============================== desktop ============================== */
+.desktop {
+  position: fixed;
+  inset: 0;
+}
+
+/* desktop icons */
+#deskIcons {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  z-index: 1;
+}
+.desk-icon {
+  width: 86px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+.desk-icon .glyph {
+  font-size: 30px;
+  line-height: 32px;
+  height: 36px;
+  filter: drop-shadow(1px 1px 0 rgba(0,0,0,.5));
+}
+.desk-icon .lbl {
+  margin-top: 2px;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.15;
+  text-shadow: 1px 1px 0 #000;
+  padding: 1px 2px;
+}
+.desk-icon.selected .lbl {
+  background: #000080;
+  outline: 1px dotted #ffffc0;
+}
+.desk-icon.disabled .glyph { filter: grayscale(.7) drop-shadow(1px 1px 0 rgba(0,0,0,.5)); opacity: .75; }
+.desk-icon.disabled .lbl { color: #e0e0e0; }
+
+/* ============================== managed windows ============================== */
+.app-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 2px 2px 0 rgba(0,0,0,.45);
+  box-sizing: border-box;
+}
+.app-window > .window-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  min-height: 0;
+}
+.app-window > .status-bar {
+  flex: 0 0 auto;
+  margin: 0 2px 2px;
+}
+.app-window.snapped .rsz { display: none; }
+
+/* resize handles (pointer-based; invisible except the SE grip) */
+.rsz { position: absolute; z-index: 5; }
+.rsz-n  { top: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.rsz-s  { bottom: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.rsz-e  { top: 8px; bottom: 8px; right: 0; width: 5px; cursor: ew-resize; }
+.rsz-w  { top: 8px; bottom: 8px; left: 0; width: 5px; cursor: ew-resize; }
+.rsz-ne { top: 24px; right: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+.rsz-nw { top: 24px; left: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+.rsz-se {
+  bottom: 2px; right: 2px; width: 14px; height: 14px; cursor: nwse-resize;
+  background: repeating-linear-gradient(135deg,
+    transparent 0 2px, #808080 2px 3px, #fff 3px 4px, transparent 4px 6px);
+}
+.rsz-sw { bottom: 0; left: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+
+/* snap preview outline */
+#snapPreview {
+  position: fixed;
+  z-index: 900000;
+  border: 2px dashed #000080;
+  background: rgba(0, 0, 128, .12);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* ============================== taskbar ============================== */
+#taskbar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 32px;
+  background: #c0c0c0;
+  border-top: 2px solid;
+  border-color: #dfdfdf #808080 #808080 #dfdfdf;
+  box-shadow: inset 0 1px 0 #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  box-sizing: border-box;
+  z-index: 1000000;
+}
+#startBtn {
+  min-width: 64px;
+  height: 24px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+#startBtn .start-flag { color: #008000; font-size: 13px; }
+#startBtn.active {
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #0a0a0a,
+              inset -2px -2px #dfdfdf, inset 2px 2px grey;
+  text-shadow: 1px 1px #222;
+}
+#taskButtons {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+  height: 24px;
+}
+.task-btn {
+  min-width: 120px;
+  max-width: 180px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  background: silver;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff,
+              inset -2px -2px grey, inset 2px 2px #dfdfdf;
+}
+.task-btn.active {
+  background: #dfdfdf;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px #0a0a0a,
+              inset -2px -2px #dfdfdf, inset 2px 2px grey;
+  font-weight: bold;
+}
+.task-btn .tb-icon { flex: 0 0 auto; }
+#taskClock {
+  flex: 0 0 auto;
+  height: 22px;
+  line-height: 20px;
+  padding: 0 10px;
+  font-size: 11px;
+  border: 2px solid;
+  border-color: #808080 #dfdfdf #dfdfdf #808080;
+  box-sizing: border-box;
+}
+
+/* start menu */
+#startMenu {
+  position: absolute;
+  left: 2px;
+  bottom: 34px;
+  display: flex;
+  background: #c0c0c0;
+  border: 2px solid;
+  border-color: #dfdfdf #808080 #808080 #dfdfdf;
+  box-shadow: 2px 2px 4px rgba(0,0,0,.5);
+  z-index: 1000001;
+  min-width: 220px;
+}
+#startMenu .sm-side {
+  background: linear-gradient(180deg, #000080, #1084d0);
+  color: #c0c0c0;
+  font-weight: bold;
+  font-size: 14px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 8px 3px;
+  letter-spacing: 1px;
+}
+#startMenu .sm-side b { color: #fff; }
+#startMenu .sm-items { flex: 1; padding: 2px; }
+.sm-item {
+  padding: 6px 12px 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.sm-item:hover { background: #000080; color: #fff; }
+.sm-item:hover .sm-soon { color: #c0c0c0; }
+.sm-soon { color: #606060; font-size: 10px; }
+.sm-sep { border-top: 1px solid #808080; border-bottom: 1px solid #fff; margin: 2px 2px; }
+
+/* ============================== wizard widgets (unchanged) ============================== */
+.date-warn {
+  background: #ffffc0;
+  border: 2px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.wizard-tabs { margin-bottom: 10px; font-size: 12px; user-select: none; }
+.wtab { padding: 2px 6px; color: #606060; }
+.wtab.active {
+  color: #000;
+  background: #dfdfdf;
+  border: 2px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  font-weight: bold;
+}
+.wtab.done { color: #000080; }
+.wsep { color: #606060; }
+
+.big-btn { font-size: 13px; font-weight: bold; padding: 6px 16px; }
+button.default { outline: 1px dotted #000; outline-offset: -4px; }
+.danger:not(:disabled) { color: #800000; }
+
+.progress {
+  height: 20px;
+  background: #ffffff;
+  border: 2px solid;
+  border-color: #808080 #dfdfdf #dfdfdf #808080;
+  box-shadow: inset 1px 1px 0 #0a0a0a;
+  position: relative;
+  margin: 4px 0;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background-image: repeating-linear-gradient(90deg,
+      #000080 0, #000080 10px, transparent 10px, transparent 13px);
+  background-color: transparent;
+  transition: width .25s;
+}
+.progress-text { display: flex; justify-content: space-between; font-size: 11px; }
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.panel { margin-bottom: 10px; }
+.panel-wide { width: 100%; box-sizing: border-box; }
+.panel .window-body { font-size: 12px; }
+.panel .title-bar-text { font-size: 11px; }
+
+.stat-table { width: 100%; border-collapse: collapse; }
+.stat-table td { padding: 1px 4px; vertical-align: top; }
+.stat-table td:first-child { color: #404040; white-space: nowrap; }
+.stat-table td:last-child { text-align: right; font-weight: bold; }
+
+.thumb-grid {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  max-height: 240px; overflow-y: auto;
+}
+.thumb-cell {
+  width: 130px;
+  border: 2px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  background: #fff;
+  padding: 3px;
+  box-sizing: border-box;
+}
+.thumb-cell img {
+  width: 100%; height: 96px; object-fit: contain;
+  image-rendering: auto; display: block; background: #c0c0c0;
+}
+.thumb-cell .cap {
+  font-size: 10px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.sunken-list {
+  background: #ffffff;
+  border: 2px solid;
+  border-color: #808080 #dfdfdf #dfdfdf #808080;
+  box-shadow: inset 1px 1px 0 #0a0a0a;
+  height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+}
+.log-list { height: 180px; margin-top: 8px; }
+.plan-stats { font-size: 12px; margin-bottom: 8px; line-height: 1.5; }
+.plan-stats b { color: #000080; }
+
+.plan-row { padding: 1px 2px; white-space: nowrap; }
+.plan-row .to { color: #000080; }
+.plan-row.dupe { background: #fff3d6; }
+.plan-row .tag {
+  display: inline-block; background: #800000; color: #fff;
+  font-size: 9px; padding: 0 3px; margin-right: 4px;
+}
+.plan-row .oktag { background: #008000; }
+.plan-row .tag-sample { background: #808000; }
+.plan-row .tag-clutter { background: #800080; }
+.plan-row .tag-unidentified { background: #404040; }
+.plan-row.row-sample { background: #fdf6e3; }
+.plan-row.row-clutter { background: #f3e5f5; }
+.plan-row.row-unidentified { background: #ececec; }
+
+.step-nav {
+  display: flex; justify-content: space-between;
+  margin-top: 12px; padding-top: 8px;
+  border-top: 1px solid #808080;
+}
+
+.status-bar-field { min-width: 90px; }
+#statusPath, #exStatusPath { flex: 1; }
+
+fieldset { margin-bottom: 10px; }
+.field-row label { margin-right: 8px; }
+.field-row-stacked label { margin-bottom: 2px; }
+.field-row-stacked label input { vertical-align: -2px; }
+input[type="text"], select { font-family: inherit; }
+#targetRoot, #scanPath, #customTpl { width: 100%; box-sizing: border-box; }
+
+.done-kv td { padding: 2px 6px; }
+.done-kv td:first-child { color: #404040; }
+
+/* --- explore + preview --- */
+.explore-btn {
+  float: right;
+  font-weight: bold;
+  margin-top: -2px;
+}
+
+.ex-count {
+  font-size: 12px;
+  font-weight: bold;
+  margin: 4px 0 6px;
+  color: #000080;
+}
+
+.ex-grid { max-height: none; flex: 1 1 auto; min-height: 140px; }
+
+.thumb-cell { cursor: pointer; position: relative; }
+.thumb-cell:hover { outline: 1px dotted #000080; }
+.thumb-cell .cap2 {
+  font-size: 9px; color: #404040;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ext-badge {
+  position: absolute; top: 5px; right: 5px;
+  font-size: 9px; font-weight: bold; padding: 1px 3px;
+  background: #dfdfdf; color: #202020;
+  border: 1px solid; border-color: #ffffff #808080 #808080 #ffffff;
+  pointer-events: none;
+}
+.ext-badge.ext-raw { background: #ffd800; }
+.ext-badge.ext-video { background: #1084d0; color: #fff; }
+.ext-badge.ext-sidecar { background: #c0c0c0; color: #606060; }
+
+/* per-cell "open file location" button */
+.cell-reveal {
+  position: absolute;
+  bottom: 34px;
+  right: 4px;
+  min-width: 0;
+  min-height: 0;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  display: none;
+}
+.thumb-cell:hover .cell-reveal { display: block; }
+
+#winExplore > .window-body { display: flex; flex-direction: column; }
+
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 64, 64, .45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000000;
+}
+.preview-window {
+  max-width: 92vw;
+  box-shadow: 3px 3px 0 rgba(0,0,0,.5);
+}
+.preview-body { text-align: center; }
+.preview-body img {
+  max-width: 86vw;
+  max-height: 72vh;
+  image-rendering: auto;
+  border: 2px solid;
+  border-color: #808080 #dfdfdf #dfdfdf #808080;
+  background: #fff;
+}
+#previewPath { margin-top: 4px; max-width: 86vw; overflow: hidden; text-overflow: ellipsis; }
+#previewTitle { max-width: 70vw; }
+
+/* --- music organizer --- */
+/* distinct desktop glyph: silver CD plate behind the note */
+.desk-icon .glyph-music {
+  width: 40px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%,
+      #ffffff 0 28%, #dfe7ef 29% 52%, #b9c4d0 53% 62%, #8f9aa6 63% 66%,
+      transparent 67%);
+}
+
+#mScanPath, #mTargetRoot { width: 100%; box-sizing: border-box; }
+
+/* fingerprint availability badge */
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-color: #808080 #dfdfdf #dfdfdf #808080;
+  background: #c0c0c0;
+  color: #606060;
+  white-space: nowrap;
+}
+.badge-on {
+  background: #008000;
+  color: #fff;
+  border-color: #dfdfdf #004000 #004000 #dfdfdf;
+}
+
+/* plan-row kinds new to music (dupe/unidentified reuse the cinema styles) */
+.plan-row .tag-va { background: #000080; }
+.plan-row.row-va { background: #e8ecff; }
+
+/* --- folder browse dialog (browse.js) --- */
+.path-row { display: flex; gap: 6px; align-items: center; }
+.path-row input { flex: 1 1 auto; min-width: 0; }
+.path-row button { flex: 0 0 auto; white-space: nowrap; }
+
+.browse-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 64, 64, .45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000000;
+}
+.browse-window {
+  width: 480px;
+  max-width: 94vw;
+  box-shadow: 3px 3px 0 rgba(0,0,0,.5);
+}
+.browse-list {
+  height: 240px;
+  margin-top: 6px;
+  font-family: "Pixelated MS Sans Serif", Tahoma, "MS Sans Serif", Arial, sans-serif;
+  font-size: 12px;
+  user-select: none;
+  outline: none;
+}
+.browse-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browse-row .browse-ico { flex: 0 0 auto; font-size: 13px; }
+.browse-row .browse-name { overflow: hidden; text-overflow: ellipsis; }
+.browse-row .browse-hid {
+  margin-left: auto;
+  font-size: 9px;
+  color: #606060;
+  border: 1px solid #808080;
+  padding: 0 3px;
+}
+.browse-row.is-hidden .browse-name,
+.browse-row.is-hidden .browse-ico { opacity: .55; }
+.browse-row.selected {
+  background: #000080;
+  color: #fff;
+}
+.browse-row.selected .browse-hid { color: #c0c0c0; border-color: #dfdfdf; }
+.browse-empty { color: #606060; padding: 4px; font-style: italic; }
+
+/* ============ visible checkboxes / radios (bug fix) ================
+   98.css hides the real control (opacity:0; position:fixed) and paints the
+   box onto an ADJACENT SIBLING label -- `input[type=checkbox] + label`.
+   This app nests its inputs INSIDE their labels
+   (`<label><input type="checkbox"> Text</label>`), so that selector never
+   matched and every checkbox/radio rendered invisible: clicking the label
+   text still toggled it, but you could never see the state (which made
+   options like "Fingerprint near-duplicates" look permanently disabled).
+   Restore real, visible native controls. */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: auto !important;
+  -webkit-appearance: auto !important;
+  -moz-appearance: auto !important;
+  opacity: 1 !important;
+  position: static !important;
+  width: 13px;
+  height: 13px;
+  margin: 0 5px 0 0 !important;
+  vertical-align: -2px;
+}
+
+/* ===================== single-app mode (?app=) =====================
+   Aegis mounts one organizer domain per window. Hide the Win98 desktop
+   chrome and let the single app window fill the frame; Aegis provides the
+   surrounding window chrome (title bar, min/close, drag). No-op without the
+   body.single-app class (standalone keeps its full desktop). */
+body.single-app #deskIcons,
+body.single-app #taskbar,
+body.single-app #startMenu { display: none !important; }
+body.single-app #desktop { inset: 0; }
+body.single-app .app-window {
+  position: fixed !important;
+  left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
+  width: 100% !important; height: 100% !important;
+  max-width: none !important; max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+body.single-app .app-window > .title-bar { display: none !important; }

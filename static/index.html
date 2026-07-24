@@ -76,6 +76,9 @@
           var advMap = {userBubbleBg:'--user-bubble-bg',aiBubbleBg:'--ai-bubble-bg',bubbleBorder:'--bubble-border',sidebarBg:'--sidebar-bg',sectionAccent:'--section-accent',brandColor:'--brand-color',inputBg:'--input-bg',inputBorder:'--input-border',sendBtnBg:'--send-btn-bg',sendBtnHover:'--send-btn-hover',codeBg:'--code-bg',codeFg:'--code-fg',toggleBg:'--toggle-bg',toggleActive:'--toggle-active',accentPrimary:'--accent-primary',accentError:'--accent-error'};
           for (var k in advMap) { if (a[k]) s.setProperty(advMap[k], a[k]); }
         }
+        // Aegis 98: scope win98.css from the very first paint (theme.js
+        // applyWin98 keeps this class in sync at runtime).
+        if (t.name === 'win98') document.documentElement.classList.add('theme-win98');
       }
       // Apply font early
       if (t && t.font) {
@@ -227,6 +230,8 @@
     })();
   </script>
   <link rel="stylesheet" href="/static/style.css?v=20260713uirefresh">
+  <!-- Aegis 98 skin — fully scoped under html.theme-win98, inert otherwise -->
+  <link rel="stylesheet" href="/static/win98.css?v=1">
   <link rel="modulepreload" href="/static/app.js?v=20260713uirefresh">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -706,6 +711,9 @@
     <button class="icon-rail-btn" id="rail-research" title="Deep Research"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg></button>
     <button class="icon-rail-btn" id="rail-email" title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></button>
     <button class="icon-rail-btn" id="rail-gallery" title="Studio"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/><path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/><circle cx="12.5" cy="7.5" r="1.4"/><path d="M21 12.5 17.75 9.25 11 16"/></svg></button>
+    <button class="icon-rail-btn" id="rail-photos" title="Photos — organize, dedupe, AI tagging"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="2"/><circle cx="12" cy="12.5" r="3.2"/><path d="M8 5l1.5-2h5L16 5"/></svg></button>
+    <button class="icon-rail-btn" id="rail-cinema" title="Movies &amp; TV — organize for Plex, dedupe, identify"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/></svg></button>
+    <button class="icon-rail-btn" id="rail-music" title="Music — organize, dedupe, fix tags"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg></button>
     <button class="icon-rail-btn" id="rail-archive" title="Library"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/></svg></button>
     <button class="icon-rail-btn" id="rail-memory" title="Brain"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg></button>
     <button class="icon-rail-btn" id="rail-notes" title="Notes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 13.5V6A2.5 2.5 0 0 0 18 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h7.5z"/><path d="M13.5 20.5V16a2.5 2.5 0 0 1 2.5-2.5h4.5"/><path d="M8 9h8"/><path d="M8 13h4"/></svg></button>
@@ -916,6 +924,30 @@
             <path d="M21 12.5 17.75 9.25 11 16"/>
           </svg>
           <span class="grow">Studio</span>
+        </div>
+        <div class="list-item" id="tool-photos-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="flex-shrink:0;opacity:0.5;">
+            <rect x="3" y="5" width="18" height="15" rx="2"/><circle cx="12" cy="12.5" r="3.2"/><path d="M8 5l1.5-2h5L16 5"/>
+          </svg>
+          <span class="grow">Photos</span>
+        </div>
+        <div class="list-item" id="tool-cinema-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="flex-shrink:0;opacity:0.5;">
+            <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/>
+          </svg>
+          <span class="grow">Movies &amp; TV</span>
+        </div>
+        <div class="list-item" id="tool-music-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="flex-shrink:0;opacity:0.5;">
+            <path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>
+          </svg>
+          <span class="grow">Music</span>
         </div>
         <div class="list-item" id="tool-library-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
@@ -1507,6 +1539,24 @@
               <div id="set-utilityChatMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
             </div>
           </div>
+
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>Coder Model</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Drives Code Canvas and the <code>/code</code> (Aider) agent. Leave blank to auto-pick: local endpoints first, preferring coder-named models.</div>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label">Endpoint</label>
+                <span class="adm-model-logo" id="set-coderEpSelect-logo" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;opacity:0.9;color:var(--fg);"></span>
+                <select id="set-coderEpSelect" class="settings-select"><option value="">—</option></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Model</label>
+                <span class="adm-model-logo" id="set-coderModelSelect-logo" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0;opacity:0.9;color:var(--fg);"></span>
+                <select id="set-coderModelSelect" class="settings-select"><option value="">—</option></select>
+              </div>
+              <div id="set-coderChatMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
+            </div>
+          </div>
           <div class="admin-card">
             <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Vision<span style="flex:1"></span><label class="admin-switch" title="Analyze images with a vision-capable model"><input type="checkbox" id="set-visionEnabledToggle" checked><span class="admin-slider"></span></label></h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Analyze images with a vision-capable model.</div>
@@ -1932,6 +1982,11 @@
                 <span class="vis-icon" style="font-size:13px;line-height:14px;">🎛️</span>
                 <span class="vis-label">Aegis Amp <span class="vis-hint">A classic Y2K skinned music player for your Studio songs (/winamp)</span></span>
                 <input type="checkbox" data-egg-key="winamp"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row">
+                <span class="vis-icon" style="font-size:13px;line-height:14px;">🪟</span>
+                <span class="vis-label">Aegis 98 <span class="vis-hint">The full Windows 98 desktop — teal desktop, Start menu, program icons (/win98)</span></span>
+                <input type="checkbox" data-egg-key="win98"><span class="vis-switch"></span>
               </label>
             </div>
           </div>
@@ -2566,11 +2621,13 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/bonzi.js"></script>
 <script type="module" src="/static/js/winamp.js"></script>
+<script type="module" src="/static/js/win98.js"></script>
 <script type="module" src="/static/js/modelSettings.js"></script>
 <script type="module" src="/static/js/enginePanel.js"></script>
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
+<script type="module" src="/static/js/organizer.js"></script>
 <script type="module" src="/static/app.js?v=20260630mdfontsize"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>

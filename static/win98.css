@@ -1,0 +1,515 @@
+/* ── Aegis 98 — the Windows 98 desktop skin ─────────────────────────────────
+   Every rule is scoped under `.theme-win98` (set on <html> by the early-paint
+   script in index.html and kept in sync by theme.js applyWin98()), so this
+   whole file is inert unless the Aegis 98 theme is active. Companion module:
+   static/js/win98.js (desktop icons, taskbar, Start menu, boot splash).
+
+   Bevel technique (borrowed from jdan's 98.css, MIT): raised/pressed/sunken
+   chrome is drawn with stacked inset box-shadows — no wrapper elements.
+   Fonts: "Pixelated MS Sans Serif" from the 98.css project (see
+   ACKNOWLEDGMENTS.md), vendored in /static/fonts/. */
+
+@font-face {
+  font-family: 'Pixelated MS Sans Serif';
+  src: url('/static/fonts/ms_sans_serif.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Pixelated MS Sans Serif';
+  src: url('/static/fonts/ms_sans_serif_bold.woff2') format('woff2');
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+
+/* ── Palette + token overrides ── */
+.theme-win98 {
+  /* Shape: Windows 98 has no rounded corners and no soft shadows. */
+  --radius-xs: 0px; --radius-sm: 0px; --radius-md: 0px;
+  --radius-lg: 0px; --radius-xl: 0px; --radius-full: 0px;
+  --shadow-sm: 1px 1px 0 rgba(0,0,0,.35);
+  --shadow-md: 2px 2px 0 rgba(0,0,0,.45);
+  --shadow-lg: 3px 3px 0 rgba(0,0,0,.5);
+  /* Win98 chrome constants (used throughout this file) */
+  --w98-silver: #c0c0c0;
+  --w98-light: #dfdfdf;
+  --w98-dark: #808080;
+  --w98-black: #0a0a0a;
+  --w98-navy: #000080;
+  --w98-blue: #1084d0;
+  --w98-teal: #008080;
+  --w98-tooltip: #ffffc0;
+  /* Stacked-inset bevels, 98.css style */
+  --w98-raised: inset -1px -1px var(--w98-black), inset 1px 1px #fff,
+                inset -2px -2px var(--w98-dark), inset 2px 2px var(--w98-light);
+  --w98-pressed: inset -1px -1px #fff, inset 1px 1px var(--w98-black),
+                 inset -2px -2px var(--w98-light), inset 2px 2px var(--w98-dark);
+  --w98-sunken: inset -1px -1px #fff, inset 1px 1px var(--w98-dark),
+                inset -2px -2px var(--w98-light), inset 2px 2px var(--w98-black);
+  --w98-window: inset -1px -1px var(--w98-black), inset 1px 1px var(--w98-light),
+                inset -2px -2px var(--w98-dark), inset 2px 2px #fff;
+}
+
+.theme-win98 body {
+  font-family: 'Pixelated MS Sans Serif', Tahoma, 'MS Sans Serif', 'Segoe UI', Arial, sans-serif;
+  font-size: 12px;
+  -webkit-font-smoothing: none;
+  /* Reserve room for the taskbar (win98.js builds it at the bottom). */
+  padding-bottom: 36px;
+}
+.theme-win98 ::selection { background: var(--w98-navy); color: #fff; }
+
+/* ── The Great Flattening — no rounded corner survives 1998 ── */
+.theme-win98 *, .theme-win98 *::before, .theme-win98 *::after {
+  border-radius: 0 !important;
+}
+/* Spinners must stay circular or they rotate as squares. */
+.theme-win98 [class*="spinner"], .theme-win98 [class*="spinner"]::before,
+.theme-win98 [class*="spinner"]::after, .theme-win98 [class*="loading-dot"] {
+  border-radius: 50% !important;
+}
+/* Soft layered shadows → hard offset shadows. */
+.theme-win98 .modal-content, .theme-win98 .dropdown, .theme-win98 [class*="popover"] {
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5) !important;
+}
+
+/* ── Buttons: every button is a raised silver square, as God intended ── */
+.theme-win98 button,
+.theme-win98 .icon-rail-btn,
+.theme-win98 [role="button"].btn,
+.theme-win98 input[type="button"],
+.theme-win98 input[type="submit"] {
+  background: var(--w98-silver) !important;
+  color: #000 !important;
+  border: none !important;
+  box-shadow: var(--w98-raised) !important;
+  text-shadow: none !important;
+  min-height: 18px;
+}
+.theme-win98 button:hover { filter: none; }
+.theme-win98 button:active,
+.theme-win98 .icon-rail-btn:active,
+.theme-win98 button[aria-pressed="true"],
+.theme-win98 button.active,
+.theme-win98 .icon-rail-btn.active {
+  box-shadow: var(--w98-pressed) !important;
+}
+.theme-win98 button:focus-visible { outline: 1px dotted #000 !important; outline-offset: -4px; }
+.theme-win98 button:disabled { color: var(--w98-dark) !important; text-shadow: 1px 1px 0 #fff !important; }
+/* Buttons that live inside a title bar are the small chrome squares. */
+.theme-win98 .modal-header button,
+.theme-win98 .modal-header .close-btn {
+  background: var(--w98-silver) !important;
+  color: #000 !important;
+  box-shadow: var(--w98-raised) !important;
+  padding: 1px 2px !important;
+  min-height: 0;
+}
+
+/* ── Inputs, textareas, selects: sunken white wells ── */
+.theme-win98 input[type="text"], .theme-win98 input[type="search"],
+.theme-win98 input[type="email"], .theme-win98 input[type="password"],
+.theme-win98 input[type="number"], .theme-win98 input[type="url"],
+.theme-win98 textarea, .theme-win98 select {
+  /* background-COLOR, not the shorthand: appearance:none selects carry their
+     dropdown chevron (and some inputs a search icon) as a background-image. */
+  background-color: #fff !important;
+  color: #000 !important;
+  border: none !important;
+  box-shadow: var(--w98-sunken) !important;
+  padding-left: 6px;
+}
+.theme-win98 input:focus-visible, .theme-win98 textarea:focus-visible, .theme-win98 select:focus-visible {
+  outline: none !important;
+}
+
+/* ── Scrollbars: chunky 16px with dithered track and arrow buttons ── */
+.theme-win98 ::-webkit-scrollbar { width: 16px; height: 16px; }
+.theme-win98 ::-webkit-scrollbar-track {
+  /* Classic 2px dither checkerboard */
+  background: #fff;
+  background-image: linear-gradient(45deg, var(--w98-silver) 25%, transparent 25%, transparent 75%, var(--w98-silver) 75%),
+                    linear-gradient(45deg, var(--w98-silver) 25%, transparent 25%, transparent 75%, var(--w98-silver) 75%);
+  background-size: 4px 4px;
+  background-position: 0 0, 2px 2px;
+}
+.theme-win98 ::-webkit-scrollbar-thumb {
+  background: var(--w98-silver);
+  box-shadow: var(--w98-raised);
+  border-radius: 0;
+}
+.theme-win98 ::-webkit-scrollbar-thumb:hover { background: var(--w98-silver); }
+.theme-win98 ::-webkit-scrollbar-button:single-button {
+  display: block;
+  width: 16px; height: 16px;
+  background-color: var(--w98-silver);
+  box-shadow: var(--w98-raised);
+  background-repeat: no-repeat; background-position: center;
+}
+.theme-win98 ::-webkit-scrollbar-button:vertical:decrement {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M3.5 0 7 4H0z' fill='%23000'/%3E%3C/svg%3E");
+}
+.theme-win98 ::-webkit-scrollbar-button:vertical:increment {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='4'%3E%3Cpath d='M3.5 4 0 0h7z' fill='%23000'/%3E%3C/svg%3E");
+}
+.theme-win98 ::-webkit-scrollbar-button:horizontal:decrement {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='7'%3E%3Cpath d='M0 3.5 4 0v7z' fill='%23000'/%3E%3C/svg%3E");
+}
+.theme-win98 ::-webkit-scrollbar-button:horizontal:increment {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='7'%3E%3Cpath d='M4 3.5 0 7V0z' fill='%23000'/%3E%3C/svg%3E");
+}
+/* Root scroller only: scrollbar-color inherits everywhere on its own, and a
+   universal scrollbar-width would un-hide the deliberately scrollbar-less
+   tab/chip strips (style.css uses per-class `scrollbar-width: none`). */
+html.theme-win98 { scrollbar-width: auto; scrollbar-color: var(--w98-silver) #fff; }
+
+/* ── Window chrome: modals become real windows ── */
+.theme-win98 .modal-content {
+  background: var(--w98-silver) !important;
+  border: none !important;
+  box-shadow: var(--w98-window), 2px 2px 0 rgba(0, 0, 0, 0.5) !important;
+  padding-top: 3px;
+}
+.theme-win98 .modal-header {
+  background: linear-gradient(90deg, var(--w98-navy), var(--w98-blue)) !important;
+  color: #fff !important;
+  margin: 3px 3px 0 3px;
+  padding: 3px 4px !important;
+  min-height: 18px;
+  border: none !important;
+}
+.theme-win98 .modal-header h1, .theme-win98 .modal-header h2,
+.theme-win98 .modal-header h3, .theme-win98 .modal-header h4,
+.theme-win98 .modal-header span {
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.theme-win98 .modal-header svg { color: #fff; stroke: #fff; }
+.theme-win98 .modal-header .close-btn svg { color: #000; stroke: #000; }
+.theme-win98 .modal-body { background: var(--w98-silver); }
+
+/* Tile-snap ghost becomes the classic drag outline */
+.theme-win98 #tile-ghost {
+  background: transparent !important;
+  border: 2px dashed var(--w98-navy) !important;
+}
+
+/* ── Sidebar: gray program-manager panel ── */
+.theme-win98 .sidebar {
+  background: var(--w98-silver) !important;
+  border-right: none !important;
+  box-shadow: inset -1px 0 0 var(--w98-dark), inset -2px 0 0 var(--w98-light);
+}
+.theme-win98 .sidebar .list-item { color: #000; }
+.theme-win98 .sidebar .list-item:hover,
+.theme-win98 .sidebar .list-item.active {
+  background: var(--w98-navy) !important;
+  color: #fff !important;
+}
+.theme-win98 .sidebar .list-item:hover svg,
+.theme-win98 .sidebar .list-item.active svg { color: #fff; stroke: #fff; opacity: 1; }
+.theme-win98 .sidebar .section-title { color: #000; font-weight: 700; }
+.theme-win98 .sidebar-brand-title { color: var(--w98-navy) !important; font-weight: 700; }
+.theme-win98 .icon-rail, .theme-win98 #icon-rail {
+  background: var(--w98-silver) !important;
+}
+.theme-win98 .icon-rail-btn { margin: 2px; width: 26px; height: 26px; }
+
+/* ── Chat area ── */
+.theme-win98 .chat-container { background: var(--w98-silver); }
+.theme-win98 .chat-top-bar { background: var(--w98-silver); }
+.theme-win98 .chat-meta-overlay {
+  background: var(--w98-silver) !important;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px var(--w98-dark);
+  color: #000 !important;
+  padding: 2px 8px;
+}
+.theme-win98 .msg, .theme-win98 .message {
+  border: 1px solid var(--w98-dark);
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.2);
+}
+/* Links: classic navy underline */
+.theme-win98 a { color: var(--w98-navy); }
+.theme-win98 a:visited { color: #660099; }
+
+/* Dropdown menus: silver menus with navy highlight */
+.theme-win98 .dropdown, .theme-win98 [class*="dropdown-menu"] {
+  background: var(--w98-silver) !important;
+  border: none !important;
+  box-shadow: var(--w98-window), 2px 2px 0 rgba(0,0,0,.5) !important;
+  color: #000;
+}
+.theme-win98 .dropdown-item { color: #000 !important; }
+.theme-win98 .dropdown-item:hover {
+  background: var(--w98-navy) !important;
+  color: #fff !important;
+}
+.theme-win98 .dropdown-item:hover h4, .theme-win98 .dropdown-item:hover p { color: #fff !important; }
+
+/* ── Minimized-modal dock chips become taskbar task buttons ── */
+.theme-win98 #minimized-dock {
+  bottom: 4px !important;
+  left: 84px !important;
+  right: 190px;
+  transform: none !important;
+  justify-content: flex-start;
+  padding: 0;
+  gap: 3px;
+  z-index: 246;
+  max-width: none;
+}
+.theme-win98 .minimized-dock-chip {
+  background: var(--w98-silver) !important;
+  border: none !important;
+  box-shadow: var(--w98-raised) !important;
+  color: #000 !important;
+  height: 26px;
+  padding: 2px 8px !important;
+  animation: none !important;
+  font-size: 11px;
+  max-width: 160px;
+  overflow: hidden;
+}
+.theme-win98 .minimized-dock-chip:hover { background: var(--w98-silver) !important; }
+.theme-win98 .minimized-dock-chip:active { box-shadow: var(--w98-pressed) !important; }
+.theme-win98 .minimized-dock-chip svg { opacity: 1; color: var(--w98-navy); }
+
+/* ── The Desktop (built by win98.js inside #chat-container) ── */
+.theme-win98 #win98-desktop {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--w98-teal);
+  padding: 12px 8px;
+  overflow: hidden;
+  user-select: none;
+}
+/* Only visible on the "no chat open" welcome state — pure CSS switch. */
+.theme-win98 #chat-container.welcome-active #win98-desktop { display: block; }
+/* The composer floats above the desktop so a new chat can still be typed
+   straight from the teal desktop (AIM icon → New Chat → composer is here).
+   NB: the composer is .chat-input-bar — #chat-form is a hidden legacy form. */
+.theme-win98 .welcome-active .chat-input-bar { position: relative; z-index: 6; }
+.theme-win98 #win98-desktop .w98-icons {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(5, 84px);
+  grid-auto-columns: 84px;
+  gap: 6px 8px;
+  height: 100%;
+}
+.theme-win98 .w98-icon {
+  width: 80px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 4px 2px;
+  cursor: default;
+  text-align: center;
+  /* Desktop icons are NOT beveled buttons — undo the global button chrome. */
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+.theme-win98 .w98-icon svg {
+  width: 34px; height: 34px;
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.45));
+}
+.theme-win98 .w98-icon .w98-icon-label {
+  color: #fff !important;
+  font-size: 11px;
+  line-height: 1.15;
+  text-shadow: 1px 1px 0 #000;
+  padding: 0 2px;
+}
+.theme-win98 .w98-icon.selected .w98-icon-label {
+  background: var(--w98-navy);
+  outline: 1px dotted var(--w98-tooltip);
+}
+.theme-win98 .w98-icon.selected svg { filter: drop-shadow(1px 1px 0 rgba(0,0,0,.45)) saturate(0.6) brightness(0.85); }
+.theme-win98 .w98-icon:focus-visible { outline: none !important; }
+.theme-win98 .w98-icon:focus-visible .w98-icon-label { outline: 1px dotted var(--w98-tooltip); }
+
+/* ── Taskbar ── */
+.theme-win98 #win98-taskbar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 34px;
+  background: var(--w98-silver);
+  box-shadow: inset 0 1px 0 var(--w98-light), inset 0 2px 0 #fff;
+  border-top: 1px solid var(--w98-silver);
+  display: flex; align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  z-index: 245;
+}
+.theme-win98 #win98-start-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px;
+  padding: 2px 8px 2px 4px !important;
+  font-weight: 700;
+  font-size: 12px;
+}
+.theme-win98 #win98-start-btn.open { box-shadow: var(--w98-pressed) !important; }
+.theme-win98 .w98-taskbar-divider {
+  width: 1px; height: 22px;
+  border-left: 1px solid var(--w98-dark);
+  border-right: 1px solid #fff;
+  margin: 0 2px;
+}
+.theme-win98 #win98-clock {
+  margin-left: auto;
+  height: 26px;
+  min-width: 74px;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: inset -1px -1px #fff, inset 1px 1px var(--w98-dark);
+  padding: 0 10px;
+  font-size: 11px;
+  color: #000;
+  gap: 6px;
+}
+
+/* ── Start menu ── */
+.theme-win98 #win98-startmenu {
+  position: fixed;
+  left: 4px; bottom: 36px;
+  width: 226px;
+  background: var(--w98-silver);
+  box-shadow: var(--w98-window), 2px 2px 0 rgba(0, 0, 0, 0.5);
+  z-index: 250;
+  display: flex;
+  padding: 3px;
+}
+.theme-win98 #win98-startmenu .w98-sm-banner {
+  width: 24px;
+  background: linear-gradient(180deg, var(--w98-navy), var(--w98-blue));
+  color: #fff;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 6px 2px;
+  display: flex; align-items: center;
+}
+.theme-win98 #win98-startmenu .w98-sm-items { flex: 1; padding: 2px 0; max-height: 60vh; overflow-y: auto; }
+.theme-win98 .w98-sm-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #000;
+  cursor: default;
+  white-space: nowrap;
+}
+.theme-win98 .w98-sm-item svg { width: 20px; height: 20px; flex-shrink: 0; }
+.theme-win98 .w98-sm-item .w98-sm-emoji { width: 20px; text-align: center; flex-shrink: 0; }
+.theme-win98 .w98-sm-item:hover { background: var(--w98-navy); color: #fff; }
+.theme-win98 .w98-sm-sep {
+  height: 0;
+  border-top: 1px solid var(--w98-dark);
+  border-bottom: 1px solid #fff;
+  margin: 3px 2px;
+}
+
+/* ── Shut Down dialog ── */
+.theme-win98 #win98-shutdown {
+  position: fixed; inset: 0;
+  z-index: 251;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex; align-items: center; justify-content: center;
+}
+.theme-win98 #win98-shutdown .w98-sd-box {
+  width: 300px;
+  background: var(--w98-silver);
+  box-shadow: var(--w98-window), 2px 2px 0 rgba(0, 0, 0, 0.5);
+  padding: 3px;
+}
+.theme-win98 #win98-shutdown .w98-sd-title {
+  background: linear-gradient(90deg, var(--w98-navy), var(--w98-blue));
+  color: #fff; font-weight: 700; font-size: 12px;
+  padding: 3px 6px;
+}
+.theme-win98 #win98-shutdown .w98-sd-body { padding: 14px 12px; font-size: 12px; color: #000; }
+.theme-win98 #win98-shutdown label { display: flex; gap: 6px; align-items: center; margin: 6px 0; color: #000; }
+.theme-win98 #win98-shutdown .w98-sd-btns { display: flex; justify-content: flex-end; gap: 6px; padding: 4px 12px 12px; }
+.theme-win98 #win98-shutdown .w98-sd-btns button { min-width: 70px; padding: 4px 10px !important; }
+
+/* ── Boot splash ── */
+#win98-splash {
+  position: fixed; inset: 0;
+  z-index: 100000;
+  background: #000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 26px;
+  font-family: 'Pixelated MS Sans Serif', Tahoma, Arial, sans-serif;
+  transition: opacity 0.35s ease;
+}
+#win98-splash .w98-splash-logo {
+  color: #fff; font-size: 34px; font-weight: 700; letter-spacing: 1px;
+  text-align: center;
+}
+#win98-splash .w98-splash-logo .w98-splash-98 {
+  background: linear-gradient(180deg, #53c4f0 0%, #2a7fd4 55%, #123f8c 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+#win98-splash .w98-splash-sub { color: #a0a0a0; font-size: 12px; }
+#win98-splash .w98-splash-bar {
+  width: 220px; height: 14px;
+  border: 1px solid #fff;
+  overflow: hidden;
+  position: relative;
+}
+#win98-splash .w98-splash-bar::before {
+  content: '';
+  position: absolute; top: 1px; bottom: 1px; left: -60px;
+  width: 60px;
+  background: repeating-linear-gradient(90deg, #2a7fd4 0 12px, #123f8c 12px 14px);
+  animation: w98-splash-slide 1.1s linear infinite;
+}
+@keyframes w98-splash-slide { to { left: 100%; } }
+
+/* ── DOS-blue code blocks (QBasic vibes) ──
+   The --hl-* vars are set INLINE by win98.js (applyColors would win over a
+   stylesheet), but pre/code container chrome is handled here. */
+.theme-win98 pre, .theme-win98 pre.hljs, .theme-win98 code {
+  border: none;
+}
+.theme-win98 pre {
+  box-shadow: var(--w98-sunken) !important;
+  padding: 8px 10px;
+}
+
+/* ── Toasts / status pills ── */
+.theme-win98 [class*="toast"] {
+  background: var(--w98-tooltip) !important;
+  color: #000 !important;
+  border: 1px solid #000 !important;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ── Kill leftover glow / translucency ── */
+.theme-win98 [class*="glow"], .theme-win98 [class*="Glow"] { filter: none !important; }
+.theme-win98 .modal { backdrop-filter: none !important; }
+
+/* ── Mobile: Program Manager in your pocket ── */
+@media (max-width: 768px) {
+  .theme-win98 body { padding-bottom: 38px; }
+  .theme-win98 #win98-desktop .w98-icons {
+    grid-template-rows: repeat(5, 92px);
+    grid-auto-columns: minmax(84px, 1fr);
+    justify-content: start;
+  }
+  .theme-win98 .w98-icon { width: 84px; }
+  .theme-win98 .w98-icon svg { width: 40px; height: 40px; }
+  .theme-win98 #win98-taskbar { height: 38px; }
+  .theme-win98 #win98-startmenu { bottom: 40px; width: min(260px, 86vw); }
+  .theme-win98 #minimized-dock { right: 96px; }
+  .theme-win98 .minimized-dock-chip {
+    width: 34px !important; height: 28px !important;
+    border-radius: 0 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #win98-splash { display: none !important; }
+}

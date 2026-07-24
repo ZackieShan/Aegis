@@ -639,6 +639,59 @@ async function initUtilityModel() {
   });
 }
 
+/* ── Coder Model ── */
+// Drives Code Canvas and the /code (Aider) agent. Empty = auto-pick
+// (local endpoints first, preferring coder-named models).
+async function initCoderModel() {
+  var epSel = el('set-coderEpSelect');
+  var modelSel = el('set-coderModelSelect');
+  var msg = el('set-coderChatMsg');
+  if (!epSel || !modelSel) return;
+  var _endpoints = [];
+  if (epSel.options[0]) epSel.options[0].textContent = 'Auto-pick';
+  if (modelSel.options[0]) modelSel.options[0].textContent = 'Auto-pick';
+
+  try {
+    _endpoints = await _fetchModelEndpoints();
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+  } catch (e) { console.warn('Failed to load endpoints for coder model', e); }
+
+  function refreshModels(selectedModel) {
+    var ep = _endpoints.find(function(e) { return e.id === epSel.value; });
+    _fillModelSelect(modelSel, ep ? ep.models : [], selectedModel, true);
+  }
+
+  try {
+    var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await res.json();
+    if (settings.coder_endpoint_id) epSel.value = settings.coder_endpoint_id;
+    refreshModels(settings.coder_model || '');
+  } catch (e) { console.warn('Failed to load coder model settings', e); }
+
+  async function saveCoder() {
+    try {
+      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coder_endpoint_id: epSel.value || '',
+          coder_model: modelSel.value || ''
+        })
+      });
+      msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
+      setTimeout(function() { msg.textContent = ''; }, 1500);
+    } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
+  }
+
+  epSel.addEventListener('change', function() { refreshModels(''); saveCoder(); });
+  modelSel.addEventListener('change', saveCoder);
+
+  _registerAiEndpointRefresh(function(endpoints) {
+    _endpoints = endpoints;
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+    refreshModels(modelSel.value);
+  });
+}
+
 /* ── Teacher Model ── */
 // SOTA model called automatically when a self-hosted student model
 // fails an agent-mode task. Stored as a single `teacher_model` string
@@ -2610,6 +2663,7 @@ function initAll() {
   initDefaultChat();
   initTeacherModel();
   initUtilityModel();
+  initCoderModel();
   initImageSettings();
   initVideoSettings();
   initVisionSettings();

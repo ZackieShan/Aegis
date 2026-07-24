@@ -36,6 +36,16 @@ export const THEMES = {
                             inputBg: '#2f2f2f', brandColor: '#ffffff', brandMixTo: '#ffffff' } },
   claude:     { bg:'#262624', fg:'#f5f4f0', panel:'#30302e', border:'#4a4a47', red:'#c6613f' },
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
+  // Aegis 98 — the full Windows 98 desktop mode: silver chrome, navy title
+  // bars, DOS-blue code, teal desktop with program icons. Selecting it also
+  // flips the theme-win98 class (see applyWin98) which scopes win98.css and
+  // wakes js/win98.js (desktop, taskbar, Start menu).
+  win98:      { bg:'#c0c0c0', fg:'#000000', panel:'#c0c0c0', border:'#808080', red:'#000080',
+                advanced: { userBubbleBg: '#ffffff', aiBubbleBg: '#ffffff', bubbleBorder: '#808080',
+                            sidebarBg: '#c0c0c0', inputBg: '#ffffff', inputBorder: '#808080',
+                            sendBtnBg: '#c0c0c0', sendBtnHover: '#dfdfdf',
+                            codeBg: '#0000a8', codeFg: '#ffffff',
+                            toggleActive: '#000080', brandColor: '#000080', brandMixTo: '#1084d0' } },
 };
 
 const DEFAULT_THEME = 'aurora';
@@ -69,6 +79,7 @@ const THEME_DEFAULT_PATTERN = {
   organs:     'rain',
   ume:        'petals',
   cute:       'sparkles',
+  win98:      'none',
 };
 
 // Default effect colors for specific themes (overrides --fg)
@@ -308,6 +319,13 @@ export function applyColors(colors) {
 
   // Update favicon to match theme accent color
   _updateFavicon(colors.red || '#b45de0', colors.fg || '#cbb8ec');
+
+  // Aegis 98 pins a DOS-blue code palette that must survive every derived
+  // --hl-* write above (initThemeUI seeding, Customize pickers, ...). Ping
+  // win98.js so it re-asserts its inline overrides whenever the skin is on.
+  if (document.documentElement.classList.contains('theme-win98')) {
+    window.dispatchEvent(new CustomEvent('aegis-win98-theme', { detail: { enabled: true } }));
+  }
 }
 
 // Per-route SVG shape registry — kept in sync with the inline favicon
@@ -453,6 +471,19 @@ export function applyFrostedGlass(on) {
   document.body.classList.toggle('theme-frosted', !!on);
 }
 
+/** Toggle the "Aegis 98" Windows-98 skin: a class on <html> (matching the
+ *  early-paint script in index.html) that scopes static/win98.css, plus an
+ *  event js/win98.js listens to for the desktop/taskbar/DOS code palette.
+ *  Deliberately fires on EVERY call — not just state changes — so win98.js
+ *  can re-assert its inline --hl-* overrides after any applyColors(). Also
+ *  mirrors state into the 'aegis-win98' egg key so the Settings → Appearance
+ *  checkbox stays in sync. */
+export function applyWin98(on) {
+  document.documentElement.classList.toggle('theme-win98', !!on);
+  try { localStorage.setItem('aegis-win98', on ? 'on' : 'off'); } catch (_) {}
+  window.dispatchEvent(new CustomEvent('aegis-win98-theme', { detail: { enabled: !!on } }));
+}
+
 // Read current size multiplier for JS effects (canvas-based).
 function _getEffectSize() {
   const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bg-effect-size'));
@@ -487,6 +518,15 @@ export function getSaved() {
 }
 
 export function save(name, colors, opts) {
+  // Entering win98 from another theme: stash the outgoing theme so /win98 off
+  // (or Start → Shut Down) can restore it exactly. Centralized here because
+  // every enable path (swatch click, /win98, Settings egg) funnels into save.
+  if (name === 'win98') {
+    const cur = getSaved();
+    if (cur && cur.name !== 'win98') {
+      try { localStorage.setItem('aegis-win98-prev', JSON.stringify(cur)); } catch (_) {}
+    }
+  }
   const obj = { name, colors };
   if (opts) {
     if (opts.font && opts.font !== DEFAULT_FONT) obj.font = opts.font;
@@ -499,6 +539,7 @@ export function save(name, colors, opts) {
   }
   Storage.setJSON(LS_KEY, obj);
   _syncToServer(obj);
+  applyWin98(name === 'win98');
 }
 
 function _syncToServer(obj) {
@@ -667,7 +708,7 @@ export function initThemeUI() {
         <span style="background:${c.fg}"></span>
         <span style="background:${c.red}"></span>
       </div>
-      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : (name === 'millennium' ? 'millennium core' : name))}
+      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : (name === 'millennium' ? 'millennium core' : (name === 'win98' ? 'Aegis 98' : name)))}
     </div>
   `).join('');
 
@@ -1345,7 +1386,11 @@ export function initThemeUI() {
       }
       const colorData = { bg: colors.bg, fg: colors.fg, panel: colors.panel, border: colors.border, red: colors.red };
       if (colors.advanced && typeof colors.advanced === 'object') colorData.advanced = colors.advanced;
-      const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'imported';
+      let slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'imported';
+      // A built-in name would shadow the preset — and 'win98' would even
+      // force-activate the desktop mode (save() keys on the name). Dedupe
+      // instead of rejecting: import names come from files.
+      if (THEMES[slug]) slug = slug + '-imported';
       const opts = {};
       if (parsed.font) opts.font = parsed.font;
       if (parsed.density) opts.density = parsed.density;
@@ -2094,7 +2139,7 @@ function _initEmbers() {
 const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
                        THEMES, applyColors, applyFontDensity, applyBgPattern,
                        applyBgEffectColor, applyBgEffectIntensity, applyBgEffectSize,
-                       applyFrostedGlass,
+                       applyFrostedGlass, applyWin98,
                        save, getSaved, saveCustomTheme, deleteCustomTheme,
                        getCustomThemes };
 
@@ -2109,6 +2154,7 @@ async function _initWithSync() {
       if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
       Storage.setJSON(LS_KEY, serverTheme);
       applyColors(serverTheme.colors);
+      applyWin98(serverTheme.name === 'win98');
     }
   }
   // Also sync custom themes from server

@@ -1,0 +1,7 @@
+{
+  "api": "openai",
+  "endpoint": "http://127.0.0.1:9090/v1",
+  "model": "",
+  "timeoutMs": 120000,
+  "minConfidence": 0.5
+}
