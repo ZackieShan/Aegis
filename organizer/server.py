@@ -132,7 +132,7 @@ SCAN_CANCEL = threading.Event()
 EXEC_CANCEL = threading.Event()
 VISION_CANCEL = threading.Event()
 STATE = {
-    "scan": {"state": "idle", "total": 0, "processed": 0, "currentFile": "", "error": None},
+    "scan": {"state": "idle", "total": 0, "processed": 0, "currentFile": "", "error": None, "phase": ""},
     "execute": {"state": "idle", "total": 0, "processed": 0, "currentFile": "", "error": None, "log": []},
     "vision": {"state": "idle", "total": 0, "processed": 0, "tagged": 0, "currentFile": "", "error": None},
     "photos": [],
@@ -142,6 +142,7 @@ STATE = {
     "lastUndo": None,
     "partialScan": False,
     "geocodeDisabled": False,
+    "dupeAudit": None,     # deterministic best-copy audit (survives via meta)
 }
 
 _GEO_LAST_REQ = [0.0]
@@ -571,11 +572,16 @@ def restore_state_from_db():
     photos = [row_to_rec(r) for r in rows]
     groups = {r["path"]: r["dupe_group"] for r in rows if r["dupe_group"]}
     root = meta.get("last_scan_root") or _infer_root_from_rows(rows)
+    try:
+        audit = json.loads(meta.get("dupe_audit") or "null")
+    except Exception:
+        audit = None
     with LOCK:
         STATE["photos"] = photos
         STATE["groups"] = groups
         STATE["scannedRoot"] = root
         STATE["partialScan"] = meta.get("last_scan_partial") == "1"
+        STATE["dupeAudit"] = audit
         STATE["scan"] = {"state": "done", "total": len(photos),
                          "processed": len(photos), "currentFile": "", "error": None}
     note = f" (capped at {RESTORE_CAP} of {total})" if total > len(rows) else ""
@@ -1058,7 +1064,9 @@ def run_scan(root, max_files):
                 if rec["companions"]:
                     rec["companions"].sort()
         # duplicate grouping over whatever we have (full or partial)
+        set_scan(phase="duplicates", currentFile="")
         groups = compute_groups(photos)
+        audit = audit_dupe_groups(photos, groups) if not cancelled else None
         with LOCK:
             prev_root = STATE.get("scannedRoot")
             same_root = bool(prev_root) and normcase_abs(root) == normcase_abs(prev_root)
@@ -1071,6 +1079,7 @@ def run_scan(root, max_files):
                 STATE["scannedRoot"] = root
                 STATE["plan"] = None
                 STATE["partialScan"] = cancelled
+                STATE["dupeAudit"] = audit
                 kept_previous = False
             else:
                 kept_previous = True
@@ -1080,23 +1089,28 @@ def run_scan(root, max_files):
         try:
             db_upsert_recs(photos, groups if not cancelled else None, scanned_at)
             if photos or same_root:
-                db_set_meta({
+                meta_kv = {
                     "last_scan_root": root,
                     "last_scan_completed_at": datetime.now().isoformat(sep=" "),
                     "last_scan_count": str(len(photos)),
                     "last_scan_partial": "1" if cancelled else "0",
-                })
+                }
+                if not cancelled:
+                    # a cancelled scan keeps the DB's last complete rows —
+                    # the stored audit still matches them, so keep it too
+                    meta_kv["dupe_audit"] = json.dumps(audit)
+                db_set_meta(meta_kv)
             if not cancelled and not max_files:
                 db_set_dupe_groups(root, groups)
                 db_prune_missing(root, set(files))
         except Exception:
             pass  # DB issues never fail the scan itself
         if cancelled:
-            set_scan(state="cancelled", processed=len(photos), currentFile="", error=None)
+            set_scan(state="cancelled", processed=len(photos), currentFile="", error=None, phase="")
         else:
-            set_scan(state="done", processed=len(files), currentFile="", error=None)
+            set_scan(state="done", processed=len(files), currentFile="", error=None, phase="")
     except Exception as e:
-        set_scan(state="error", error=f"{type(e).__name__}: {e}")
+        set_scan(state="error", error=f"{type(e).__name__}: {e}", phase="")
 
 
 # 64-bit aHash split into 7 bands: two hashes at hamming distance <= 6 must
@@ -1169,6 +1183,64 @@ def compute_groups(photos):
     return groups
 
 
+def photo_rank_key(p):
+    """THE best-copy ordering for a photo dupe group (first = keeper):
+    highest resolution, tiebreak largest file. compute_plan and the audit
+    must rank identically or the audit lies."""
+    return (-(p.get("width") or 0) * (p.get("height") or 0),
+            -p["size"], p["path"])
+
+
+def audit_dupe_groups(photos, groups):
+    """Deterministic best-copy audit of every dupe group (the "supervisor
+    checks duplicates" step of the scan chain). Never moves anything — it
+    verifies each keeper decision has a real quality signal behind it and
+    flags the groups where the pick is effectively a coin toss, so the user
+    reviews a handful of groups instead of trusting hundreds blind."""
+    members = {}
+    for p in photos:
+        gid = groups.get(p["path"])
+        if gid:
+            members.setdefault(gid, []).append(p)
+    flagged = []
+    for gid, ms in sorted(members.items()):
+        ranked = sorted(ms, key=photo_rank_key)
+        keeper, losers = ranked[0], ranked[1:]
+        if not losers:
+            continue
+        flags = []
+        kpix = (keeper.get("width") or 0) * (keeper.get("height") or 0)
+        lpix = (losers[0].get("width") or 0) * (losers[0].get("height") or 0)
+        if kpix == 0 and lpix == 0:
+            flags.append("no-dimension-data")   # decided by file size alone
+        elif kpix == lpix:
+            szk, szl = keeper["size"], losers[0]["size"]
+            if szl and abs(szk - szl) <= 0.1 * max(szk, szl):
+                flags.append("resolution-tie")  # same pixels, ~same bytes
+        # a RAW original losing to a JPEG derivative deserves eyes on it
+        keeper_raw = (keeper.get("media_type") or "") == "raw"
+        if not keeper_raw and any((l.get("media_type") or "") == "raw"
+                                  for l in losers):
+            flags.append("raw-loses-to-jpeg")
+        if flags:
+            flagged.append({
+                "groupId": gid, "flags": flags,
+                "title": keeper.get("name"),
+                "keeper": keeper["path"],
+                "files": [{"path": m["path"], "name": m["name"],
+                           "quality": (m.get("width") or 0)
+                           * (m.get("height") or 0),
+                           "size": m["size"],
+                           "keep": m["path"] == keeper["path"]}
+                          for m in ranked]})
+    # pure: the caller decides whether this audit reaches STATE — run_scan
+    # may keep the PREVIOUS results (empty rescan), and then the previous
+    # audit must survive with them
+    return {"checkedAt": datetime.now().isoformat(sep=" "),
+            "groups": len(members), "flagged": flagged,
+            "clean": len(members) - len(flagged)}
+
+
 def quality_of(p):
     """date_quality with legacy fallback for rows predating the column."""
     q = p.get("date_quality")
@@ -1192,6 +1264,7 @@ def build_results():
         groups = dict(STATE["groups"])
         root = STATE["scannedRoot"]
         partial = STATE["partialScan"]
+        dupe_audit = STATE.get("dupeAudit")
     total = len(photos)
     total_bytes = sum(p["size"] for p in photos)
     dts = sorted(p["dt"] for p in photos if p.get("dt"))
@@ -1245,6 +1318,7 @@ def build_results():
         "exactWastedBytes": wasted,
         "totalGroups": len(gid_members),
         "nearGroups": near_groups,
+        "dupeAudit": dupe_audit,
         "groups": {gid: sorted(m) for gid, m in sorted(gid_members.items())},
         "photos": photos,
         "thumbSample": [p["path"] for p in photos[:30]],
@@ -1287,6 +1361,53 @@ def apply_template(tpl, rec, dt, seq):
     return TOKEN_RE.sub(lambda m: vals[m.group(1)], tpl)
 
 
+def find_in_library(photo_recs, root):
+    """{rec path -> library path} for scanned photos whose bytes (md5)
+    already live under a DIFFERENT root in photos.db (which keeps every
+    scanned root). The library copy must still exist on disk."""
+    prefix = normcase_abs(root) + os.sep
+    by_md5 = {}
+    try:
+        con = db_connect()
+        try:
+            for row in con.execute("SELECT path, md5 FROM photos"
+                                   " WHERE md5 IS NOT NULL"):
+                if normcase_abs(row["path"]).startswith(prefix):
+                    continue
+                by_md5.setdefault(row["md5"], row["path"])
+        finally:
+            con.close()
+    except Exception:
+        return {}
+    out, alive = {}, {}
+    for p in photo_recs:
+        lib = by_md5.get(p.get("md5"))
+        if not lib:
+            continue
+        if lib not in alive:
+            alive[lib] = os.path.isfile(lib)
+        if alive[lib]:
+            out[p["path"]] = lib
+    return out
+
+
+def _rel_dir(path, scanned_root):
+    """The file's folder relative to the scanned root ("" when it sits at the
+    root). Quarantine buckets keep this sub-path so a reviewed file stays
+    with its original release folder -- that folder is often the only clue to
+    what the file is -- and identically-named files from different folders
+    stop colliding.
+    """
+    try:
+        rel = os.path.relpath(os.path.dirname(os.path.abspath(path)),
+                              os.path.abspath(scanned_root))
+    except ValueError:              # different drive
+        return ""
+    if rel in (".", os.curdir) or rel.startswith(".."):
+        return ""
+    return rel
+
+
 def compute_plan(params):
     ensure_state()  # rebuild from DB after a restart if needed
     with LOCK:
@@ -1314,7 +1435,22 @@ def compute_plan(params):
     if normcase_abs(target_root) == normcase_abs(root):
         return None, "Target root must differ from the scanned folder."
 
-    # best copy per group: highest resolution, tiebreak largest file
+    # per-file exclusions from the plan preview: excluded files are left
+    # untouched and drop out of planning BEFORE best-copy ranking, so
+    # excluding a keeper promotes the next-best copy
+    exclude = {normcase_abs(p) for p in (params.get("exclude") or []) if p}
+    excluded = 0
+    if exclude:
+        kept_photos = []
+        for p in photos:
+            if normcase_abs(p["path"]) in exclude:
+                excluded += 1
+            else:
+                kept_photos.append(p)
+        photos = kept_photos
+
+    # best copy per group: highest resolution, tiebreak largest file —
+    # photo_rank_key is shared with the scan chain's audit
     best_of = {}
     gid_members = {}
     for p in photos:
@@ -1322,8 +1458,7 @@ def compute_plan(params):
         if gid:
             gid_members.setdefault(gid, []).append(p)
     for gid, members in gid_members.items():
-        ranked = sorted(members, key=lambda p: (-(p.get("width") or 0) * (p.get("height") or 0),
-                                                -p["size"], p["path"]))
+        ranked = sorted(members, key=photo_rank_key)
         best_of[gid] = ranked[0]["path"]
 
     photos_sorted = sorted(photos, key=lambda p: p["path"])
@@ -1337,17 +1472,34 @@ def compute_plan(params):
         else:
             normal.append(p)
 
+    # cross-root check: photos whose bytes already live under another scanned
+    # root (the main library, when this scan is an inbox) are quarantined to
+    # _AlreadyInLibrary\ instead of merging in beside the copy you own
+    in_library = find_in_library(normal, root)
+
     entries = []
     # --- orphan sidecars -> _Sidecars\ (flat, original filename)
     # --- files with no trustworthy date -> _Unknown Date\<Camera>\
     # --- normal-tree files
     staged = []
     unknown_date = 0
+    in_library_count = 0
     for p in normal:
         if (p.get("media_type") or "photo") == "sidecar":
             entries.append({"from": p["path"],
                             "to": os.path.join(target_root, "_Sidecars", p["name"]),
                             "isDupe": False, "groupId": None, "mediaType": "sidecar"})
+            continue
+        if p["path"] in in_library:
+            in_library_count += 1
+            entries.append({"from": p["path"],
+                            "to": os.path.join(target_root, "_AlreadyInLibrary",
+                                               _rel_dir(p["path"], root),
+                                               p["name"]),
+                            "isDupe": False, "groupId": groups.get(p["path"]),
+                            "reason": "in-library",
+                            "libraryCopy": in_library[p["path"]],
+                            "mediaType": p.get("media_type") or "photo"})
             continue
         if not p.get("dt") or (p.get("date_quality") or "") == "unknown":
             unknown_date += 1
@@ -1381,7 +1533,10 @@ def compute_plan(params):
                         "mediaType": p.get("media_type") or "photo"})
     # --- duplicates -> _Duplicates\<group>\ (always keep original filename)
     for p, gid in dupes:
-        dest_dir = os.path.join(target_root, "_Duplicates", gid)
+        # duplicates keep their original sub-folder so you can see WHERE
+        # each copy came from when deciding what to delete
+        dest_dir = os.path.join(target_root, "_Duplicates", gid,
+                                _rel_dir(p["path"], root))
         entries.append({"from": p["path"], "to": os.path.join(dest_dir, p["name"]),
                         "isDupe": True, "groupId": gid,
                         "mediaType": p.get("media_type") or "photo"})
@@ -1439,8 +1594,10 @@ def compute_plan(params):
         "entries": entries,
         "stats": {
             "totalFiles": len(entries),
+            "excludedFiles": excluded,
             "companionFiles": companion_files,
             "unknownDateFiles": unknown_date,
+            "inLibraryFiles": in_library_count,
             "action": action,
             "dupeFiles": len(dupes),
             "groupCount": len(gid_members),
@@ -1495,6 +1652,24 @@ def remove_empty_dirs(root, exclude):
             pass
 
 
+def _preflight_roots(scanned_root, target_root):
+    """Friendly up-front checks so a disconnected/mistyped drive fails with a
+    clear message instead of a mid-run WinError deep in makedirs."""
+    if not os.path.isdir(scanned_root):
+        return (f"Scanned folder is no longer available: {scanned_root} — "
+                "was a drive disconnected? Rescan, then rebuild the plan.")
+    drive = os.path.splitdrive(os.path.abspath(target_root))[0]
+    if drive and not os.path.exists(drive + os.sep):
+        return (f"Target drive {drive}\\ is not available — connect it or "
+                "pick a different target folder, then rebuild the plan.")
+    try:
+        os.makedirs(target_root, exist_ok=True)
+    except OSError as e:
+        return (f"Cannot create the target folder {target_root}: "
+                f"{type(e).__name__}: {e}")
+    return None
+
+
 def run_execute():
     with LOCK:
         plan = STATE["plan"]
@@ -1507,6 +1682,10 @@ def run_execute():
     target_root = params["targetRoot"]
     scanned_root = params["scannedRoot"]
     set_exec(total=len(entries), processed=0)
+    err = _preflight_roots(scanned_root, target_root)
+    if err:
+        set_exec(state="error", error=err)
+        return
     manifest = []
     moved = copied = skipped = errors = 0
     cancelled = False
@@ -2066,6 +2245,26 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(d)
             if path == "/api/vision/status":
                 return self._json(vision_status())
+            if path == "/api/cinema/tv-supervise/status":
+                return self._json(cinema.tvsupervise_status())
+            if path == "/api/cinema/tv-supervise/scope":
+                want = (urllib.parse.parse_qs(u.query).get("path") or [""])[0]
+                return self._json(cinema.unidentified_scope(want or None))
+            if path == "/api/llm/models":
+                # chat-capable models on the configured endpoint, for the
+                # supervisor's picker (identification quality tracks model
+                # size, so let the user choose a bigger one)
+                try:
+                    import llm_assist as _la
+                    cfg = _la.load_config()
+                    names = _la.list_models(cfg)
+                except Exception:
+                    cfg, names = {}, []
+                skip = ("image", "video", "tts", "-vl", "wan", "ltx", "embed")
+                chat = [n for n in names
+                        if not any(s in n.lower() for s in skip)]
+                return self._json({"models": chat,
+                                   "default": (cfg or {}).get("model", "")})
             if path == "/api/results":
                 if not ensure_state():
                     return self._error(404, "No scan results yet.")
@@ -2100,6 +2299,8 @@ class Handler(BaseHTTPRequestHandler):
             # ---- cinema organizer ----
             if path == "/api/cinema/scan/status":
                 return self._json(cinema.scan_status())
+            if path == "/api/cinema/pipeline/status":
+                return self._json(cinema.pipeline_status())
             if path == "/api/cinema/execute/status":
                 return self._json(cinema.execute_status())
             if path == "/api/cinema/results":
@@ -2198,11 +2399,27 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/cinema/scan":
                 return self._api_cinema_scan(body)
             if u.path == "/api/cinema/scan/cancel":
-                if not cinema.cancel_scan():
+                # a pipeline run cancels as a unit (scan + supervisor)
+                if not cinema.cancel_pipeline() and not cinema.cancel_scan():
                     return self._error(409, "No cinema scan is running.")
+                return self._json({"ok": True})
+            if u.path == "/api/cinema/pipeline/cancel":
+                if not cinema.cancel_pipeline():
+                    return self._error(409, "No cinema pipeline is running.")
                 return self._json({"ok": True})
             if u.path == "/api/cinema/plan":
                 return self._api_cinema_plan(body)
+            if u.path == "/api/cinema/tv-supervise":
+                ok, err = cinema.start_tv_supervise(
+                    (body or {}).get("minConfidence"),
+                    (body or {}).get("model"),
+                    (body or {}).get("path"))
+                if not ok:
+                    return self._error(409, err)
+                return self._json({"ok": True})
+            if u.path == "/api/cinema/tv-supervise/cancel":
+                cinema.TVSUP_CANCEL.set()
+                return self._json({"ok": True})
             if u.path == "/api/cinema/execute":
                 ok, err = cinema.start_execute()
                 if not ok:
@@ -2218,7 +2435,10 @@ class Handler(BaseHTTPRequestHandler):
                 body = body or {}
                 cinema.save_config(
                     body.get("tmdbKey") if "tmdbKey" in body else None,
-                    body.get("tmdbToken") if "tmdbToken" in body else None)
+                    body.get("tmdbToken") if "tmdbToken" in body else None,
+                    body.get("omdbKey") if "omdbKey" in body else None,
+                    body.get("tvdbKey") if "tvdbKey" in body else None,
+                    body.get("tvdbPin") if "tvdbPin" in body else None)
                 return self._json(cinema.get_config_public())
             # ---- music organizer (delegated to music.api_post) ----
             # Contract: music.api_post(sub, body) -> (status:int, obj) where
@@ -2345,7 +2565,18 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             max_files = 0
         hash_enabled = bool(body.get("hash"))
-        ok, err = cinema.start_scan(root, max_files, hash_enabled)
+        # a scan now runs the whole unattended pipeline: scan -> AI
+        # supervisor over unidentified -> dupe regroup + quality audit.
+        # supervise:false gives the old scan-only behaviour.
+        supervise = body.get("supervise", True) is not False
+        disc_policy = (body.get("discPolicy") or "keep").strip().lower()
+        if disc_policy not in ("keep", "quarantine"):
+            disc_policy = "keep"
+        ok, err = cinema.start_pipeline(
+            root, max_files, hash_enabled, supervise=supervise,
+            model=body.get("model"),
+            min_confidence=body.get("minConfidence"),
+            disc_policy=disc_policy)
         if not ok:
             return self._error(409, err)
         db_add_root(root, "scan")

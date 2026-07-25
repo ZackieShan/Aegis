@@ -40,6 +40,7 @@ TMDB_INTERVAL = 0.26                # ~4 requests/second
 
 LOCK = threading.Lock()
 SCAN_CANCEL = threading.Event()
+TVSUP_CANCEL = threading.Event()
 EXEC_CANCEL = threading.Event()
 STATE = {
     "scan": {"state": "idle", "total": 0, "processed": 0,
@@ -52,6 +53,13 @@ STATE = {
     "plan": None,
     "lastUndo": None,
     "partialScan": False,
+    "tvsupervise": {"state": "idle", "total": 0, "processed": 0,
+                    "identified": 0, "rejected": 0, "currentFile": "",
+                    "error": None, "root": "", "log": []},
+    # one-click chain: scan -> supervisor -> dupe regroup + quality audit.
+    # phases: [{name, state: pending|running|done|skipped|error, detail}]
+    "pipeline": {"state": "idle", "phase": "", "phases": [], "error": None},
+    "dupeAudit": None,     # audit_dupe_groups() result (survives via meta)
 }
 
 
@@ -143,6 +151,22 @@ def title_similarity(a, b):
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
+try:
+    import llm_tv
+except Exception:            # LLM assist optional
+    llm_tv = None
+
+try:
+    import llm_reidentify     # movie verification (3-gate TMDB check)
+except Exception:
+    llm_reidentify = None
+
+try:
+    import llm_assist         # local-LLM reachability probe for the pipeline
+except Exception:
+    llm_assist = None
+
+
 def _sim_accept(guess, hit_title):
     """Reasonable-match gate for adopting a TMDB hit for a yearless guess."""
     g = normalize_title(_fold(guess))
@@ -162,6 +186,35 @@ def _sim_accept(guess, hit_title):
 _LEAD_YEAR_PAREN = re.compile(r"^\(((?:19|20)\d{2})\)\s*(.*)$")   # fansub (1984) Title~Jiten
 _YEAR_FIRST = re.compile(r"^((?:19|20)\d{2})\s*[-–—]\s*(.+)$")    # 2001 - A Space Odyssey
 _INDEX_PREFIX = re.compile(r"^\d{1,2}-(?=[A-Za-z])")               # 5-Vengeful Beauty
+
+
+_FOLDER_INDEX_PREFIX = re.compile(
+    r"^\s*(0\d{1,2}|\d{1,3})\s*(?:([-._)\]:]+)\s*|\s+)(?=\S)")
+
+
+def strip_index_prefix(s):
+    """Drop a leading track/disc/episode index from a name meant to become a
+    FOLDER ("01 - Greatest Hits" -> "Greatest Hits", "03. The Wall" ->
+    "The Wall").
+
+    Deliberately conservative: plenty of real titles start with a number, so
+    the digits must LOOK like an index — either zero-padded ("01", "007") or
+    followed by a separator ("01 - ", "03."). A bare "22 Jump Street",
+    "13 Assassins", "12 Monkeys", "300" or "1917" is left alone, and the
+    remainder must still contain a word.
+    """
+    s = str(s or "")
+    m = _FOLDER_INDEX_PREFIX.match(s)
+    if not m:
+        return s
+    digits, sep = m.group(1), m.group(2)
+    zero_padded = len(digits) > 1 and digits[0] == "0"
+    if not (zero_padded or sep):
+        return s                        # bare "22 Jump Street" -> keep
+    rest = s[m.end():].strip()
+    if len(rest) < 3 or not re.search(r"[A-Za-z]{2}", rest):
+        return s                        # "50-50" -> keep
+    return rest
 
 
 def _strip_tokens(s):
@@ -221,6 +274,68 @@ def _clean_series_title(s):
                 return c
         return ""
     return _clean_title(_strip_tokens(s))
+
+
+# "030 - Title", "12. Title", "007_Title": an episode number leads the name
+# but the SERIES name isn't in the file at all — it lives in the folder tree.
+_EPISODE_LED_RE = re.compile(r"^\s*(\d{1,3})\s*[-._)\]]\s*\S")
+_SEASON_DIR_RE = re.compile(
+    r"^(season[\s._-]*\d+|s\d{1,2}|specials?|disc[\s._-]*\d+|cd\d+)$", re.I)
+
+
+def _series_from_dir(dirname):
+    """A series title from a folder name, or None when the folder doesn't
+    look like a real title. Requires at least two alphabetic words: release
+    folders squashed into one run-on token ("036mysticmanorflopgoes...")
+    would otherwise become junk series names."""
+    cleaned = _clean_title(_strip_tokens(strip_index_prefix(dirname)))
+    if not cleaned:
+        return None
+    words = [w for w in re.split(r"\s+", cleaned) if w]
+    alpha_words = [w for w in words if re.search(r"[A-Za-z]", w)]
+    if len(alpha_words) < 2 or len(cleaned) < 4:
+        return None
+    if len(max(alpha_words, key=len)) > 24:
+        return None                 # run-on token: not a real title
+    return cleaned
+
+
+def infer_tv_from_folder(rec, scan_root):
+    """Promote an unidentified, episode-led file to TV using the folder tree
+    for the series name (Show\\Season 01\\03 - Title.mkv). Absolute numbering
+    lands in season 1. Returns True when the rec was updated."""
+    if rec.get("kind") != "unknown" or rec.get("season") is not None:
+        return False
+    stem = os.path.splitext(rec["name"])[0]
+    m = _EPISODE_LED_RE.match(stem)
+    if not m:
+        return False
+    ep = int(m.group(1))
+    if ep <= 0:
+        return False
+    d = os.path.dirname(rec["path"])
+    root_n = normcase_abs(scan_root)
+    season = None
+    while d and normcase_abs(d) != root_n and len(d) > 3:
+        base = os.path.basename(d)
+        sm = _SEASON_DIR_RE.match(base.strip())
+        if sm:
+            num = re.search(r"\d+", base)
+            if num and season is None:
+                season = int(num.group(0))
+            d = os.path.dirname(d)
+            continue
+        title = _series_from_dir(base)
+        if title:
+            rec["kind"] = "tv"
+            rec["title"] = title
+            rec["season"] = season if season is not None else 1
+            rec["episode"] = ep
+            rec["episodes"] = [ep]
+            rec["tags"] = (rec.get("tags") or []) + ["folder-series"]
+            return True
+        break        # nearest meaningful folder didn't look like a title
+    return False
 
 
 def parse_media_name(name):
@@ -592,6 +707,25 @@ CREATE TABLE IF NOT EXISTS cmeta (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+-- Persistent multi-root identity index: every COMPLETED scan refreshes its
+-- own root's rows, so an inbox scan can ask "do I already own this movie /
+-- episode?" against the main library's last scan.
+CREATE TABLE IF NOT EXISTS library_index (
+  path TEXT PRIMARY KEY,
+  root TEXT,
+  kind TEXT,
+  title_norm TEXT,
+  year INTEGER,
+  season INTEGER,
+  episode INTEGER,
+  md5 TEXT,
+  quality_score INTEGER,
+  size_bytes INTEGER,
+  indexed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_clibidx_root ON library_index(root);
+CREATE INDEX IF NOT EXISTS idx_clibidx_md5 ON library_index(md5);
+CREATE INDEX IF NOT EXISTS idx_clibidx_ident ON library_index(title_norm);
 """
 
 
@@ -699,6 +833,85 @@ def db_replace_recs(recs, groups, scanned_at):
                  groups.get(rec["path"]), rec.get("error"), scanned_at))
 
 
+def _ident_key(rec):
+    """Identity key for cross-root matching: movies by title+year, episodes
+    by series+season+episode. None for unidentified / season packs."""
+    t = normalize_title(rec.get("title") or "")
+    if not t:
+        return None
+    if rec.get("kind") == "movie" and rec.get("year"):
+        return ("movie", t, rec["year"])
+    if rec.get("kind") == "tv" and rec.get("season") is not None \
+            and rec.get("episode") is not None:
+        return ("tv", t, rec["season"], rec["episode"])
+    return None
+
+
+def db_update_library_index(recs, root, scanned_at):
+    """Refresh the persistent identity index for ONE root, leaving other
+    roots' rows untouched."""
+    prefix = normcase_abs(root) + os.sep
+    with _db() as con:
+        for (p,) in con.execute("SELECT path FROM library_index").fetchall():
+            if normcase_abs(p).startswith(prefix):
+                con.execute("DELETE FROM library_index WHERE path=?", (p,))
+        for r in recs:
+            if r.get("kind") not in ("movie", "tv"):
+                continue
+            con.execute(
+                "INSERT OR REPLACE INTO library_index"
+                " (path, root, kind, title_norm, year, season, episode,"
+                "  md5, quality_score, size_bytes, indexed_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (r["path"], root, r["kind"],
+                 normalize_title(r.get("title") or ""), r.get("year"),
+                 r.get("season"), r.get("episode"), r.get("md5"),
+                 r.get("quality_score"), r.get("size"), scanned_at))
+
+
+def find_in_library(recs, root):
+    """{rec path -> (library path, verdict)} for scanned files already owned
+    under a DIFFERENT indexed root. verdict "dupe" = same bytes or same
+    identity at equal-or-lower quality; "upgrade" = same identity but this
+    copy scores better than the library's."""
+    prefix = normcase_abs(root) + os.sep
+    by_md5, by_ident = {}, {}
+    try:
+        with _db() as con:
+            for row in con.execute("SELECT * FROM library_index"):
+                if normcase_abs(row["path"]).startswith(prefix):
+                    continue
+                if row["md5"]:
+                    by_md5.setdefault(row["md5"], row["path"])
+                k = _ident_key(dict(row, kind=row["kind"],
+                                    title=row["title_norm"]))
+                if k:
+                    prev = by_ident.get(k)
+                    if prev is None or (row["quality_score"] or 0) > prev[1]:
+                        by_ident[k] = (row["path"], row["quality_score"] or 0)
+    except Exception:
+        return {}
+    out = {}
+    alive = {}
+    def _isfile(p):
+        if p not in alive:
+            alive[p] = os.path.isfile(p)
+        return alive[p]
+    for r in recs:
+        md5_hit = by_md5.get(r.get("md5"))
+        if md5_hit and _isfile(md5_hit):
+            out[r["path"]] = (md5_hit, "dupe")
+            continue
+        k = _ident_key(r)
+        hit = by_ident.get(k) if k else None
+        if hit and _isfile(hit[0]):
+            if (r.get("quality_score") or 0) > hit[1]:
+                out[r["path"]] = (hit[0], "upgrade")
+            else:
+                out[r["path"]] = (hit[0], "dupe")
+    return out
+
+
 def db_update_paths(entries, action):
     """Keep media.path truthful after execute/undo."""
     with _db() as con:
@@ -723,14 +936,21 @@ def load_config():
         return {}
 
 
-def save_config(tmdb_key=None, tmdb_token=None):
-    """Persist TMDB credentials. None leaves a field unchanged, '' clears
+def save_config(tmdb_key=None, tmdb_token=None, omdb_key=None,
+                tvdb_key=None, tvdb_pin=None):
+    """Persist API credentials. None leaves a field unchanged, '' clears
     it, any other value sets it. Values are never logged."""
     cfg = load_config()
     if tmdb_key is not None:
         cfg["tmdbKey"] = tmdb_key.strip()
     if tmdb_token is not None:
         cfg["tmdbToken"] = tmdb_token.strip()
+    if omdb_key is not None:
+        cfg["omdbKey"] = omdb_key.strip()
+    if tvdb_key is not None:
+        cfg["tvdbKey"] = tvdb_key.strip()
+    if tvdb_pin is not None:
+        cfg["tvdbPin"] = tvdb_pin.strip()
     tmp = CONFIG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f)
@@ -753,9 +973,14 @@ def get_config_public():
     cfg = load_config()
     key = cfg.get("tmdbKey") or ""
     tok = cfg.get("tmdbToken") or ""
+    omdb = cfg.get("omdbKey") or ""
+    tvdb = cfg.get("tvdbKey") or ""
     return {"hasKey": bool(key or tok), "hasApiKey": bool(key),
             "hasToken": bool(tok), "tmdbKeyMasked": mask_secret(key),
-            "tmdbTokenMasked": mask_secret(tok)}
+            "tmdbTokenMasked": mask_secret(tok),
+            "hasOmdbKey": bool(omdb), "omdbKeyMasked": mask_secret(omdb),
+            "hasTvdbKey": bool(tvdb), "tvdbKeyMasked": mask_secret(tvdb),
+            "hasTvdbPin": bool(cfg.get("tvdbPin"))}
 
 
 # =================================================================== helpers
@@ -836,17 +1061,56 @@ def execute_status():
 
 # =================================================================== scan
 
+DISC_DIR_NAMES = {"video_ts", "bdmv"}
+
+
 def collect_files(root, max_files):
-    out = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    """(files, discs). A folder containing VIDEO_TS\\ or BDMV\\ is ONE title
+    (a DVD/Blu-ray rip): its whole subtree is pruned from per-file collection
+    and returned as an atomic disc unit instead — otherwise the rip's
+    .m2ts/.vob internals would be scanned as unidentifiable videos and the
+    structure torn apart. Standalone .iso images are disc units too."""
+    out, discs = [], []
+    root_abs = os.path.abspath(root)
+    for dirpath, dirnames, filenames in os.walk(root_abs):
+        lower = {d.lower(): d for d in dirnames}
+        hit = next((lower[k] for k in ("video_ts", "bdmv") if k in lower),
+                   None)
+        if hit is not None:
+            fmt = "dvd" if hit.lower() == "video_ts" else "bluray"
+            if normcase_abs(dirpath) == normcase_abs(root_abs):
+                # the scan root itself IS the rip: the unit is the disc dir
+                discs.append({"path": os.path.join(dirpath, hit),
+                              "format": fmt})
+                dirnames[:] = [d for d in dirnames
+                               if d.lower() not in DISC_DIR_NAMES]
+            else:
+                discs.append({"path": dirpath, "format": fmt})
+                dirnames[:] = []      # never descend into a rip
+                continue              # its top-level files belong to it too
         dirnames.sort()
         for fn in sorted(filenames):
             ext = os.path.splitext(fn)[1].lower()
+            if ext == ".iso":
+                discs.append({"path": os.path.join(dirpath, fn),
+                              "format": "iso"})
+                continue
             if ext in VIDEO_EXTS or ext in SUB_EXTS or ext in CLUTTER_EXTS:
                 out.append(os.path.join(dirpath, fn))
                 if max_files and len(out) >= max_files:
-                    return out
-    return out
+                    return out, discs
+    return out, discs
+
+
+def _dir_size(path):
+    total = 0
+    for dp, _dn, fns in os.walk(path):
+        for fn in fns:
+            try:
+                total += os.path.getsize(os.path.join(dp, fn))
+            except OSError:
+                pass
+    return total
 
 
 def _group_recs(recs):
@@ -906,8 +1170,8 @@ def run_scan(root, max_files, hash_enabled):
     scanned_at = datetime.now().isoformat(sep=" ")
     cancelled = False
     try:
-        files = collect_files(root, max_files)
-        set_scan(total=len(files), processed=0)
+        files, discs = collect_files(root, max_files)
+        set_scan(total=len(files) + len(discs), processed=0)
         recs = []
         videos = []  # indices into recs that are videos (not clutter)
         for i, path in enumerate(files):
@@ -926,6 +1190,9 @@ def run_scan(root, max_files, hash_enabled):
                     "error": None}
             if ext in VIDEO_EXTS:
                 rec = {**base, **parse_media_name(name)}
+                # "Show\Season 01\03 - Title.mkv": the episode number leads
+                # the filename and the series lives in the folder tree
+                infer_tv_from_folder(rec, root)
                 if hash_enabled and st.st_size < HASH_MAX:
                     rec["md5"] = md5_file(path, SCAN_CANCEL)
                 videos.append(len(recs))
@@ -934,6 +1201,49 @@ def run_scan(root, max_files, hash_enabled):
                 continue  # subtitles attach to their video below
             else:
                 recs.append({**base, "kind": "_clutter_candidate"})
+
+        # disc-rip units (VIDEO_TS / BDMV folders, .iso images): ONE record
+        # per title, moved whole at execute. Identity parses from the rip's
+        # folder (or iso file) name; joins dedupe/identify like any movie.
+        for d in discs:
+            if SCAN_CANCEL.is_set():
+                cancelled = True
+                break
+            p = d["path"]
+            name = os.path.basename(p)
+            is_iso = d["format"] == "iso"
+            set_scan(currentFile=name)
+            try:
+                if is_iso:
+                    st = os.stat(p)
+                    size, mtime = st.st_size, st.st_mtime
+                else:
+                    size = _dir_size(p)
+                    mtime = os.path.getmtime(p)
+            except OSError:
+                continue
+            # for a VIDEO_TS/BDMV unit at the scan root, the parent folder
+            # carries the title; otherwise the unit folder itself does
+            if not is_iso and name.lower() in DISC_DIR_NAMES:
+                src_name = os.path.basename(os.path.dirname(p)) or name
+            else:
+                src_name = name
+            parsed = parse_media_name(src_name if is_iso
+                                      else src_name + ".mkv")
+            rec = {"path": p, "name": name,
+                   "ext": ".iso" if is_iso else "",
+                   "size": size, "mtime": mtime, "md5": None, "error": None,
+                   **parsed}
+            rec["is_disc"] = True
+            rec["disc_format"] = d["format"]
+            rec["tags"] = (rec.get("tags") or []) + ["disc:" + d["format"]]
+            if rec["kind"] in ("movie", "tv"):
+                # quality floor when the rip's name carries no res tags:
+                # a Blu-ray outranks web 1080p sources, a DVD sits at SD
+                floor = {"bluray": 3095, "dvd": 1060}.get(d["format"], 0)
+                rec["quality_score"] = max(rec.get("quality_score") or 0,
+                                           floor)
+            recs.append(rec)
 
         # companion + clutter matching need per-dir video indexes.
         # Companions are dicts: {"from": path, "suffix": ".en.srt"} renames to
@@ -1159,6 +1469,11 @@ def run_scan(root, max_files, hash_enabled):
             STATE["scannedRoot"] = root
             STATE["plan"] = None
             STATE["partialScan"] = cancelled
+            # a fresh rec set invalidates the previous run's audit — the
+            # pipeline's phase 3 recomputes it moments later. The meta copy
+            # is only cleared on a COMPLETE scan (a cancelled one keeps the
+            # DB's last complete rows, which the stored audit still matches)
+            STATE["dupeAudit"] = None
         try:
             if cancelled:
                 # db_replace_recs does DELETE FROM media -- never let a
@@ -1169,10 +1484,12 @@ def run_scan(root, max_files, hash_enabled):
                           "last_scan_cancelled_count": str(len(recs))})
             else:
                 db_replace_recs(recs, groups, scanned_at)
+                db_update_library_index(recs, root, scanned_at)
                 set_meta({"last_scan_root": root,
                           "last_scan_completed_at": scanned_at,
                           "last_scan_count": str(len(recs)),
-                          "last_scan_partial": "0"})
+                          "last_scan_partial": "0",
+                          "dupe_audit": "null"})
         except Exception:
             pass
         if cancelled:
@@ -1181,6 +1498,482 @@ def run_scan(root, max_files, hash_enabled):
             set_scan(state="done", processed=len(files), currentFile="")
     except Exception as e:
         set_scan(state="error", error=f"{type(e).__name__}: {e}")
+
+
+def _title_words(s):
+    return set(w for w in normalize_title(s).split() if len(w) > 3)
+
+
+def tmdb_episode_titles(series_title, api_key, token=None, fetcher=None,
+                        cancel=None, max_seasons=3):
+    """Episode names for a series (first few seasons). [] when unavailable."""
+    fetcher = _resolve_fetcher(fetcher, token)
+    try:
+        url = ("https://api.themoviedb.org/3/search/tv"
+               f"?{_key_qs(api_key)}query="
+               f"{urllib.parse.quote(_fold(series_title))}")
+        data = _throttled(url, fetcher) or {}
+        hits = data.get("results") or []
+        if not hits:
+            return []
+        tv_id = hits[0].get("id")
+        if not tv_id:
+            return []
+        names = []
+        nseasons = min(max_seasons,
+                       max(1, int(hits[0].get("number_of_seasons") or 1)))
+        for season in range(1, nseasons + 1):
+            if cancel is not None and cancel.is_set():
+                break
+            surl = (f"https://api.themoviedb.org/3/tv/{tv_id}/season/{season}"
+                    f"?{_key_qs(api_key)}")
+            sdata = _throttled(surl, fetcher) or {}
+            for ep in sdata.get("episodes") or []:
+                nm = ep.get("name")
+                if nm:
+                    names.append(nm)
+        return names
+    except Exception:
+        return []
+
+
+def episode_titles_match(filenames, tmdb_titles, min_hits=1):
+    """True when at least `min_hits` episode titles from the filenames also
+    appear in the series' TMDB episode list.
+
+    This is the check that separates "that show exists" from "that show
+    actually has these episodes" — the difference between accepting and
+    rejecting a confident hallucination.
+    """
+    if not tmdb_titles:
+        return None                 # can't verify (no data) -> caller decides
+    tmdb_sets = [_title_words(t) for t in tmdb_titles if t]
+    tmdb_sets = [s for s in tmdb_sets if s]
+    if not tmdb_sets:
+        return None
+    hits = 0
+    for fn in filenames:
+        stem = os.path.splitext(os.path.basename(fn))[0]
+        stem = re.sub(r"^\s*\d{1,3}\s*[-._)\]]\s*", "", stem)
+        stem = _strip_tokens(stem)
+        # segment-title files list several titles separated by commas
+        for part in re.split(r"[,;]| - ", stem):
+            words = _title_words(part)
+            if len(words) < 2:
+                continue
+            for t in tmdb_sets:
+                overlap = words & t
+                if len(overlap) >= 2 or (words and words <= t):
+                    hits += 1
+                    break
+            if hits >= min_hits:
+                return True
+    return hits >= min_hits
+
+
+# ---------------------------------------------- second-source verification
+# TMDB is the canonical database, but a TMDB miss shouldn't doom a correct
+# identification: TVmaze (keyless) and TheTVDB (legacy key) provide second
+# episode lists for the cross-check, and OMDb (IMDb data) a second movie
+# database. All are total-failure-tolerant — any problem returns empty and
+# the caller behaves exactly as before the source existed.
+
+def _get_json(url, headers=None, timeout=20):
+    """Tolerant GET -> parsed JSON dict; {} on ANY failure. Never raises."""
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "AegisOrganizer/1.0 (personal media tool)",
+            **(headers or {})})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8", "replace")) or {}
+    except Exception:
+        return {}
+
+
+def tvmaze_episode_titles(series_title, cancel=None):
+    """Episode names from TVmaze (keyless, CC BY-SA, ~20 req/10s).
+    [] when the show isn't found or the found show's name doesn't pass the
+    similarity gate (a fuzzy TVmaze match for a DIFFERENT show must not
+    become verification evidence)."""
+    if not series_title or (cancel is not None and cancel.is_set()):
+        return []
+    q = urllib.parse.quote(_fold(series_title))
+    data = _get_json("https://api.tvmaze.com/singlesearch/shows?q=" + q
+                     + "&embed=episodes")
+    if not _sim_accept(series_title, data.get("name") or ""):
+        return []
+    eps = (data.get("_embedded") or {}).get("episodes") or []
+    return [e.get("name") for e in eps if e.get("name")]
+
+
+_TVDB_TOKEN = {"token": None, "born": 0.0}
+
+
+def _tvdb_login(api_key):
+    """Bearer token for TheTVDB's legacy (v3) API, cached ~20h (tokens live
+    24h). '' when login fails or the v3 API is finally retired."""
+    now = time.time()
+    if _TVDB_TOKEN["token"] and now - _TVDB_TOKEN["born"] < 20 * 3600:
+        return _TVDB_TOKEN["token"]
+    try:
+        req = urllib.request.Request(
+            "https://api.thetvdb.com/login",
+            data=json.dumps({"apikey": api_key}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            tok = (json.loads(resp.read().decode()) or {}).get("token") or ""
+    except Exception:
+        tok = ""
+    if tok:
+        _TVDB_TOKEN.update(token=tok, born=now)
+    return tok
+
+
+def tvdb_episode_titles(series_title, api_key, cancel=None, max_pages=3):
+    """Episode names from TheTVDB legacy v3 API. [] when unavailable."""
+    if not series_title or not api_key:
+        return []
+    if cancel is not None and cancel.is_set():
+        return []
+    tok = _tvdb_login(api_key)
+    if not tok:
+        return []
+    hdr = {"Authorization": "Bearer " + tok}
+    q = urllib.parse.quote(_fold(series_title))
+    data = _get_json("https://api.thetvdb.com/search/series?name=" + q, hdr)
+    sid = None
+    for h in (data.get("data") or [])[:5]:
+        if _sim_accept(series_title, h.get("seriesName") or ""):
+            sid = h.get("id")
+            break
+    if not sid:
+        return []
+    names = []
+    for page in range(1, max_pages + 1):
+        if cancel is not None and cancel.is_set():
+            break
+        data = _get_json(f"https://api.thetvdb.com/series/{sid}/episodes"
+                         f"?page={page}", hdr)
+        for ep in data.get("data") or []:
+            nm = ep.get("episodeName")
+            if nm:
+                names.append(nm)
+        if not (data.get("links") or {}).get("next"):
+            break
+    return names
+
+
+def verify_episode_titles(filenames, series_title, api_key, token,
+                          tvdb_key=None, cancel=None):
+    """Cross-check proposed episodes against every available episode-list
+    source. Returns (verdict, source): True as soon as ANY source's episode
+    list matches the filenames; False when at least one source HAD data and
+    none matched; None when no source had data. Extra sources reduce both
+    false accepts (TMDB-exists-but-wrong-show) and false REJECTS (right
+    show, sparse TMDB episode data)."""
+    verdict, via = None, ""
+    # the alt sources return FULL episode lists (hundreds of titles), so a
+    # single 2-word fluke match must not confirm a wrong series: multi-file
+    # folders need two independent filename<->episode hits
+    min_hits = 1 if len(filenames) < 2 else 2
+    for name, titles in (
+            ("tmdb", lambda: tmdb_episode_titles(series_title, api_key,
+                                                 token, cancel=cancel)),
+            ("tvmaze", lambda: tvmaze_episode_titles(series_title,
+                                                     cancel=cancel)),
+            ("tvdb", lambda: tvdb_episode_titles(series_title, tvdb_key,
+                                                 cancel=cancel))):
+        if name == "tvdb" and not tvdb_key:
+            continue
+        v = episode_titles_match(filenames, titles(), min_hits=min_hits)
+        if v is True:
+            return True, name
+        if v is False and verdict is None:
+            verdict, via = False, name
+    return verdict, via
+
+
+def omdb_verify(crack, omdb_key, file_guess=None):
+    """OMDb (IMDb data) as a SECOND movie database when TMDB can't confirm
+    the LLM's guess. Applies the same three gates as verify_with_tmdb:
+    title similarity, year within 1, and the filename anchor that blocks
+    self-consistent hallucinations. Returns verify_with_tmdb's shape or
+    None."""
+    if not omdb_key or llm_reidentify is None:
+        return None
+    title, year = crack.get("title"), crack.get("year")
+    if not title:
+        return None
+    anchor = file_guess or title
+    queries = [(title, year), (title, None)] if year else [(title, None)]
+    for q, qy in queries:
+        url = ("https://www.omdbapi.com/?apikey="
+               + urllib.parse.quote(omdb_key)
+               + "&t=" + urllib.parse.quote(_fold(q))
+               + (f"&y={qy}" if qy else ""))
+        data = _get_json(url)
+        if (data.get("Response") or "").lower() != "true":
+            continue
+        if (data.get("Type") or "movie") not in ("movie", "series"):
+            continue
+        canon = data.get("Title") or ""
+        hy = (data.get("Year") or "")[:4]
+        if not canon or not hy.isdigit():
+            continue
+        if not _sim_accept(title, canon):
+            continue
+        if year and abs(int(hy) - year) > 1:
+            continue
+        if not llm_reidentify._filename_match(anchor, canon):
+            continue
+        genres = [g.strip() for g in (data.get("Genre") or "").split(",")
+                  if g.strip() and g.strip() != "N/A"]
+        return {"kind": "tv" if data.get("Type") == "series" else "movie",
+                "title": canon, "year": int(hy),
+                "genre": genres[0] if genres else "Unclassified",
+                "subgenre": genres[1] if len(genres) > 1 else "General"}
+    return None
+
+
+def unidentified_scope(path=None):
+    """What the supervisor would work on: how many unidentified files, and
+    the deepest folder that contains them all (so the UI can show a concrete
+    target instead of leaving the user guessing). `path` narrows the set."""
+    with LOCK:
+        recs = [r for r in STATE["recs"] if r.get("kind") == "unknown"
+                and not r.get("is_disc")]
+        scanned = STATE.get("scannedRoot")
+    if path:
+        recs = [r for r in recs if is_within(r["path"], path)]
+    paths = [r["path"] for r in recs]
+    root = ""
+    if paths:
+        try:
+            root = os.path.commonpath([os.path.dirname(p) for p in paths])
+        except ValueError:              # different drives
+            root = ""
+    folders = sorted({os.path.dirname(p) for p in paths})
+    return {"count": len(paths), "root": root or (scanned or ""),
+            "scannedRoot": scanned or "", "folders": len(folders),
+            "samples": [os.path.basename(p) for p in paths[:5]]}
+
+
+def set_tvsup(**kw):
+    with LOCK:
+        STATE["tvsupervise"].update(kw)
+
+
+def tvsupervise_status():
+    with LOCK:
+        d = dict(STATE["tvsupervise"])
+        d["log"] = list(d["log"][-200:])
+        return d
+
+
+def _tvsup_log(msg):
+    with LOCK:
+        STATE["tvsupervise"]["log"].append(msg)
+
+
+def run_tv_supervise(min_confidence=None, model=None, path=None):
+    """LLM supervisor for EVERYTHING left unidentified (TV and films).
+
+    Groups them by folder (shared context is what makes a series guess
+    possible), asks the local model to name the series and map each file to
+    a season/episode, then VERIFIES the proposed series against TMDB and
+    adopts only TMDB's canonical title. Files whose series can't be
+    confirmed stay unidentified. Updates the DB + in-memory recs; it never
+    touches a file — organizing still goes through plan -> preview -> undo.
+    """
+    try:
+        if llm_tv is None:
+            set_tvsup(state="error", error="LLM assist unavailable.")
+            return
+        cfg = load_config()
+        api_key = (cfg.get("tmdbKey") or "").strip()
+        token = (cfg.get("tmdbToken") or "").strip()
+        if not (api_key or token):
+            set_tvsup(state="error",
+                      error="A TMDB key or read token is required — the LLM's "
+                            "series guess is only adopted after TMDB confirms it.")
+            return
+        thr = llm_tv.MIN_CONFIDENCE if min_confidence is None             else float(min_confidence)
+        gmaps = {}      # kind -> {genre_id: name}, filled lazily by the verifier
+        with LOCK:
+            recs = [r for r in STATE["recs"] if r.get("kind") == "unknown"
+                    and not r.get("is_disc")]
+        if path:
+            # scope to one folder (e.g. a previous run's _Unidentified\)
+            path = os.path.abspath(os.path.expanduser(str(path).strip()))
+            recs = [r for r in recs if is_within(r["path"], path)]
+            if not recs:
+                set_tvsup(state="error",
+                          error=f"No unidentified files under {path}")
+                return
+        by_dir = {}
+        for r in recs:
+            by_dir.setdefault(os.path.dirname(r["path"]), []).append(r)
+        folders = sorted(by_dir)
+        scope = unidentified_scope(path)
+        set_tvsup(state="running", total=len(folders), processed=0,
+                  identified=0, rejected=0, currentFile="", error=None,
+                  root=scope["root"], log=[])
+        identified = rejected = 0
+        for i, d in enumerate(folders):
+            if TVSUP_CANCEL.is_set():
+                set_tvsup(state="cancelled", processed=i)
+                return
+            members = by_dir[d]
+            folder = os.path.basename(d) or d
+            set_tvsup(processed=i, currentFile=folder)
+            names = [m["name"] for m in members]
+            try:
+                out = llm_tv.supervise_folder(folder, names, model=model)
+            except Exception as e:
+                out = None
+                _tvsup_log(f"ERROR {folder}: {type(e).__name__}: {e}")
+            if not out or out["confidence"] < thr:
+                rejected += len(members)
+                set_tvsup(rejected=rejected)
+                _tvsup_log(f"no answer: {folder}")
+                continue
+
+            hits = 0
+            if out["kind"] == "movie":
+                # Films: reuse the movie verifier's three gates (TMDB title
+                # similarity, year within 1, and a FILENAME anchor that stops
+                # self-consistent hallucinations). TMDB supplies the title.
+                for m in members:
+                    if TVSUP_CANCEL.is_set():
+                        break
+                    proposed = out["movies"].get(m["name"])
+                    if not proposed:
+                        continue
+                    crack = {"title": proposed[0], "year": proposed[1],
+                             "kind": "movie", "confidence": out["confidence"]}
+                    try:
+                        v = llm_reidentify.verify_with_tmdb(
+                            crack, api_key, _resolve_fetcher(None, token),
+                            gmaps, file_guess=m.get("guess_title") or m["name"])
+                        vsrc = "llm+tmdb"
+                    except Exception as e:
+                        v = None
+                        vsrc = ""
+                        _tvsup_log(f"ERROR verify {m['name']}: "
+                                   f"{type(e).__name__}: {e}")
+                    if not v and cfg.get("omdbKey"):
+                        # second database: a real film TMDB doesn't know
+                        # (or titles it too differently) can still be
+                        # confirmed by OMDb/IMDb under the same gates
+                        v = omdb_verify(crack, cfg.get("omdbKey"),
+                                        file_guess=m.get("guess_title")
+                                        or m["name"])
+                        if v and v.get("kind") != "movie":
+                            # OMDb matched a SERIES — this branch writes
+                            # movie records (no season/episode), so a TV
+                            # hit must not be adopted here
+                            _tvsup_log(f"{m['name']}: OMDb matched a TV "
+                                       "series — not adopted as a film")
+                            v = None
+                        vsrc = "llm+omdb"
+                        if v:
+                            _tvsup_log(f"{m['name']}: confirmed by OMDb "
+                                       "(TMDB had no match)")
+                    if not v:
+                        continue
+                    m["kind"] = "movie"
+                    m["title"] = v.get("title")
+                    m["year"] = v.get("year")
+                    m["genre"] = v.get("genre") or m.get("genre")
+                    m["subgenre"] = v.get("subgenre") or m.get("subgenre")
+                    m["genre_source"] = vsrc
+                    m["tags"] = (m.get("tags") or []) + ["llm-movie"]
+                    hits += 1
+                if hits:
+                    _tvsup_log(f"{folder} -> {hits}/{len(members)} film(s) "
+                               "confirmed by TMDB")
+                else:
+                    _tvsup_log(f"TMDB confirmed no films in {folder}")
+            else:
+                # TV: series must exist on TMDB *and* the episode titles in
+                # the filenames must appear in that series' episode list.
+                title, year, genre, subgenre, source = identify_tv(
+                    out["series"], None, api_key, token, cancel=TVSUP_CANCEL)
+                if not title:
+                    rejected += len(members)
+                    set_tvsup(rejected=rejected)
+                    _tvsup_log(f"TMDB rejected \"{out['series']}\" for {folder}")
+                    continue
+                verdict, via = verify_episode_titles(
+                    names, title, api_key, token,
+                    tvdb_key=cfg.get("tvdbKey"), cancel=TVSUP_CANCEL)
+                if verdict is False:
+                    rejected += len(members)
+                    set_tvsup(rejected=rejected)
+                    _tvsup_log(f"episode titles don't match \"{title}\" "
+                               f"for {folder} ({via}) — not adopted")
+                    continue
+                if verdict is None:
+                    _tvsup_log(f"note: could not cross-check episode titles "
+                               f"for \"{title}\" ({folder})")
+                elif via != "tmdb":
+                    _tvsup_log(f"episode titles confirmed by {via} "
+                               f"for \"{title}\"")
+                for m in members:
+                    se, ep = out["episodes"].get(m["name"], (None, None))
+                    if ep is None:
+                        ep = llm_tv.fallback_episode(m["name"])
+                        se = se or out.get("season") or 1
+                    if ep is None:
+                        continue
+                    m["kind"] = "tv"
+                    m["title"] = title
+                    m["season"] = se if se is not None else 1
+                    m["episode"] = ep
+                    m["episodes"] = [ep]
+                    m["genre"] = genre or m.get("genre")
+                    m["subgenre"] = subgenre or m.get("subgenre")
+                    m["genre_source"] = source or "llm+tmdb"
+                    m["tags"] = (m.get("tags") or []) + ["llm-tv"]
+                    hits += 1
+                _tvsup_log(f"{folder} -> {title} "
+                           f"({hits}/{len(members)} episodes)")
+
+            identified += hits
+            rejected += len(members) - hits
+            set_tvsup(identified=identified, rejected=rejected)
+        # regroup FIRST: files the supervisor just identified must join
+        # dupe groups now, or they escape best-copy selection until the
+        # next full rescan. Then persist recs + fresh groups together, and
+        # refresh the audit so its group ids match the new numbering.
+        groups = _regroup_recs()
+        try:
+            with LOCK:
+                all_recs = list(STATE["recs"])
+            db_replace_recs(all_recs, groups,
+                            datetime.now().isoformat(sep=" "))
+        except Exception as e:
+            _tvsup_log(f"WARN db write failed: {type(e).__name__}: {e}")
+        audit_dupe_groups()
+        set_tvsup(state="done", processed=len(folders), currentFile="",
+                  identified=identified, rejected=rejected)
+    except Exception as e:
+        set_tvsup(state="error", error=f"{type(e).__name__}: {e}")
+
+
+def start_tv_supervise(min_confidence=None, model=None, path=None):
+    if llm_tv is None:
+        return False, "LLM assist unavailable."
+    with LOCK:
+        for k in ("scan", "execute", "tvsupervise", "pipeline"):
+            if STATE[k]["state"] == "running":
+                return False, f"A {k} is already running."
+    TVSUP_CANCEL.clear()
+    threading.Thread(target=run_tv_supervise,
+                     kwargs={"min_confidence": min_confidence,
+                             "model": model, "path": path},
+                     daemon=True).start()
+    return True, None
 
 
 def start_scan(root, max_files, hash_enabled):
@@ -1203,6 +1996,243 @@ def cancel_scan():
     if not running:
         return False
     SCAN_CANCEL.set()
+    return True
+
+
+# =================================================================== pipeline
+# One Scan click runs the whole unattended part of the flow:
+#   phase 1  scan + parse + TMDB identify + grouping   (run_scan)
+#   phase 2  AI supervisor corrects the Unidentified   (run_tv_supervise)
+#   phase 3  dupe regroup + best-copy quality audit    (audit_dupe_groups)
+# then it STOPS. Building the plan (structure, exclusions) and executing it
+# stay user-triggered — the pipeline never moves a file.
+
+def set_pipe(**kw):
+    with LOCK:
+        STATE["pipeline"].update(kw)
+
+
+def _pipe_phase(name, state, detail=""):
+    with LOCK:
+        for ph in STATE["pipeline"]["phases"]:
+            if ph["name"] == name:
+                ph["state"] = state
+                if detail:
+                    ph["detail"] = detail
+        if state == "running":
+            STATE["pipeline"]["phase"] = name
+
+
+def pipeline_status():
+    """Composite status for the UI stepper: the pipeline's phase list plus
+    the live sub-statuses it is built from (poll one endpoint, not three)."""
+    with LOCK:
+        d = dict(STATE["pipeline"])
+        d["phases"] = [dict(p) for p in d["phases"]]
+        audit = STATE["dupeAudit"]
+    d["scan"] = scan_status()
+    d["supervise"] = tvsupervise_status()
+    d["audit"] = ({"groups": audit["groups"], "flagged": len(audit["flagged"]),
+                   "clean": audit["clean"]} if audit else None)
+    return d
+
+
+def _regroup_recs():
+    """Recompute dupe groups from the CURRENT recs and swap them into
+    STATE. Returns the new groups dict."""
+    with LOCK:
+        groupable = [r for r in STATE["recs"]
+                     if r["kind"] in ("movie", "tv")
+                     and not r.get("is_sample")]
+    groups = _group_recs(groupable)
+    with LOCK:
+        STATE["groups"] = groups
+    return groups
+
+
+def dupe_rank_key(r, disc_policy="keep"):
+    """THE best-copy ordering (first = keeper): playable beats disc rip
+    under discPolicy=quarantine, then quality score, then size. compute_plan
+    and the phase-3 audit must rank identically or the audit lies."""
+    return (1 if (disc_policy == "quarantine" and r.get("is_disc")) else 0,
+            -(r.get("quality_score") or 0),
+            -(r.get("size") or 0), r["path"])
+
+
+def audit_dupe_groups(disc_policy="keep"):
+    """Phase-3 supervisor: deterministic audit of every dupe group's keeper
+    choice. Never moves anything — it verifies each decision has a real
+    quality signal behind it and flags the groups where the pick is
+    effectively a coin toss (or worth a human look), so the user reviews a
+    handful of groups instead of trusting hundreds blind."""
+    with LOCK:
+        recs = [dict(r) for r in STATE["recs"]]
+        groups = dict(STATE["groups"])
+    members = {}
+    for r in recs:
+        gid = groups.get(r["path"])
+        if gid:
+            members.setdefault(gid, []).append(r)
+    flagged = []
+    for gid, mems in sorted(members.items()):
+        ranked = sorted(mems, key=lambda m: dupe_rank_key(m, disc_policy))
+        keeper, losers = ranked[0], ranked[1:]
+        if not losers:
+            continue
+        flags = []
+        kq = keeper.get("quality_score") or 0
+        lq0 = losers[0].get("quality_score") or 0
+        # scores under 1000 mean NO resolution tag anywhere in the name
+        # (RES_SCORE starts at 1000; the parser's base is 500) — the
+        # "best copy" was effectively picked by file size alone
+        if kq < 1000 and all((l.get("quality_score") or 0) < 1000
+                             for l in losers):
+            flags.append("no-quality-signal")
+        elif kq == lq0:
+            szk, szl = keeper.get("size") or 0, losers[0].get("size") or 0
+            if szl and abs(szk - szl) <= 0.1 * max(szk, szl):
+                flags.append("quality-tie")     # same score, ~same size
+        if keeper.get("is_disc") and any(not l.get("is_disc")
+                                         for l in losers):
+            flags.append("keeper-is-disc-rip")  # a playable copy loses
+        big = max((l.get("size") or 0) for l in losers)
+        if kq > lq0 and big and (keeper.get("size") or 0) * 2 < big:
+            flags.append("size-inversion")      # name tags may overstate
+        if flags:
+            flagged.append({
+                "groupId": gid, "flags": flags,
+                "title": keeper.get("title") or keeper.get("name"),
+                "keeper": keeper["path"],
+                "files": [{"path": m["path"], "name": m["name"],
+                           "quality": m.get("quality_score") or 0,
+                           "size": m.get("size") or 0,
+                           "disc": bool(m.get("is_disc")),
+                           "keep": m["path"] == keeper["path"]}
+                          for m in ranked]})
+    audit = {"checkedAt": datetime.now().isoformat(sep=" "),
+             "groups": len(members), "flagged": flagged,
+             "clean": len(members) - len(flagged),
+             "discPolicy": disc_policy}
+    with LOCK:
+        STATE["dupeAudit"] = audit
+    try:
+        set_meta({"dupe_audit": json.dumps(audit)})
+    except Exception:
+        pass
+    return audit
+
+
+def run_pipeline(root, max_files, hash_enabled, supervise=True,
+                 model=None, min_confidence=None, disc_policy="keep"):
+    try:
+        _pipe_phase("scan", "running")
+        run_scan(root, max_files, hash_enabled)
+        st = scan_status()
+        if st["state"] != "done":
+            _pipe_phase("scan", st["state"])
+            set_pipe(state=st["state"], phase="", error=st.get("error"))
+            return
+        with LOCK:
+            total = len(STATE["recs"])
+            unident = sum(1 for r in STATE["recs"]
+                          if r.get("kind") == "unknown"
+                          and not r.get("is_disc"))
+        _pipe_phase("scan", "done",
+                    f"{total} files, {unident} unidentified")
+
+        cfg = load_config()
+        has_tmdb = bool((cfg.get("tmdbKey") or "").strip()
+                        or (cfg.get("tmdbToken") or "").strip())
+        llm_ok = False
+        if supervise and unident and llm_tv is not None and has_tmdb \
+                and llm_assist is not None:
+            try:
+                llm_ok = llm_assist.available()
+            except Exception:
+                llm_ok = False
+        if llm_ok:
+            _pipe_phase("supervise", "running")
+            run_tv_supervise(min_confidence=min_confidence, model=model)
+            sup = tvsupervise_status()
+            if sup["state"] == "cancelled" or TVSUP_CANCEL.is_set():
+                _pipe_phase("supervise", "cancelled")
+                set_pipe(state="cancelled", phase="")
+                return
+            if sup["state"] == "error":
+                # a supervisor failure shouldn't strand the chain — note it
+                # and still audit what the scan DID identify
+                _pipe_phase("supervise", "error", sup.get("error") or "")
+            else:
+                _pipe_phase("supervise", "done",
+                            f"{sup.get('identified', 0)} identified, "
+                            f"{sup.get('rejected', 0)} left for review")
+        else:
+            why = ("no unidentified files" if not unident else
+                   "disabled" if not supervise else
+                   "LLM assist unavailable" if llm_tv is None
+                   or llm_assist is None else
+                   "needs a TMDB key" if not has_tmdb else
+                   "local model not reachable")
+            _pipe_phase("supervise", "skipped", why)
+
+        if SCAN_CANCEL.is_set() or TVSUP_CANCEL.is_set():
+            _pipe_phase("duplicates", "cancelled")
+            set_pipe(state="cancelled", phase="")
+            return
+        _pipe_phase("duplicates", "running")
+        _regroup_recs()
+        audit = audit_dupe_groups(disc_policy)
+        try:
+            with LOCK:
+                all_recs = list(STATE["recs"])
+                groups = dict(STATE["groups"])
+            db_replace_recs(all_recs, groups,
+                            datetime.now().isoformat(sep=" "))
+        except Exception:
+            pass
+        _pipe_phase("duplicates", "done",
+                    f"{audit['groups']} groups checked, "
+                    f"{len(audit['flagged'])} flagged for review")
+        set_pipe(state="done", phase="")
+    except Exception as e:
+        set_pipe(state="error", phase="", error=f"{type(e).__name__}: {e}")
+
+
+def start_pipeline(root, max_files, hash_enabled, supervise=True,
+                   model=None, min_confidence=None, disc_policy="keep"):
+    with LOCK:
+        for k in ("scan", "execute", "tvsupervise", "pipeline"):
+            if STATE[k]["state"] == "running":
+                return False, f"A {k} is already running."
+        STATE["scan"] = {"state": "running", "total": 0, "processed": 0,
+                         "currentFile": "", "error": None}
+        STATE["partialScan"] = False
+        STATE["pipeline"] = {
+            "state": "running", "phase": "scan", "error": None,
+            "phases": [
+                {"name": "scan", "state": "running", "detail": ""},
+                {"name": "supervise", "state": "pending", "detail": ""},
+                {"name": "duplicates", "state": "pending", "detail": ""}]}
+    SCAN_CANCEL.clear()
+    TVSUP_CANCEL.clear()
+    threading.Thread(target=run_pipeline,
+                     args=(root, max_files, hash_enabled),
+                     kwargs={"supervise": supervise, "model": model,
+                             "min_confidence": min_confidence,
+                             "disc_policy": disc_policy},
+                     daemon=True).start()
+    return True, None
+
+
+def cancel_pipeline():
+    with LOCK:
+        running = (STATE["pipeline"]["state"] == "running"
+                   or STATE["scan"]["state"] == "running"
+                   or STATE["tvsupervise"]["state"] == "running")
+    if not running:
+        return False
+    SCAN_CANCEL.set()
+    TVSUP_CANCEL.set()
     return True
 
 
@@ -1241,14 +2271,25 @@ def restore_state():
                "md5": row["md5"], "genre": row["genre"],
                "subgenre": row["subgenre"], "genre_source": row["genre_source"],
                "error": row["error"], "companions": []}
+        for t in rec["tags"]:
+            if isinstance(t, str) and t.startswith("disc:"):
+                rec["is_disc"] = True
+                rec["disc_format"] = t.split(":", 1)[1]
+                break
         recs.append(rec)
         if row["dupe_group"]:
             groups[row["path"]] = row["dupe_group"]
+    audit = None
+    try:
+        audit = json.loads(meta.get("dupe_audit") or "null")
+    except Exception:
+        audit = None
     with LOCK:
         STATE["recs"] = recs
         STATE["groups"] = groups
         STATE["scannedRoot"] = meta.get("last_scan_root")
         STATE["partialScan"] = meta.get("last_scan_partial") == "1"
+        STATE["dupeAudit"] = audit
         STATE["scan"] = {"state": "done", "total": len(recs),
                          "processed": len(recs), "currentFile": "", "error": None}
     return True
@@ -1260,6 +2301,7 @@ def build_results():
         groups = dict(STATE["groups"])
         root = STATE["scannedRoot"]
         partial = STATE["partialScan"]
+        dupe_audit = STATE.get("dupeAudit")
     by_kind = Counter(r["kind"] for r in recs)
     genres = Counter(r.get("genre") for r in recs
                      if r["kind"] in ("movie", "tv") and r.get("genre"))
@@ -1291,6 +2333,7 @@ def build_results():
         "samples": sum(1 for r in recs if r.get("is_sample")),
         "clutter": by_kind.get("clutter", 0),
         "unidentified": by_kind.get("unknown", 0),
+        "dupeAudit": dupe_audit,
         "hasTmdbKey": bool((load_config().get("tmdbKey") or "")
                            or (load_config().get("tmdbToken") or "")),
         "recs": [{k: r.get(k) for k in
@@ -1311,7 +2354,8 @@ def movie_dest(rec, target_root, split=False, year_folder=True,
     Movies\\Title (Year)\\Title (Year).ext (no genre levels). layout="genre"
     keeps the Genre\\Sub-genre tree; there, split=True roots it at Movies\\
     and year_folder=False drops the extra YYYY level."""
-    folder = f"{sanitize_component(rec['title'])} ({rec['year']})"
+    folder = (f"{sanitize_component(strip_index_prefix(rec['title']))}"
+              f" ({rec['year']})")
     name = folder + rec["ext"]
     if layout == "plex":
         return os.path.join(target_root, "Movies", folder, name)
@@ -1336,7 +2380,7 @@ def tv_dest(rec, target_root, split=False, layout="genre"):
     appear in TV paths (a series spans years; episodes must not scatter
     across year folders). Multi-episode tags keep their full run (S01E01E02).
     Season packs keep the original filename."""
-    t = sanitize_component(rec["title"])
+    t = sanitize_component(strip_index_prefix(rec["title"]))
     season = rec["season"]
     season_dir = "Specials" if season == 0 else f"Season {season:02d}"
     if layout == "plex":
@@ -1354,9 +2398,31 @@ def tv_dest(rec, target_root, split=False, layout="genre"):
     return os.path.join(*(base + [ep]))
 
 
+def _rel_dir(path, scanned_root):
+    """The file's folder relative to the scanned root ("" when it sits at the
+    root). Quarantine buckets keep this sub-path so a reviewed file stays
+    with its original release folder -- that folder is often the only clue to
+    what the file is -- and identically-named files from different folders
+    stop colliding.
+    """
+    try:
+        rel = os.path.relpath(os.path.dirname(os.path.abspath(path)),
+                              os.path.abspath(scanned_root))
+    except ValueError:              # different drive
+        return ""
+    if rel in (".", os.curdir) or rel.startswith(".."):
+        return ""
+    return rel
+
+
 def compute_plan(params):
     ensure_state()
     with LOCK:
+        for k in ("scan", "tvsupervise", "pipeline"):
+            if STATE[k]["state"] == "running":
+                return None, (f"A {k} is still running — a plan built now "
+                              "would use half-updated results. Wait for it "
+                              "to finish (or cancel it) first.")
         recs = [dict(r) for r in STATE["recs"]]
         groups = dict(STATE["groups"])
         root = STATE["scannedRoot"]
@@ -1367,10 +2433,50 @@ def compute_plan(params):
         return None, "Invalid action."
     target_root = (params or {}).get("targetRoot") or os.path.join(root, "Organized")
     target_root = os.path.abspath(target_root)
-    if normcase_abs(target_root) == normcase_abs(root):
+    # restructure: re-file an ALREADY-organized library into a different
+    # layout from the indexed identities — no rescan needed (execute/undo
+    # keep DB paths truthful). Sources and destinations share one root, so
+    # the usual target!=scanned-root guard doesn't apply.
+    restructure = bool((params or {}).get("restructure"))
+    if restructure:
+        outside = [r["path"] for r in recs
+                   if not is_within(r["path"], target_root)]
+        if outside:
+            return None, (
+                f"{len(outside)} indexed file(s) live outside {target_root}. "
+                "Restructure re-files a library in place — set the target to "
+                "the folder that already holds them, e.g. "
+                f"{os.path.dirname(outside[0])}")
+    elif normcase_abs(target_root) == normcase_abs(root):
         return None, "Target root must differ from the scanned folder."
+    rel_root = target_root if restructure else root
 
     # best copy per group: quality_score desc, then size desc
+    # discPolicy "keep" (default) files rips into the library (Kodi-friendly);
+    # "quarantine" routes every rip to _DiscRips\ for review/removal (Plex
+    # can't play them) — playable files then always beat rips in dedupe, and
+    # rips that are the ONLY copy of their title are flagged so a film isn't
+    # lost without a remux. Parsed here because best-copy ranking needs it.
+    disc_policy = ((params or {}).get("discPolicy") or "keep").strip().lower()
+    if disc_policy not in ("keep", "quarantine"):
+        return None, "Invalid discPolicy (use 'keep' or 'quarantine')."
+
+    # per-file exclusions from the plan preview: excluded files are left
+    # untouched and drop out of planning BEFORE best-copy ranking, so
+    # excluding a keeper promotes the next-best copy instead of
+    # quarantining every remaining member of its group.
+    exclude = {normcase_abs(p)
+               for p in ((params or {}).get("exclude") or []) if p}
+    excluded = 0
+    if exclude:
+        kept_recs = []
+        for r in recs:
+            if normcase_abs(r["path"]) in exclude:
+                excluded += 1
+            else:
+                kept_recs.append(r)
+        recs = kept_recs
+
     best_of = {}
     gid_members = {}
     for r in recs:
@@ -1378,8 +2484,11 @@ def compute_plan(params):
         if gid:
             gid_members.setdefault(gid, []).append(r)
     for gid, members in gid_members.items():
-        ranked = sorted(members, key=lambda r: (-(r.get("quality_score") or 0),
-                                                -(r.get("size") or 0), r["path"]))
+        # under discPolicy=quarantine a playable file ALWAYS beats a disc rip
+        # (a rip's higher quality score is useless if you can't play it) —
+        # dupe_rank_key is shared with the phase-3 audit
+        ranked = sorted(members,
+                        key=lambda r: dupe_rank_key(r, disc_policy))
         best_of[gid] = ranked[0]["path"]
 
     # What this library is supposed to hold. Anything of the other kind is
@@ -1452,53 +2561,113 @@ def compute_plan(params):
 
     nfo_count = 0
     tvshow_done = set()          # series dirs that already got a tvshow.nfo
+    # cross-root check against other indexed roots (the main library):
+    # owned copies route to _AlreadyInLibrary\; better-quality copies file
+    # normally but are tagged as upgrades in the preview
+    in_library = {} if restructure else find_in_library(recs, root)
     entries = []
     counts = {"dupe": 0, "sample": 0, "clutter": 0, "unidentified": 0,
-              "crossMovie": 0, "crossTv": 0}
+              "crossMovie": 0, "crossTv": 0, "inLibrary": 0, "upgrade": 0,
+              "disc": 0, "discQuarantine": 0, "discOnlyCopy": 0}
     for r in sorted(recs, key=lambda x: x["path"]):
         gid = groups.get(r["path"])
+        # quarantine buckets keep the file's original sub-folder
+        rel_dir = _rel_dir(r["path"], rel_root)
         entry = {"from": r["path"], "kind": r["kind"],
                  "isDupe": False, "groupId": gid, "reason": None,
                  "companions": [{"from": c["from"], "to": None,
                                  "suffix": c.get("suffix"),
                                  "keepName": bool(c.get("keepName"))}
                                 for c in (r.get("companions") or [])]}
-        if r["kind"] == "clutter":
-            entry.update(to=os.path.join(target_root, "_Clutter", r["name"]),
+        if disc_policy == "quarantine" and r.get("is_disc"):
+            # one review bucket for every rip; flag rips that are the ONLY
+            # copy of their title (no playable twin in this scan, nothing in
+            # the library index) — deleting those loses the film, remux first
+            gid_m = gid_members.get(gid, []) if gid else []
+            has_playable = any(not m.get("is_disc") for m in gid_m
+                               if m["path"] != r["path"]) \
+                or r["path"] in in_library
+            entry.update(to=os.path.join(target_root, "_DiscRips",
+                                         rel_dir, r["name"]),
+                         reason="disc-rip")
+            if not has_playable:
+                entry["onlyCopy"] = True
+                counts["discOnlyCopy"] += 1
+            counts["discQuarantine"] += 1
+        elif r["kind"] == "clutter":
+            entry.update(to=os.path.join(target_root, "_Clutter",
+                                         rel_dir, r["name"]),
                          reason="clutter")
             counts["clutter"] += 1
         elif r.get("is_sample"):
-            entry.update(to=os.path.join(target_root, "_Samples", r["name"]),
+            entry.update(to=os.path.join(target_root, "_Samples",
+                                         rel_dir, r["name"]),
                          reason="sample")
             counts["sample"] += 1
         elif gid and r["path"] != best_of.get(gid):
-            entry.update(to=os.path.join(target_root, "_Duplicates", gid, r["name"]),
+            entry.update(to=os.path.join(target_root, "_Duplicates", gid,
+                                         rel_dir, r["name"]),
                          isDupe=True, reason="dupe")
             counts["dupe"] += 1
+        elif r["path"] in in_library and in_library[r["path"]][1] == "dupe":
+            # same bytes, or same movie/episode at equal-or-lower quality,
+            # already lives in another indexed root (the main library)
+            entry.update(to=os.path.join(target_root, "_AlreadyInLibrary",
+                                         rel_dir, r["name"]),
+                         reason="in-library",
+                         libraryCopy=in_library[r["path"]][0])
+            counts["inLibrary"] += 1
         elif expect_kind == "tv" and r["kind"] == "movie":
             # A movie turned up in a TV library: don't file it into the TV
             # tree -- quarantine it so it can be moved to the real movie
             # library (same idea as _Duplicates / _Unidentified).
-            entry.update(to=os.path.join(target_root, "_Movies", r["name"]),
+            entry.update(to=os.path.join(target_root, "_Movies",
+                                         rel_dir, r["name"]),
                          reason="cross-movie")
             counts["crossMovie"] += 1
         elif expect_kind == "movie" and r["kind"] == "tv":
-            entry.update(to=os.path.join(target_root, "_TV", r["name"]),
+            entry.update(to=os.path.join(target_root, "_TV",
+                                         rel_dir, r["name"]),
                          reason="cross-tv")
             counts["crossTv"] += 1
         elif r["kind"] == "movie":
-            entry["to"] = movie_dest(r, target_root, split=split_by_kind,
-                                     year_folder=movie_year_folder,
-                                     layout=layout)
+            dest = movie_dest(r, target_root, split=split_by_kind,
+                              year_folder=movie_year_folder, layout=layout)
+            if r.get("is_disc") and not r["ext"]:
+                # folder rip: move the unit as a directory. A unit named
+                # VIDEO_TS/BDMV (rip at scan root) keeps that name inside
+                # the movie folder; otherwise the unit folder BECOMES the
+                # movie folder ("Title (Year)\VIDEO_TS\..." either way).
+                movie_dir = os.path.dirname(dest)
+                if r["name"].lower() in DISC_DIR_NAMES:
+                    entry["to"] = os.path.join(movie_dir, r["name"])
+                else:
+                    entry["to"] = movie_dir
+            else:
+                entry["to"] = dest
         elif r["kind"] == "tv":
             entry["to"] = tv_dest(r, target_root, split=split_by_kind,
                                   layout=layout)
         else:
-            entry.update(to=os.path.join(target_root, "_Unidentified", r["name"]),
+            entry.update(to=os.path.join(target_root, "_Unidentified",
+                                         rel_dir, r["name"]),
                          reason="unidentified")
             counts["unidentified"] += 1
+        # better copy of something already owned: file it normally, but tag
+        # it so the preview shows it's an upgrade (the old copy stays put —
+        # a later library scan's dedupe will catch the loser)
+        if entry["reason"] is None and r["path"] in in_library \
+                and in_library[r["path"]][1] == "upgrade":
+            entry["upgrade"] = True
+            entry["libraryCopy"] = in_library[r["path"]][0]
+            counts["upgrade"] += 1
+        if r.get("is_disc"):
+            entry["disc"] = r.get("disc_format")
+            entry["isDir"] = not r["ext"]
+            counts["disc"] += 1
         # generated NFO sidecars for identified, normally-filed movies/eps
-        if write_nfo and entry["reason"] is None \
+        # (skipped for disc units — their metadata lives inside the rip)
+        if write_nfo and entry["reason"] is None and not r.get("is_disc") \
                 and r["kind"] in ("movie", "tv") and r.get("title"):
             has_nfo = any(str(c.get("from") or "").lower().endswith(".nfo")
                           for c in entry["companions"])
@@ -1541,8 +2710,20 @@ def compute_plan(params):
                 comp["to"] = os.path.join(dest_dir, stem + sfx)
         entries.append(entry)
 
+    unchanged = 0
+    if restructure:
+        kept = []
+        for e in entries:
+            if normcase_abs(e["from"]) == normcase_abs(e["to"]):
+                unchanged += 1
+            else:
+                kept.append(e)
+        entries = kept
+
     folders = {os.path.dirname(e["to"]) for e in entries}
     stats = {"totalFiles": len(entries),
+             "excludedFiles": excluded,
+             "unchangedFiles": unchanged, "restructure": restructure,
              "dupeFiles": counts["dupe"], "sampleFiles": counts["sample"],
              "clutterFiles": counts["clutter"],
              "unidentifiedFiles": counts["unidentified"],
@@ -1550,6 +2731,12 @@ def compute_plan(params):
              "crossTvFiles": counts["crossTv"],
              "nfoFiles": nfo_count,
              "writeNfo": write_nfo,
+             "inLibraryFiles": counts["inLibrary"],
+             "upgradeFiles": counts["upgrade"],
+             "discUnits": counts["disc"],
+             "discQuarantined": counts["discQuarantine"],
+             "discOnlyCopy": counts["discOnlyCopy"],
+             "discPolicy": disc_policy,
              "expectKind": expect_kind,
              "splitByKind": split_by_kind,
              "movieYearFolder": movie_year_folder,
@@ -1560,13 +2747,54 @@ def compute_plan(params):
              "scannedRoot": root}
     plan = {"entries": entries, "stats": stats,
             "params": {"action": action, "targetRoot": target_root,
-                       "scannedRoot": root, "expectKind": expect_kind}}
+                       "scannedRoot": target_root if restructure else root,
+                       "expectKind": expect_kind,
+                       "restructure": restructure}}
     with LOCK:
         STATE["plan"] = plan
     return plan, None
 
 
 # =================================================================== execute
+
+def _preflight_roots(scanned_root, target_root):
+    """Friendly up-front checks so a disconnected/mistyped drive fails with a
+    clear message instead of a mid-run WinError deep in makedirs."""
+    if not os.path.isdir(scanned_root):
+        return (f"Scanned folder is no longer available: {scanned_root} — "
+                "was a drive disconnected? Rescan, then rebuild the plan.")
+    drive = os.path.splitdrive(os.path.abspath(target_root))[0]
+    if drive and not os.path.exists(drive + os.sep):
+        return (f"Target drive {drive}\\ is not available — connect it or "
+                "pick a different target folder, then rebuild the plan.")
+    try:
+        os.makedirs(target_root, exist_ok=True)
+    except OSError as e:
+        return (f"Cannot create the target folder {target_root}: "
+                f"{type(e).__name__}: {e}")
+    return None
+
+
+def _apply_manifest_to_state(manifest):
+    """Mirror an executed move-manifest onto the IN-MEMORY recs so a second
+    plan in the same session (e.g. a restructure right after an organize)
+    sees where files actually are — the DB is already updated by
+    db_update_paths, but STATE keeps the pre-move paths otherwise."""
+    moves = {normcase_abs(e["from"]): e["to"] for e in manifest
+             if e.get("action") == "move" and e.get("from") and e.get("to")}
+    if not moves:
+        return
+    with LOCK:
+        for r in STATE["recs"]:
+            dst = moves.get(normcase_abs(r["path"]))
+            if dst:
+                r["path"] = dst
+                r["name"] = os.path.basename(dst)
+        groups = STATE.get("groups") or {}
+        if groups:
+            STATE["groups"] = {moves.get(normcase_abs(p), p): g
+                               for p, g in groups.items()}
+
 
 def run_execute():
     with LOCK:
@@ -1580,6 +2808,10 @@ def run_execute():
     target_root = params["targetRoot"]
     scanned_root = params["scannedRoot"]
     set_exec(total=len(entries), processed=0)
+    err = _preflight_roots(scanned_root, target_root)
+    if err:
+        set_exec(state="error", error=err)
+        return
     manifest = []
     moved = copied = skipped = errors = 0
     cancelled = False
@@ -1599,20 +2831,29 @@ def run_execute():
                     skipped += 1
                     exec_log(f"SKIP (already in place): {src}")
                     continue
-                if not os.path.isfile(src):
+                src_is_dir = os.path.isdir(src)
+                if not os.path.isfile(src) and not src_is_dir:
                     raise FileNotFoundError("source missing")
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 actual = resolve_collision(dst, src)
-                if action == "move":
-                    import shutil as _sh
+                import shutil as _sh
+                if src_is_dir:
+                    # disc-rip unit (VIDEO_TS/BDMV): one atomic tree op
+                    if action == "move":
+                        _sh.move(src, actual)
+                        moved += 1
+                    else:
+                        _sh.copytree(src, actual)
+                        copied += 1
+                elif action == "move":
                     _sh.move(src, actual)
                     moved += 1
                 else:
-                    import shutil as _sh
                     _sh.copy2(src, actual)
                     copied += 1
                 exec_log(f"{action.upper()} {src} -> {actual}")
-                manifest.append({"from": src, "to": actual, "action": action})
+                manifest.append({"from": src, "to": actual, "action": action,
+                                 **({"dir": True} if src_is_dir else {})})
                 for comp in e.get("companions") or []:
                     if comp.get("generate") == "nfo":
                         try:
@@ -1677,6 +2918,7 @@ def run_execute():
         if action == "move":
             try:
                 db_update_paths(manifest, "move")
+                _apply_manifest_to_state(manifest)
             except Exception:
                 pass
         set_exec(state="cancelled" if cancelled else "done",
@@ -1692,6 +2934,12 @@ def start_execute():
     with LOCK:
         if STATE["execute"]["state"] == "running":
             return False, "Execution already running."
+        # the pipeline's supervisor/audit mutate recs+groups+DB — an execute
+        # interleaved with them would replay a plan built from half-updated
+        # state
+        for k in ("scan", "tvsupervise", "pipeline"):
+            if STATE[k]["state"] == "running":
+                return False, f"A {k} is still running — wait for it to finish."
         if not STATE["plan"]:
             return False, "No plan. Build a plan preview first."
         STATE["execute"] = {"state": "running", "total": 0, "processed": 0,
@@ -1723,7 +2971,7 @@ def run_undo(manifest_path):
         src, dst, act = e["from"], e["to"], e.get("action", "move")
         try:
             if act == "move":
-                if not os.path.isfile(dst):
+                if not os.path.exists(dst):
                     skipped += 1
                     continue
                 os.makedirs(os.path.dirname(src), exist_ok=True)
@@ -1731,7 +2979,12 @@ def run_undo(manifest_path):
                 _sh.move(dst, src)
                 restored += 1
             else:
-                if os.path.isfile(dst):
+                if e.get("dir") and os.path.isdir(dst):
+                    # undo of a copied disc-rip unit: remove the copy we made
+                    import shutil as _sh
+                    _sh.rmtree(dst)
+                    deleted += 1
+                elif os.path.isfile(dst):
                     os.remove(dst)
                     deleted += 1
                 else:

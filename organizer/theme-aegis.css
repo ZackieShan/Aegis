@@ -156,3 +156,19 @@ body.theme-aegis ::-webkit-scrollbar-thumb {
   background-clip: padding-box;
 }
 body.theme-aegis ::-webkit-scrollbar-track { background: transparent; }
+
+/* pipeline stepper on the flat Aegis skin */
+body.theme-aegis .pipe-steps .pipe-step {
+  background: var(--panel, #1a1128); color: var(--fg, #eee);
+  border: 1px solid var(--border, #333); border-radius: 6px;
+}
+body.theme-aegis .pipe-steps .pipe-step.running {
+  background: var(--accent, #7c5cff); color: #fff; border-color: transparent;
+}
+body.theme-aegis .pipe-steps .pipe-step.done {
+  background: #1e7d3c; color: #fff; border-color: transparent;
+}
+body.theme-aegis .pipe-steps .pipe-step.error,
+body.theme-aegis .pipe-steps .pipe-step.cancelled {
+  background: #8a2231; color: #fff; border-color: transparent;
+}

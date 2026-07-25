@@ -120,6 +120,11 @@
           <div class="window panel">
             <div class="title-bar"><div class="title-bar-text">Duplicates</div></div>
             <div class="window-body" id="dupBody"></div>
+            <fieldset id="pAuditBox" class="hidden" style="margin:4px">
+              <legend>Duplicate audit</legend>
+              <div id="pAuditSummary" class="hint"></div>
+              <div class="sunken-list" id="pAuditList" style="max-height:140px"></div>
+            </fieldset>
           </div>
           <div class="window panel">
             <div class="title-bar"><div class="title-bar-text">By type</div></div>
@@ -239,7 +244,13 @@
           <div class="title-bar"><div class="title-bar-text">Plan preview</div></div>
           <div class="window-body">
             <div id="planStats" class="plan-stats"></div>
+            <div class="hint">Untick a row to leave that file exactly where
+              it is (excluding a duplicate keeper promotes the next-best copy).</div>
             <div class="sunken-list" id="planList"></div>
+            <div id="pExcludeBar" class="field-row hidden" style="margin-top:4px">
+              <span id="pExcludeText" class="hint"></span>
+              <button id="pBtnReplan">&#8635; Rebuild plan with exclusions</button>
+            </div>
           </div>
         </div>
         <div class="step-nav">
@@ -432,12 +443,15 @@
       </fieldset>
 
       <fieldset id="cScanProgressBox" class="hidden">
-        <legend>Scanning&hellip;</legend>
+        <legend>Analyzing&hellip;</legend>
+        <div id="cPipeSteps" class="pipe-steps"></div>
         <div class="progress"><div class="progress-fill" id="cScanBar"></div></div>
         <div class="progress-text"><span id="cScanText">0 / 0</span><span id="cScanPct"></span></div>
         <div class="mono small ellipsis" id="cScanFile"></div>
         <div class="field-row" style="margin-top:6px">
           <button id="cBtnScanCancel">Cancel</button>
+          <span class="hint">scan &rarr; AI supervisor &rarr; duplicate check run on their own;
+            nothing moves until you build and confirm a plan</span>
         </div>
       </fieldset>
 
@@ -470,6 +484,11 @@
             <div class="window-body" id="cDupBody"></div>
           </div>
         </div>
+        <fieldset id="cAuditBox" class="hidden">
+          <legend>Duplicate audit &mdash; groups worth your eyes</legend>
+          <div id="cAuditSummary" class="hint"></div>
+          <div class="sunken-list" id="cAuditList" style="max-height:180px"></div>
+        </fieldset>
       </div>
 
       <!-- organize -->
@@ -477,7 +496,9 @@
         <legend>Organize</legend>
         <div class="hint" style="margin-bottom:6px">
           Posters, artwork, .nfo and subtitles (incl. <code>.en.srt</code>)
-          travel <b>with</b> their video. Buckets: <code>_Duplicates\</code>
+          travel <b>with</b> their video. Disc rips (<code>.iso</code>,
+          <code>VIDEO_TS\</code>, <code>BDMV\</code>) are one title each and
+          move <b>whole</b> &mdash; never torn apart. Buckets: <code>_Duplicates\</code>
           <code>_Samples\</code> <code>_Clutter\</code>
           <code>_Unidentified\</code> &mdash; best copy per duplicate group
           wins (quality, then size).
@@ -517,10 +538,27 @@
             Plex&nbsp;&amp;&nbsp;Kodi; skipped when a release already ships one;
             undoable)</label>
         </div>
+        <div class="field-row" style="margin-top:6px">
+          <span>Disc rips (<code>.iso</code> / <code>VIDEO_TS</code> / <code>BDMV</code>):</span>
+          <label><input type="radio" name="cDiscPolicy" value="quarantine" checked>
+            Quarantine to <code>_DiscRips\</code> (Plex can&rsquo;t play them)</label>
+          <label><input type="radio" name="cDiscPolicy" value="keep">
+            File into the library (Kodi plays them)</label>
+        </div>
+        <div class="hint" style="margin-top:2px">
+          With quarantine on, playable files always win duplicate groups, and a rip
+          that is the <b>only copy</b> of its title is flagged &mdash; remux it
+          (MakeMKV) before deleting or the film is lost.
+        </div>
         <div class="hint" style="margin-top:2px">
           Picking &ldquo;Movies only&rdquo; or &ldquo;TV only&rdquo; keeps strays out of the
           wrong tree: TV found in a movie library goes to <code>_TV\</code>, and movies
           found in a TV library go to <code>_Movies\</code>, ready to move to their real home.
+        </div>
+        <div class="field-row" style="margin-top:6px">
+          <label><input type="checkbox" id="cRestructure">
+            Re-file in place, no rescan &mdash; the target below already holds
+            this library and you just want a different structure</label>
         </div>
         <div class="field-row-stacked" style="margin-top:6px">
           <label for="cTargetRoot">Target root folder:</label>
@@ -541,7 +579,13 @@
           <div class="title-bar"><div class="title-bar-text">Plan preview</div></div>
           <div class="window-body">
             <div id="cPlanStats" class="plan-stats"></div>
+            <div class="hint">Untick a row to leave that file exactly where it
+              is (excluding a duplicate keeper promotes the next-best copy).</div>
             <div class="sunken-list" id="cPlanList"></div>
+            <div id="cExcludeBar" class="field-row hidden" style="margin-top:4px">
+              <span id="cExcludeText" class="hint"></span>
+              <button id="cBtnReplan">&#8635; Rebuild plan with exclusions</button>
+            </div>
           </div>
         </div>
         <div class="field-row" style="justify-content:flex-end; margin-top:6px">
@@ -685,6 +729,11 @@
             <div class="window-body" id="mDupBody"></div>
           </div>
         </div>
+        <fieldset id="mAuditBox" class="hidden">
+          <legend>Duplicate audit &mdash; groups worth your eyes</legend>
+          <div id="mAuditSummary" class="hint"></div>
+          <div class="sunken-list" id="mAuditList" style="max-height:180px"></div>
+        </fieldset>
       </div>
 
       <!-- organize -->
@@ -721,6 +770,11 @@
           <label><input type="radio" name="mAction" value="move" checked> Move files</label>
           <label><input type="radio" name="mAction" value="copy"> Copy files (safer)</label>
         </div>
+        <div class="field-row" style="margin-top:6px">
+          <label><input type="checkbox" id="mRestructure">
+            Re-file in place, no rescan &mdash; the target below already holds
+            this library and you just want a different structure</label>
+        </div>
         <div class="field-row-stacked" style="margin-top:6px">
           <label for="mTargetRoot">Target root folder:</label>
           <div class="path-row">
@@ -740,7 +794,13 @@
           <div class="title-bar"><div class="title-bar-text">Plan preview</div></div>
           <div class="window-body">
             <div id="mPlanStats" class="plan-stats"></div>
+            <div class="hint">Untick a row to leave that file exactly where
+              it is.</div>
             <div class="sunken-list" id="mPlanList"></div>
+            <div id="mExcludeBar" class="field-row hidden" style="margin-top:4px">
+              <span id="mExcludeText" class="hint"></span>
+              <button id="mBtnReplan">&#8635; Rebuild plan with exclusions</button>
+            </div>
           </div>
         </div>
         <div class="field-row" style="justify-content:flex-end; margin-top:6px">

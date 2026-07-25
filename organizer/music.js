@@ -61,6 +61,8 @@ let mResults = null;       // /api/music/results payload
 let mPlan = null;          // /api/music/plan payload
 let mPollTimer = null;
 let mCleanedCount = 0;     // dupe losers quarantined by a dupes_only run this session
+let mExcluded = new Set();        // source paths unticked in the plan preview
+let mAppliedExclude = new Set();  // exclusions baked into the loaded plan
 
 function mStopPoll() { if (mPollTimer) { clearInterval(mPollTimer); mPollTimer = null; } }
 function mSetStatus(state, path, count) {
@@ -250,6 +252,7 @@ async function mQuickCleanPlan() {
     targetRoot: $("mTargetRoot").value.trim()
       || (mResults && mResults.scannedRoot) || "",
     action: document.querySelector('input[name="mAction"]:checked').value,
+    ...(mExcluded.size ? { exclude: Array.from(mExcluded) } : {}),
   };
   $("mBtnQuickClean").disabled = true;
   mSetStatus("Computing duplicate-cleanup plan…");
@@ -262,6 +265,7 @@ async function mQuickCleanPlan() {
     return;
   }
   $("mBtnQuickClean").disabled = false;
+  mAppliedExclude = new Set(mExcluded);
   mRenderPlan(mPlan);
   $("mPlan").classList.remove("hidden");
   $("mExecBox").classList.add("hidden");
@@ -276,6 +280,8 @@ const M_PHASE_LABEL = {
   identify: "Identifying albums",
   fingerprint: "Fingerprinting files",
   dedupe: "Deduplicating",
+  supervise: "AI supervisor (verified against MusicBrainz)",
+  audit: "Auditing duplicate quality",
 };
 
 function mFmtEta(sec) {
@@ -330,6 +336,8 @@ $("mBtnScan").addEventListener("click", async () => {
   };
   if (!body.root) { alert("Pick a folder to scan first."); return; }
   $("mBtnScan").disabled = true;
+  mExcluded = new Set();
+  mAppliedExclude = new Set();
   try {
     await post("/api/music/scan", body);
   } catch (e) {
@@ -448,14 +456,19 @@ function mRenderResults(r) {
   if (!gRows.length) gRows.push(["(none found)", 0]);
   mStatRows($("mGenreBody"), gRows);
   const quar = mNum(r.dupesQuarantined) || mCleanedCount;
+  const audit = r.dupeAudit;
   mStatRows($("mDupBody"), [
     ["Duplicate groups", mNum(r.dupeGroups)],
     ["Duplicate files (non-best)", mNum(r.dupeFiles)],
+    ["Best-copy audit", audit
+      ? `${mNum(audit.groups)} checked, ${(audit.flagged || []).length} flagged`
+      : "(not run yet)"],
     ["Upgrades available (better copy exists)", mNum(r.upgradesAvailable)],
     ["Unidentified → _Unidentified\\", mNum(r.unidentified)],
     ...(quar ? [["Duplicates quarantined",
                  quar + " — hidden from identification"]] : []),
   ]);
+  mRenderAudit(r);
   // 'First pass: duplicates' quick-clean panel: only when the scan stopped
   // after the LOCAL phases and there is something to clean.
   let quickShown = false;
@@ -495,6 +508,40 @@ function mRenderResults(r) {
   if (tagBox) tagBox.classList.remove("hidden");
 }
 
+/* Flagged dupe groups from the best-copy audit: the keeper decisions that
+   were effectively coin tosses (or grouped files that may not even be the
+   same recording), surfaced so the user reviews THOSE instead of
+   distrusting every group. */
+const M_AUDIT_FLAG = {
+  "quality-tie": "same quality either way",
+  "no-quality-signal": "codec/bitrate unknown — picked by tags/name",
+  "duration-mismatch": "lengths differ — may be different edits",
+};
+function mRenderAudit(r) {
+  const box = $("mAuditBox");
+  if (!box) return;
+  const a = r.dupeAudit;
+  const fl = (a && a.flagged) || [];
+  if (!a || !a.groups || !fl.length) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  $("mAuditSummary").textContent =
+    `${mNum(a.groups).toLocaleString()} duplicate groups checked — ` +
+    `${fl.length} worth a look (the other ${mNum(a.clean).toLocaleString()} ` +
+    "have a clear best copy)." +
+    (a.reviewGroups ? ` ${a.reviewGroups} fuzzy-match groups are ` +
+      "review-only and never auto-quarantined." : "");
+  $("mAuditList").innerHTML = fl.slice(0, 100).map((g) => {
+    const why = (g.flags || []).map((f) => M_AUDIT_FLAG[f] || f).join("; ");
+    const files = (g.files || []).map((f) =>
+      `<div class="mono small ellipsis">${f.keep ? "&#10003; keep" : "&rarr; _Duplicates"} ` +
+      `${esc(f.name)} <span class="hint">(${f.quality || "?"} q, ${fmtBytes(f.size)}` +
+      `${f.duration ? ", " + Math.round(f.duration) + "s" : ""})</span></div>`)
+      .join("");
+    return `<div class="plan-row"><b>${esc(g.groupId)}</b> ${esc(g.title || "")}` +
+      ` <span class="hint">— ${esc(why)}</span>${files}</div>`;
+  }).join("");
+}
+
 /* ---------------------------------------------------------- plan */
 $("mToPlan").addEventListener("click", async () => {
   const body = {
@@ -503,6 +550,8 @@ $("mToPlan").addEventListener("click", async () => {
     dupeHandling: document.querySelector('input[name="mDupeHandling"]:checked').value,
     discStyle: document.querySelector('input[name="mDiscStyle"]:checked').value,
     layout: (document.querySelector('input[name="mLayout"]:checked') || {}).value || "artist",
+    restructure: !!($("mRestructure") && $("mRestructure").checked),
+    ...(mExcluded.size ? { exclude: Array.from(mExcluded) } : {}),
   };
   $("mToPlan").disabled = true;
   mSetStatus("Computing plan…");
@@ -515,6 +564,7 @@ $("mToPlan").addEventListener("click", async () => {
     return;
   }
   $("mToPlan").disabled = false;
+  mAppliedExclude = new Set(mExcluded);
   mRenderPlan(mPlan);
   $("mPlan").classList.remove("hidden");
   $("mExecBox").classList.add("hidden");
@@ -526,6 +576,7 @@ const M_TAGS = {
   dupe: ["tag", (e) => "DUPE " + (e.groupId || "")],
   va: ["tag tag-va", () => "VA"],
   unidentified: ["tag tag-unidentified", () => "UNIDENTIFIED"],
+  "in-library": ["tag tag-unidentified", () => "IN LIBRARY"],
 };
 
 function mRenderPlan(p) {
@@ -545,7 +596,8 @@ function mRenderPlan(p) {
       (s.companionFiles ? `<b>${s.companionFiles}</b> companions (art/cue/log/lrc/nfo) ride along &middot; ` : "") +
       `<b>${s.foldersToCreate}</b> new folders &middot; ` +
       `<b>${s.dupeFiles}</b> dupes &rarr; <code>_Duplicates\\</code> &middot; ` +
-      `<b>${s.unidentifiedFiles}</b> unidentified`;
+      `<b>${s.unidentifiedFiles}</b> unidentified` +
+      (s.inLibraryFiles ? ` &middot; <b>${s.inLibraryFiles}</b> already in library &rarr; <code>_AlreadyInLibrary\\</code>` : "");
   }
   $("mBtnExecute").innerHTML = s.mode === "dupes_only"
     ? "&#10004; Looks good &mdash; quarantine these duplicates"
@@ -569,16 +621,71 @@ function mRenderPlan(p) {
     }
     const comp = (e.companions && e.companions.length)
       ? ` <span class="hint">+${e.companions.length}</span>` : "";
-    row.innerHTML = `${tagHtml}${esc(e.from)} <b>&rarr;</b> <span class="to">${esc(e.to)}</span>${comp}`;
+    row.innerHTML =
+      `<input type="checkbox" class="mExcl" checked title="untick to leave this file where it is">` +
+      `${tagHtml}${esc(e.from)} <b>&rarr;</b> <span class="to">${esc(e.to)}</span>${comp}`;
+    const excl = row.querySelector && row.querySelector(".mExcl");
+    if (excl) excl.dataset.path = e.from;
     frag.appendChild(row);
   });
   list.appendChild(frag);
+  mUpdateExcludeBar();
 }
+
+/* ------------------------------------------- plan-preview exclusions */
+function mUpdateExcludeBar() {
+  const bar = $("mExcludeBar");
+  if (!bar) return;
+  const pending = [...mExcluded].filter((p) => !mAppliedExclude.has(p)).length
+    + [...mAppliedExclude].filter((p) => !mExcluded.has(p)).length;
+  const n = mExcluded.size;
+  bar.classList.toggle("hidden", !n && !pending);
+  $("mExcludeText").textContent = pending
+    ? `${n} file(s) excluded — rebuild the plan to apply`
+    : n ? `${n} file(s) excluded from this plan` : "";
+  $("mBtnReplan").classList.toggle("hidden", !pending);
+}
+if ($("mPlanList"))
+  $("mPlanList").addEventListener("change", (ev) => {
+    const cb = ev.target;
+    if (!cb.classList || !cb.classList.contains("mExcl")) return;
+    if (cb.checked) mExcluded.delete(cb.dataset.path);
+    else mExcluded.add(cb.dataset.path);
+    mUpdateExcludeBar();
+  });
+if ($("mBtnReplan"))
+  $("mBtnReplan").addEventListener("click", () => {
+    // dupes_only plans rebuild through their own button; the full plan
+    // through mToPlan — pick whichever built the plan on screen
+    if (mPlan && mPlan.stats && mPlan.stats.mode === "dupes_only"
+        && $("mBtnQuickClean")) $("mBtnQuickClean").click();
+    else $("mToPlan").click();
+  });
 
 /* ---------------------------------------------------------- execute */
 $("mBtnExecute").addEventListener("click", async () => {
   if (!mPlan) return;
   const s = mPlan.stats;
+  // Execute replays the SAVED plan — a target changed after it was built
+  // would otherwise be ignored (files land in the old location).
+  if (s.mode !== "dupes_only" && typeof normTargetPath === "function" &&
+      normTargetPath($("mTargetRoot").value) !== normTargetPath(s.targetRoot)) {
+    alert("The target folder changed since this plan was built.\n\n" +
+          "The saved plan still targets:\n  " + s.targetRoot +
+          "\n\nClick “Build plan preview” again to apply your change.");
+    return;
+  }
+  let exclStale = mExcluded.size !== mAppliedExclude.size;
+  if (!exclStale) {
+    for (const p of mExcluded) {
+      if (!mAppliedExclude.has(p)) { exclStale = true; break; }
+    }
+  }
+  if (exclStale) {
+    alert("You changed the excluded files after this plan was built.\n\n" +
+          "Rebuild the plan to apply your exclusions before executing.");
+    return;
+  }
   if (!confirm(`Really ${s.action} ${s.totalFiles} files into\n${s.targetRoot} ?`)) return;
   $("mExecBox").classList.remove("hidden");
   $("mDoneWindow").classList.add("hidden");
@@ -686,6 +793,8 @@ function mRenderDone(r) {
 
 $("mBtnStartOver").addEventListener("click", () => {
   mPlan = null;
+  mExcluded = new Set();
+  mAppliedExclude = new Set();
   $("mPlan").classList.add("hidden");
   $("mExecBox").classList.add("hidden");
   $("mDoneWindow").classList.add("hidden");

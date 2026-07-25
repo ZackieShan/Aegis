@@ -18,6 +18,7 @@ Quarantine, never delete: dupe losers go to _Duplicates\\Gxx and undo
 restores every moved file byte-for-byte.
 """
 import contextlib
+import difflib
 import hashlib
 import json
 import os
@@ -45,6 +46,13 @@ try:
     import music_tagfix
 except Exception:            # mutagen missing -> tag write-back unavailable
     music_tagfix = None
+
+try:
+    import llm_music         # AI supervisor for unidentified clusters
+    import llm_assist
+except Exception:            # LLM assist optional
+    llm_music = None
+    llm_assist = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Runtime DB + undo logs honor ORGANIZER_DATA_DIR (set by Aegis); config with
@@ -103,6 +111,11 @@ STATE = {
     "plan": None,
     "lastUndo": None,
     "partialScan": False,
+    # AI supervisor over unidentified clusters (runs inside the scan chain)
+    "supervise": {"state": "idle", "total": 0, "processed": 0,
+                  "identified": 0, "rejected": 0, "currentFile": "",
+                  "error": None, "log": []},
+    "dupeAudit": None,      # deterministic best-copy audit (survives via meta)
 }
 
 
@@ -121,6 +134,35 @@ def is_within(path, root):
 
 
 _BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+_INDEX_PREFIX = re.compile(
+    r"^\s*(0\d{1,2}|\d{1,3})\s*(?:([-._)\]:]+)\s*|\s+)(?=\S)")
+
+
+def strip_index_prefix(s):
+    """Drop a leading track/disc/episode index from a name meant to become a
+    FOLDER ("01 - Greatest Hits" -> "Greatest Hits", "03. The Wall" ->
+    "The Wall").
+
+    Deliberately conservative: plenty of real titles start with a number, so
+    the digits must LOOK like an index — either zero-padded ("01", "007") or
+    followed by a separator ("01 - ", "03."). A bare "22 Jump Street",
+    "13 Assassins", "12 Monkeys", "300" or "1917" is left alone, and the
+    remainder must still contain a word.
+    """
+    s = str(s or "")
+    m = _INDEX_PREFIX.match(s)
+    if not m:
+        return s
+    digits, sep = m.group(1), m.group(2)
+    zero_padded = len(digits) > 1 and digits[0] == "0"
+    if not (zero_padded or sep):
+        return s                        # bare "22 Jump Street" -> keep
+    rest = s[m.end():].strip()
+    if len(rest) < 3 or not re.search(r"[A-Za-z]{2}", rest):
+        return s                        # "50-50" -> keep
+    return rest
 
 
 def sanitize_component(s):
@@ -422,6 +464,21 @@ CREATE TABLE IF NOT EXISTS mmeta (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+-- Persistent multi-root hash index: every COMPLETED scan refreshes its own
+-- root's rows and leaves other roots alone, so an inbox scan can ask
+-- "do I already own these bytes?" against the main library's last scan.
+CREATE TABLE IF NOT EXISTS library_index (
+  path TEXT PRIMARY KEY,
+  root TEXT,
+  md5 TEXT,
+  payload_md5 TEXT,
+  fingerprint TEXT,
+  size_bytes INTEGER,
+  indexed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_libidx_root ON library_index(root);
+CREATE INDEX IF NOT EXISTS idx_libidx_md5 ON library_index(md5);
+CREATE INDEX IF NOT EXISTS idx_libidx_payload ON library_index(payload_md5);
 """
 
 
@@ -474,6 +531,57 @@ def set_meta(kv):
         for k, v in kv.items():
             con.execute("INSERT OR REPLACE INTO mmeta (key, value)"
                         " VALUES (?, ?)", (k, str(v)))
+
+
+def db_update_library_index(recs, root, scanned_at):
+    """Refresh the persistent hash index for ONE root: replace that root's
+    rows with this scan's, keep every other root's rows untouched."""
+    prefix = normcase_abs(root) + os.sep
+    with _db() as con:
+        for (p,) in con.execute("SELECT path FROM library_index").fetchall():
+            if normcase_abs(p).startswith(prefix) or normcase_abs(p) == normcase_abs(root):
+                con.execute("DELETE FROM library_index WHERE path=?", (p,))
+        for r in recs:
+            con.execute(
+                "INSERT OR REPLACE INTO library_index"
+                " (path, root, md5, payload_md5, fingerprint, size_bytes,"
+                "  indexed_at) VALUES (?,?,?,?,?,?,?)",
+                (r["path"], root, r.get("md5"), r.get("payload_md5"),
+                 r.get("fingerprint"), r.get("size"), scanned_at))
+
+
+def find_in_library(recs, root):
+    """{rec path -> library path} for scanned files whose bytes already live
+    under a DIFFERENT indexed root (md5, tag-stripped payload md5, or exact
+    fingerprint match; the library copy must still exist on disk)."""
+    prefix = normcase_abs(root) + os.sep
+    by_md5, by_payload, by_fp = {}, {}, {}
+    try:
+        with _db() as con:
+            for row in con.execute("SELECT path, md5, payload_md5,"
+                                   " fingerprint FROM library_index"):
+                if normcase_abs(row["path"]).startswith(prefix):
+                    continue
+                if row["md5"]:
+                    by_md5.setdefault(row["md5"], row["path"])
+                if row["payload_md5"]:
+                    by_payload.setdefault(row["payload_md5"], row["path"])
+                if row["fingerprint"]:
+                    by_fp.setdefault(row["fingerprint"], row["path"])
+    except Exception:
+        return {}
+    out = {}
+    checked = {}
+    for r in recs:
+        lib = (by_md5.get(r.get("md5")) or by_payload.get(r.get("payload_md5"))
+               or by_fp.get(r.get("fingerprint")))
+        if not lib:
+            continue
+        if lib not in checked:
+            checked[lib] = os.path.isfile(lib)
+        if checked[lib]:
+            out[r["path"]] = lib
+    return out
 
 
 def db_replace_state(recs, groups, review, releases, scanned_at):
@@ -1245,6 +1353,387 @@ def propagate_dupe_canonicals(recs, groups):
                     m[f] = v
 
 
+# =================================================================== supervise
+# AI supervisor over clusters that identification left behind (untagged rips
+# in run-on release folders). Mirrors the cinema supervisor's contract: the
+# model proposes, MusicBrainz must CONFIRM, and only MusicBrainz's canonical
+# fields are ever written. Runs automatically inside the scan chain; never
+# touches a file.
+
+def set_sup(**kw):
+    with LOCK:
+        STATE["supervise"].update(kw)
+
+
+def _sup_log(msg):
+    with LOCK:
+        STATE["supervise"]["log"] = \
+            (STATE["supervise"]["log"] + [msg])[-200:]
+
+
+def supervise_status():
+    with LOCK:
+        d = dict(STATE["supervise"])
+        d["log"] = list(d["log"][-200:])
+        return d
+
+
+def _sig_words(s):
+    return {w for w in normalize(s or "").split() if len(w) > 3}
+
+
+def _sim_music(a, b):
+    """Reasonable-match gate for adopting a MusicBrainz hit for an LLM
+    guess (the music analog of cinema._sim_accept)."""
+    na, nb = normalize(a), normalize(b)
+    if not na or not nb:
+        return False
+    if na == nb or difflib.SequenceMatcher(None, na, nb).ratio() >= 0.8:
+        return True
+    short, long_ = (na, nb) if len(na) <= len(nb) else (nb, na)
+    return len(short) >= 5 and short in long_
+
+
+def track_titles_match(filenames, mb_tracks, min_hits=2):
+    """True when at least `min_hits` MB track titles also appear in the
+    filenames. This separates "that album exists" from "that album actually
+    has these songs" — the difference between accepting and rejecting a
+    confident hallucination. None when MB has no usable track text."""
+    tsets = [_sig_words(t.get("title")) for t in mb_tracks or []
+             if isinstance(t, dict) and t.get("title")]
+    tsets = [s for s in tsets if s]
+    if not tsets:
+        return None
+    hits = 0
+    for fn in filenames:
+        stem = os.path.splitext(os.path.basename(fn))[0]
+        stem = re.sub(r"^\s*\d{1,3}\s*[-._)\] ]\s*", "", stem)
+        words = _sig_words(stem)
+        if not words:
+            continue
+        for s in tsets:
+            if len(words & s) >= 2 or words <= s or s <= words:
+                hits += 1
+                break
+        if hits >= min_hits:
+            return True
+    return hits >= min_hits
+
+
+def _folder_anchor(folder, names, artist, album):
+    """The MB hit must agree with what's ON DISK (folder/file text), not
+    just with the LLM — blocks self-consistent hallucinations when MB has
+    no track text to cross-check. The ARTIST is the load-bearing anchor:
+    the LLM derives its album guess FROM the folder text it was shown, so
+    a single shared album word ("greatest", "hits") proves nothing —
+    the album side only counts when it matches with 2+ significant words
+    (or its full word set)."""
+    hay = normalize((folder or "") + " " + " ".join(
+        os.path.splitext(os.path.basename(n))[0] for n in names))
+    hw = set(hay.split())
+    aw = _sig_words(artist)
+    if aw and aw & hw:
+        return True
+    bw = _sig_words(album)
+    return bool(bw) and (len(bw & hw) >= 2 or bw <= hw and len(bw) >= 2)
+
+
+def _supervise_candidates(recs):
+    """Unidentified, unquarantined tracks grouped by album cluster."""
+    by_cid = {}
+    for r in recs:
+        if r.get("quarantined"):
+            continue
+        if rec_kind(r) != "unidentified":
+            continue
+        by_cid.setdefault(r.get("cluster_id")
+                          or os.path.dirname(r["path"]), []).append(r)
+    return sorted(by_cid.items(), key=lambda kv: str(kv[0]))
+
+
+def _verify_with_musicbrainz(out, folder, names, cancel):
+    """LLM guess -> MusicBrainz-confirmed release detail, or None.
+    Gates, all required: (1) an MB hit's artist AND album pass the
+    similarity gate against the guess, (2) the hit agrees with what's on
+    disk — its track titles match the filenames, or (when MB carries no
+    usable track text) the folder/file text anchors the artist/album."""
+    if music_remote is None:
+        return None
+    hits = _safe(_remote("mb_search_release"),
+                 out["artist"], out["album"]) or []
+    for hit in hits[:3]:
+        if cancel.is_set():
+            return None
+        if not isinstance(hit, dict):
+            continue
+        mbid = hit.get("mbid") or hit.get("id")
+        if not mbid:
+            continue
+        h_artist = _s(hit.get("artist")) or ""
+        h_title = _s(hit.get("title")) or ""
+        va_guess = normalize(out["artist"]) == normalize(VA_NAME)
+        artist_ok = _sim_music(out["artist"], h_artist) or \
+            (va_guess and (hit.get("is_va")
+                           or normalize(h_artist) == normalize(VA_NAME)))
+        if not (artist_ok and _sim_music(out["album"], h_title)):
+            continue
+        detail = _safe(_remote("mb_get_release"), mbid)
+        if not detail:
+            continue
+        tmatch = track_titles_match(
+            names, detail.get("tracks"),
+            min_hits=1 if len(names) == 1 else 2)
+        if tmatch is False:
+            continue
+        if tmatch is None and not _folder_anchor(folder, names,
+                                                 out["artist"],
+                                                 out["album"]):
+            continue
+        return detail
+    return None
+
+
+def _adopt_release(cid, members, out, detail, releases):
+    """Write the CONFIRMED release: canonical fields come from MusicBrainz;
+    the LLM's per-file map (and leading track numbers) only pick WHICH MB
+    row a file is. Returns the release dict."""
+    rel = {"cluster_id": cid, "mb_release_id": detail.get("mbid"),
+           "mb_release_group_id": detail.get("release_group_mbid"),
+           "albumartist": _s(detail.get("artist")) or out["artist"],
+           "album": _s(detail.get("title")) or out["album"],
+           "year": _mb_year(detail) or out.get("year"),
+           "is_compilation": _mb_is_compilation(detail),
+           "genre": "Unclassified", "subgenre": "General",
+           "label": _s(detail.get("label")), "catno": _s(detail.get("catno")),
+           "art_path": None, "source": "llm+musicbrainz",
+           "confidence": round(min(out["confidence"], 0.85), 3)}
+    by_pos = {(t.get("disc") or 1, t.get("track")): t
+              for t in detail.get("tracks") or [] if isinstance(t, dict)}
+    by_title = {}
+    for t in detail.get("tracks") or []:
+        if isinstance(t, dict) and t.get("title"):
+            by_title.setdefault(normalize(t["title"]), t)
+    for m in members:
+        tn, title = (out["tracks"].get(m["name"]) or (None, None))
+        if tn is None:
+            tn = llm_music.fallback_track(m["name"])
+        row = by_pos.get((m.get("discno") or 1, tn)) if tn else None
+        if row is None and title:
+            row = by_title.get(normalize(title))
+        if row:
+            if not m.get("trackno"):
+                m["trackno"] = row.get("track") or tn
+            if not m.get("title") and row.get("title"):
+                m["title"] = row["title"]
+            if row.get("recording_mbid") and not m.get("mb_recording_id"):
+                m["mb_recording_id"] = row["recording_mbid"]
+            if row.get("duration_s") and not m.get("duration_s"):
+                m["duration_s"] = row["duration_s"]
+            if not m.get("artist") and row.get("artist"):
+                m["artist"] = row["artist"]
+        else:
+            if tn and not m.get("trackno"):
+                m["trackno"] = tn
+            if title and not m.get("title"):
+                m["title"] = title
+        m["albumartist"] = rel["albumartist"]
+        if not m.get("artist"):
+            m["artist"] = rel["albumartist"]
+        m["album"] = rel["album"]
+        m["year"] = rel["year"]
+        if not m.get("genre") or m.get("genre") == "Unclassified":
+            m["genre"], m["subgenre"] = rel["genre"], rel["subgenre"]
+        m["compilation"] = rel["is_compilation"]
+        m["mb_release_id"] = rel["mb_release_id"]
+    releases[cid] = rel
+    try:
+        db_upsert_release(rel)
+    except Exception:
+        pass
+    # honest count: a member with no MB-row match and no LLM title keeps no
+    # title -> still "unidentified" and will plan into _Unidentified
+    mapped = sum(1 for m in members if rec_kind(m) != "unidentified")
+    return rel, mapped
+
+
+def _supervise_pass(recs, releases, cfg, model=None, min_confidence=None,
+                    cancel=None):
+    """One supervisor sweep over the unidentified clusters in `recs`.
+    Returns (identified_tracks, rejected_tracks). Cancel-safe; never
+    raises out."""
+    cancel = cancel if cancel is not None else SCAN_CANCEL
+    thr = llm_music.MIN_CONFIDENCE if min_confidence is None \
+        else float(min_confidence)
+    cands = _supervise_candidates(recs)
+    set_sup(state="running", total=len(cands), processed=0,
+            identified=0, rejected=0, currentFile="", error=None, log=[])
+    _phase_start("supervise", len(cands))
+    identified = rejected = 0
+    for i, (cid, members) in enumerate(cands):
+        if cancel.is_set():
+            set_sup(state="cancelled", processed=i)
+            return identified, rejected
+        folder = os.path.basename(_cluster_dir(members[0]["path"])) \
+            or os.path.basename(os.path.dirname(members[0]["path"]))
+        names = [m["name"] for m in members]
+        set_sup(processed=i, currentFile=folder)
+        set_scan(currentFile=folder, phase="supervise", phaseDone=i)
+        try:
+            out = llm_music.supervise_folder(folder, names, model=model)
+        except Exception as e:
+            out = None
+            _sup_log(f"ERROR {folder}: {type(e).__name__}: {e}")
+        if not out or out["confidence"] < thr:
+            rejected += len(members)
+            set_sup(rejected=rejected)
+            _sup_log(f"no answer: {folder}")
+            continue
+        detail = _verify_with_musicbrainz(out, folder, names, cancel)
+        if not detail:
+            rejected += len(members)
+            set_sup(rejected=rejected)
+            _sup_log(f"MusicBrainz could not confirm "
+                     f"\"{out['artist']} — {out['album']}\" for {folder}")
+            continue
+        rel, mapped = _adopt_release(cid, members, out, detail, releases)
+        identified += mapped
+        rejected += len(members) - mapped
+        set_sup(identified=identified, rejected=rejected)
+        _sup_log(f"{folder} -> {rel['albumartist']} — {rel['album']} "
+                 f"({rel['year'] or '?'}) [{mapped}/{len(members)} tracks]")
+    set_sup(state="done", processed=len(cands), currentFile="",
+            identified=identified, rejected=rejected)
+    return identified, rejected
+
+
+def audit_dupe_groups(recs, groups, review):
+    """Deterministic best-copy audit of every dupe group (the phase-3
+    "supervisor checks duplicates" step). Never moves anything — it
+    verifies each keeper decision has a real quality signal behind it and
+    flags the groups where the pick is effectively a coin toss or the
+    grouped files might not even be the same recording."""
+    members = {}
+    for r in recs:
+        gid = groups.get(r["path"])
+        if gid:
+            members.setdefault(gid, []).append(r)
+    flagged = []
+    for gid, ms in sorted(members.items()):
+        ranked = sorted(ms, key=rank_key)
+        keeper, losers = ranked[0], ranked[1:]
+        if not losers:
+            continue
+        flags = []
+        kq = keeper.get("quality_score") or 0
+        lq0 = losers[0].get("quality_score") or 0
+        # under 1000 = codec/bitrate unknown (the ladder's floor for any
+        # readable bitrate is 1000; the parser's base is 500) — the keeper
+        # was picked by tag-completeness/filename alone
+        if kq < 1000 and lq0 < 1000:
+            flags.append("no-quality-signal")
+        elif kq == lq0:
+            flags.append("quality-tie")         # tie-broken by tags/name
+        dk, dl = keeper.get("duration_s"), losers[0].get("duration_s")
+        if dk and dl and abs(dk - dl) > 15:
+            flags.append("duration-mismatch")   # different edit/recording?
+        if flags:
+            flagged.append({
+                "groupId": gid, "flags": flags,
+                "title": keeper.get("title") or keeper.get("name"),
+                "keeper": keeper["path"],
+                "files": [{"path": m["path"], "name": m["name"],
+                           "quality": m.get("quality_score") or 0,
+                           "size": m.get("size") or 0,
+                           "duration": m.get("duration_s"),
+                           "keep": bool(m.get("keep", 1))}
+                          for m in ranked]})
+    rid_members = {}
+    for p, rid in (review or {}).items():
+        rid_members.setdefault(rid, []).append(p)
+    audit = {"checkedAt": datetime.now().isoformat(sep=" "),
+             "groups": len(members), "flagged": flagged,
+             "clean": len(members) - len(flagged),
+             "reviewGroups": len(rid_members)}
+    with LOCK:
+        STATE["dupeAudit"] = audit
+    return audit
+
+
+def run_supervise(model=None, min_confidence=None):
+    """Standalone supervisor run (no rescan): sweep the unidentified
+    clusters, then re-dedupe with the corrected identities, re-audit, and
+    persist. Reuses the scan status slot (like run_identify) so the UI's
+    existing progress plumbing applies."""
+    scanned_at = datetime.now().isoformat(sep=" ")
+    try:
+        with LOCK:
+            recs = STATE["recs"]
+            releases = STATE["releases"]
+            root = STATE["scannedRoot"]
+            partial = STATE["partialScan"]
+        if partial:
+            # a cancelled scan left a PARTIAL rec set in memory while the
+            # DB keeps the last complete index — persisting a supervisor
+            # sweep of the partial set would wipe the complete index
+            set_scan(state="error", phase="",
+                     error="Results are from a cancelled scan — rescan "
+                           "before running the supervisor.")
+            return
+        cfg = load_config()
+        _supervise_pass(recs, releases, cfg, model=model,
+                        min_confidence=min_confidence)
+        cancelled = SCAN_CANCEL.is_set()
+        if not cancelled:
+            _phase_indeterminate("dedupe")
+            groups, review = dedupe_recs(recs)
+            rank_groups(recs, groups)
+            _phase_indeterminate("audit")
+            audit = audit_dupe_groups(recs, groups, review)
+            with LOCK:
+                STATE["groups"] = groups
+                STATE["review"] = review
+                STATE["plan"] = None
+            try:
+                if root:
+                    db_replace_state(recs, groups, review, releases,
+                                     scanned_at)
+                    set_meta({"dupe_audit": json.dumps(audit)})
+            except Exception:
+                pass
+        set_scan(state="cancelled" if cancelled else "done",
+                 currentFile="", phase="", note=None)
+    except Exception as e:
+        set_scan(state="error", error=f"{type(e).__name__}: {e}", phase="")
+
+
+def start_supervise(model=None, min_confidence=None):
+    if llm_music is None:
+        return False, "LLM assist unavailable."
+    with LOCK:
+        if STATE["scan"]["state"] == "running":
+            return False, "A music scan is already running."
+        if STATE["execute"]["state"] == "running":
+            return False, "An execution is running."
+        has = bool(STATE["recs"])
+        partial = STATE["partialScan"]
+    if not has and not ensure_state():
+        return False, "No music scan results. Run a scan first."
+    if partial:
+        return False, ("Results are from a cancelled scan — rescan before "
+                       "running the supervisor.")
+    with LOCK:
+        STATE["scan"] = {"state": "running", "total": 0, "processed": 0,
+                         "currentFile": "", "phase": "", "error": None,
+                         "phaseDone": 0, "phaseTotal": 0,
+                         "phaseStartedAt": None, "note": None}
+    SCAN_CANCEL.clear()
+    threading.Thread(target=run_supervise,
+                     kwargs={"model": model,
+                             "min_confidence": min_confidence},
+                     daemon=True).start()
+    return True, None
+
+
 # =================================================================== scan run
 
 def fingerprint_file(fpcalc, path):
@@ -1266,14 +1755,17 @@ def _acoustid_recording_id(res):
 
 
 def run_scan(root, max_files, hash_enabled, fingerprint_enabled,
-             skip_identify=False):
+             skip_identify=False, supervise=True, sup_model=None):
     """Synchronous pipeline; runs on a daemon thread via start_scan.
     skip_identify runs collect -> tags -> dedupe only (no network at all):
     clusters get NO releases rows, which marks them pending for a later
-    'Resume identification' pass (run_identify)."""
+    'Resume identification' pass (run_identify). supervise chains the AI
+    supervisor over whatever identification left behind (needs the local
+    LLM + network; skipped silently when either is missing)."""
     scanned_at = datetime.now().isoformat(sep=" ")
     cancelled = False
     paused = False
+    audit = None
     try:
         audio, extras = collect_files(root, max_files)
         set_scan(total=len(audio), processed=0, phase="scan")
@@ -1380,6 +1872,10 @@ def run_scan(root, max_files, hash_enabled, fingerprint_enabled,
                 rank_groups(recs, groups)
                 attach_album_companions(recs, clusters, unmatched)
 
+            if not cancelled:
+                _phase_indeterminate("audit")
+                audit = audit_dupe_groups(recs, groups, review)
+
         for r in recs:      # genre fallback must hold even on cancel
             if not r.get("genre"):
                 r["genre"], r["subgenre"] = "Unclassified", "General"
@@ -1392,6 +1888,7 @@ def run_scan(root, max_files, hash_enabled, fingerprint_enabled,
             STATE["scannedRoot"] = root
             STATE["plan"] = None
             STATE["partialScan"] = cancelled
+            STATE["dupeAudit"] = audit
         try:
             if cancelled:
                 # NEVER let a cancelled scan replace the last COMPLETE scan on
@@ -1404,25 +1901,75 @@ def run_scan(root, max_files, hash_enabled, fingerprint_enabled,
                           "last_scan_cancelled_count": str(len(recs))})
             else:
                 db_replace_state(recs, groups, review, releases, scanned_at)
+                db_update_library_index(recs, root, scanned_at)
                 set_meta({"last_scan_root": root,
                           "last_scan_completed_at": scanned_at,
                           "last_scan_count": str(len(recs)),
-                          "last_scan_partial": "0"})
+                          "last_scan_partial": "0",
+                          "dupe_audit": json.dumps(audit)})
         except Exception:
             pass
         if cancelled:
             set_scan(state="cancelled", processed=len(recs),
                      currentFile="", phase="", note=None)
-        else:
-            note = None
-            if paused:
-                note = _pause_note(len(pending_identify()))
-            elif skip_identify:
-                note = ("identification skipped — %d clusters pending, "
-                        "Resume identification when online"
-                        % len(pending_identify()))
-            set_scan(state="done", processed=len(audio),
-                     currentFile="", phase="", note=note)
+            return
+
+        # ---- AI supervisor phase: runs AFTER the scan is persisted, so a
+        # cancel here never costs the finished scan (collect/identify/
+        # dedupe stay on disk), and every release the supervisor adopts is
+        # keyed against THIS scan's cluster ids in the DB. Adopted
+        # identities are re-persisted; a cancel keeps what was adopted so
+        # far, consistent in memory and on disk.
+        sup_note = None
+        if supervise and not skip_identify and llm_music is not None:
+            try:
+                llm_ok = llm_assist is not None and llm_assist.available()
+            except Exception:
+                llm_ok = False
+            if llm_ok and _supervise_candidates(recs):
+                ident = 0
+                try:
+                    ident, _rej = _supervise_pass(recs, releases, cfg,
+                                                  model=sup_model)
+                except Exception:
+                    pass
+                sup_cancelled = SCAN_CANCEL.is_set()
+                if ident and not sup_cancelled:
+                    # corrected identities can reveal tag-identity dupes
+                    # that were invisible while the tracks were unidentified
+                    _phase_indeterminate("dedupe")
+                    set_scan(currentFile="")
+                    groups, review = dedupe_recs(recs)
+                    rank_groups(recs, groups)
+                    _phase_indeterminate("audit")
+                    audit = audit_dupe_groups(recs, groups, review)
+                if ident:
+                    with LOCK:
+                        STATE["groups"] = groups
+                        STATE["review"] = review
+                        STATE["plan"] = None
+                        STATE["dupeAudit"] = audit
+                    try:
+                        db_replace_state(recs, groups, review, releases,
+                                         scanned_at)
+                        set_meta({"dupe_audit": json.dumps(audit)})
+                    except Exception:
+                        pass
+                if sup_cancelled:
+                    sup_note = ("AI supervisor cancelled — scan results "
+                                "kept; run it again from Results")
+
+        note = None
+        if paused:
+            note = _pause_note(len(pending_identify()))
+        elif skip_identify:
+            note = ("identification skipped — %d clusters pending, "
+                    "Resume identification when online"
+                    % len(pending_identify()))
+        if sup_note:
+            note = f"{note} · {sup_note}" if note else sup_note
+        set_scan(state="done", processed=len(audio),
+                 currentFile="", phase="", note=note)
     except Exception as e:
         set_scan(state="error", error=f"{type(e).__name__}: {e}", phase="")
 
@@ -1482,7 +2029,7 @@ def run_identify():
 
 
 def start_scan(root, max_files, hash_enabled, fingerprint_enabled=False,
-               skip_identify=False):
+               skip_identify=False, supervise=True, sup_model=None):
     with LOCK:
         if STATE["scan"]["state"] == "running":
             return False, "A music scan is already running."
@@ -1495,6 +2042,8 @@ def start_scan(root, max_files, hash_enabled, fingerprint_enabled=False,
     t = threading.Thread(target=run_scan,
                          args=(root, max_files, hash_enabled,
                                fingerprint_enabled, skip_identify),
+                         kwargs={"supervise": supervise,
+                                 "sup_model": sup_model},
                          daemon=True)
     t.start()
     return True, None
@@ -1595,6 +2144,10 @@ def restore_state():
             "label": row["label"], "catno": row["catno"],
             "art_path": row["art_path"], "source": row["source"],
             "confidence": row["confidence"]}
+    try:
+        audit = json.loads(meta.get("dupe_audit") or "null")
+    except Exception:
+        audit = None
     with LOCK:
         STATE["recs"] = recs
         STATE["releases"] = releases
@@ -1602,6 +2155,7 @@ def restore_state():
         STATE["review"] = review
         STATE["scannedRoot"] = meta.get("last_scan_root")
         STATE["partialScan"] = meta.get("last_scan_partial") == "1"
+        STATE["dupeAudit"] = audit
         STATE["scan"] = {"state": "done", "total": len(recs),
                          "processed": len(recs), "currentFile": "",
                          "phase": "", "error": None,
@@ -1642,6 +2196,7 @@ def build_results():
         partial = STATE["partialScan"]
         rel_keys = set(STATE["releases"])
         note = STATE["scan"].get("note")
+        dupe_audit = STATE.get("dupeAudit")
     by_kind = Counter(rec_kind(r) for r in recs)
     by_codec = Counter((r.get("codec") or "unknown")
                        for r in recs)
@@ -1700,6 +2255,7 @@ def build_results():
         "dupeFiles": dupe_files,
         "dupeBytes": dupe_bytes,
         "dupesQuarantined": quarantined_n,
+        "dupeAudit": dupe_audit,
         "quickCleanEligible": quick_clean_eligible,
         "upgradesAvailable": upgrades,
         "reviewGroups": len(rid_members),
@@ -1751,9 +2307,10 @@ def album_dest(r, target_root, multi_disc, disc_style, layout="genre"):
     if r.get("compilation"):
         artist_dir = VA_NAME
     else:
-        artist_dir = sanitize_component(
-            r.get("albumartist") or r.get("artist") or "Unknown Artist")
-    album = sanitize_component(r.get("album") or "Unknown Album")
+        artist_dir = sanitize_component(strip_index_prefix(
+            r.get("albumartist") or r.get("artist") or "Unknown Artist"))
+    album = sanitize_component(strip_index_prefix(
+        r.get("album") or "Unknown Album"))
     if layout == "artist":
         album_dir = album
     else:
@@ -1787,8 +2344,8 @@ def album_dest(r, target_root, multi_disc, disc_style, layout="genre"):
 
 def single_dest(r, target_root):
     """Artist\\_Singles\\Title.ext for loose tracks with no album tag."""
-    artist = sanitize_component(
-        r.get("artist") or r.get("albumartist") or "Unknown Artist")
+    artist = sanitize_component(strip_index_prefix(
+        r.get("artist") or r.get("albumartist") or "Unknown Artist"))
     title = sanitize_component(
         r.get("title") or os.path.splitext(r["name"])[0])
     return os.path.join(target_root, artist, "_Singles", title + r["ext"])
@@ -1812,6 +2369,23 @@ def _norm_dupe_handling(v):
     return None
 
 
+def _rel_dir(path, scanned_root):
+    """The file's folder relative to the scanned root ("" when it sits at the
+    root). Quarantine buckets keep this sub-path so a reviewed file stays
+    with its original release folder -- that folder is often the only clue to
+    what the file is -- and identically-named files from different folders
+    stop colliding.
+    """
+    try:
+        rel = os.path.relpath(os.path.dirname(os.path.abspath(path)),
+                              os.path.abspath(scanned_root))
+    except ValueError:              # different drive
+        return ""
+    if rel in (".", os.curdir) or rel.startswith(".."):
+        return ""
+    return rel
+
+
 def compute_plan(params):
     ensure_state()
     with LOCK:
@@ -1831,7 +2405,8 @@ def compute_plan(params):
         # first-pass duplicate cleanup: quarantine losers only, no network.
         # targetRoot may be the scanned root itself (the UI falls back to
         # it), so the target!=root guard below does NOT apply here.
-        return _dupes_only_plan(recs, groups, root, target_root, action)
+        return _dupes_only_plan(recs, groups, root, target_root, action,
+                                exclude=params.get("exclude"))
     dupe_handling = _norm_dupe_handling(params.get("dupeHandling"))
     if dupe_handling is None:
         return None, "Invalid dupeHandling."
@@ -1844,17 +2419,62 @@ def compute_plan(params):
     layout = (params.get("layout") or "genre").strip().lower()
     if layout not in ("genre", "artist"):
         return None, "Invalid layout (use 'genre' or 'artist')."
-    if normcase_abs(target_root) == normcase_abs(root):
+    # restructure: re-file an ALREADY-organized library into a different
+    # layout using the indexed identities — no rescan (the DB keeps paths
+    # truthful through execute/undo, so a 90k-track library re-files in
+    # seconds instead of re-reading every file). Sources and destinations
+    # share one root, so the usual target!=scanned-root guard doesn't apply.
+    restructure = bool(params.get("restructure"))
+    if restructure:
+        outside = [r["path"] for r in recs
+                   if not is_within(r["path"], target_root)]
+        if outside:
+            return None, (
+                f"{len(outside)} indexed file(s) live outside {target_root}. "
+                "Restructure re-files a library in place — set the target to "
+                "the folder that already holds them, e.g. "
+                f"{os.path.dirname(outside[0])}")
+    elif normcase_abs(target_root) == normcase_abs(root):
         return None, "Target root must differ from the scanned folder."
+    # buckets nest under the root the files actually live in
+    rel_root = target_root if restructure else root
+
+    # per-file exclusions from the plan preview: excluded files are left
+    # untouched and drop out of planning entirely
+    exclude = {normcase_abs(p)
+               for p in (params.get("exclude") or []) if p}
+    excluded = 0
+    if exclude:
+        kept_recs = []
+        for r in recs:
+            if normcase_abs(r["path"]) in exclude:
+                excluded += 1
+            else:
+                kept_recs.append(r)
+        recs = kept_recs
+        # keep flags were baked in by rank_groups at scan time — re-rank
+        # the REMAINING members so excluding a keeper promotes the
+        # next-best copy instead of quarantining every leftover copy
+        # (recs are deep copies; STATE is untouched)
+        vis = [r for r in recs if not r.get("quarantined")]
+        rank_groups(vis, {r["path"]: groups[r["path"]]
+                          for r in vis if groups.get(r["path"])})
 
     multi = multidisc_clusters(recs)
     entries = []
     counts = Counter()
+    # cross-root check: files whose bytes already live in another indexed
+    # root (e.g. the main library, when scanning an inbox) are routed to
+    # _AlreadyInLibrary\ instead of merging in beside the copy you own.
+    # Skipped for a restructure: the library IS the indexed root.
+    in_library = {} if restructure else find_in_library(recs, root)
     for r in sorted(recs, key=lambda x: x["path"].lower()):
         if r.get("quarantined"):
             continue            # first-pass dupe losers stay quarantined
         gid = groups.get(r["path"])
         kind = rec_kind(r)
+        # quarantine buckets keep the file's original sub-folder
+        rel_dir = _rel_dir(r["path"], rel_root)
         entry = {"from": r["path"], "kind": kind, "isDupe": False,
                  "groupId": gid, "reason": None,
                  "clusterId": r.get("cluster_id"),
@@ -1866,12 +2486,18 @@ def compute_plan(params):
                 counts["keptDupe"] += 1
                 continue            # keep dupes where they are (untouched)
             entry.update(to=os.path.join(target_root, "_Duplicates", gid,
-                                         r["name"]),
+                                         rel_dir, r["name"]),
                          isDupe=True, reason="dupe")
             counts["dupe"] += 1
+        elif r["path"] in in_library:
+            entry.update(to=os.path.join(target_root, "_AlreadyInLibrary",
+                                         rel_dir, r["name"]),
+                         reason="in-library",
+                         libraryCopy=in_library[r["path"]])
+            counts["inLibrary"] += 1
         elif kind == "unidentified":
             entry.update(to=os.path.join(target_root, "_Unidentified",
-                                         r["name"]),
+                                         rel_dir, r["name"]),
                          reason="unidentified")
             counts["unidentified"] += 1
         elif kind == "single":
@@ -1897,12 +2523,27 @@ def compute_plan(params):
                     dest_dir, stem + os.path.splitext(comp["from"])[1])
         entries.append(entry)
 
+    unchanged = 0
+    if restructure:
+        # a re-file leaves most tracks exactly where they are; drop those so
+        # the preview shows only what actually moves
+        kept = []
+        for e in entries:
+            if normcase_abs(e["from"]) == normcase_abs(e["to"]):
+                unchanged += 1
+            else:
+                kept.append(e)
+        entries = kept
+
     folders = {os.path.dirname(e["to"]) for e in entries}
     stats = {"totalFiles": len(entries),
+             "excludedFiles": excluded,
+             "unchangedFiles": unchanged, "restructure": restructure,
              "albumFiles": counts["album"], "vaFiles": counts["va"],
              "singleFiles": counts["single"],
              "dupeFiles": counts["dupe"],
              "keptDupeFiles": counts["keptDupe"],
+             "inLibraryFiles": counts["inLibrary"],
              "unidentifiedFiles": counts["unidentified"],
              "companionFiles": sum(len(e["companions"]) for e in entries),
              "foldersToCreate": len(folders),
@@ -1913,10 +2554,114 @@ def compute_plan(params):
     plan = {"entries": entries, "stats": stats,
             "params": {"action": action, "targetRoot": target_root,
                        "dupeHandling": dupe_handling,
-                       "discStyle": disc_style, "scannedRoot": root}}
+                       "discStyle": disc_style,
+                       "scannedRoot": target_root if restructure else root,
+                       "restructure": restructure}}
     with LOCK:
         STATE["plan"] = plan
     return plan, None
+
+
+def _dupes_only_plan(recs, groups, root, target_root, action, exclude=None):
+    """First-pass duplicate cleanup (plan mode 'dupes_only'): quarantine ONLY
+    the dupe losers (keep=0 and not already quarantined) to
+    <targetRoot>\\_Duplicates\\Gxx\\<original sub-folder>\\<name>, before any
+    MusicBrainz identification time is spent. Winners stay put. Fully
+    undoable; the execute flags the moved rows quarantined so identify/resume
+    and later organize plans skip them (and undo clears the flag again)."""
+    excl = {normcase_abs(p) for p in (exclude or [])}
+    entries = []
+    excluded = 0
+    for r in sorted(recs, key=lambda x: x["path"].lower()):
+        gid = groups.get(r["path"])
+        if not gid or r.get("keep", 1) or r.get("quarantined"):
+            continue
+        if normcase_abs(r["path"]) in excl:
+            excluded += 1
+            continue
+        rel_dir = _rel_dir(r["path"], root)
+        dest_dir = os.path.join(target_root, "_Duplicates", gid, rel_dir)
+        entries.append({
+            "from": r["path"], "kind": "track", "isDupe": True,
+            "groupId": gid, "reason": "dupe",
+            "clusterId": r.get("cluster_id"),
+            "to": os.path.join(dest_dir, r["name"]),
+            "companions": [{"from": c["from"],
+                            "to": os.path.join(dest_dir,
+                                               os.path.basename(c["from"])),
+                            "keepName": True}
+                           for c in (r.get("companions") or [])]})
+    folders = {os.path.dirname(e["to"]) for e in entries}
+    stats = {"mode": "dupes_only", "action": action,
+             "targetRoot": target_root, "scannedRoot": root,
+             "totalFiles": len(entries), "dupeFiles": len(entries),
+             "excludedFiles": excluded,
+             "companionFiles": sum(len(e["companions"]) for e in entries),
+             "foldersToCreate": len(folders)}
+    plan = {"entries": entries, "stats": stats,
+            "params": {"mode": "dupes_only", "action": action,
+                       "targetRoot": target_root, "scannedRoot": root}}
+    with LOCK:
+        STATE["plan"] = plan
+    return plan, None
+
+
+def _flag_quarantined(manifest):
+    """After a dupes_only MOVE execute: flag the relocated loser rows
+    quarantined=1 (matched by their NEW db path, which db_update_paths has
+    just written) and mirror the move + flag onto the in-memory recs/groups
+    so identify/resume and later organize plans skip them in THIS session
+    too. restore_state rebuilds the same picture after a restart."""
+    moved = [e for e in manifest if e.get("from") and not e.get("companion")]
+    try:
+        db_set_quarantined([e["to"] for e in moved], 1)
+    except Exception:
+        pass
+    remap = {e["from"]: e["to"] for e in moved}
+    with LOCK:
+        for r in STATE["recs"]:
+            newp = remap.get(r["path"])
+            if not newp:
+                continue
+            gid = STATE["groups"].pop(r["path"], None)
+            rid = STATE["review"].pop(r["path"], None)
+            r["path"] = newp
+            r["name"] = os.path.basename(newp)
+            r["quarantined"] = 1
+            if gid:
+                STATE["groups"][newp] = gid
+            if rid:
+                STATE["review"][newp] = rid
+
+
+def _unflag_quarantined(entries):
+    """Undo of a dupes_only execute: the losers are back at their original
+    paths (db_update_paths 'restore' already rewrote them), so clear
+    quarantined=0 (matched by original path) and mirror that onto the
+    in-memory recs/groups -- the tracks are visible to identify/organize
+    again."""
+    moved = [e for e in entries
+             if e.get("from") and e.get("action", "move") == "move"
+             and not e.get("companion")]
+    try:
+        db_set_quarantined([e["from"] for e in moved], 0)
+    except Exception:
+        pass
+    back = {e["to"]: e["from"] for e in moved}
+    with LOCK:
+        for r in STATE["recs"]:
+            srcp = back.get(r["path"])
+            if not srcp:
+                continue
+            gid = STATE["groups"].pop(r["path"], None)
+            rid = STATE["review"].pop(r["path"], None)
+            r["path"] = srcp
+            r["name"] = os.path.basename(srcp)
+            r["quarantined"] = 0
+            if gid:
+                STATE["groups"][srcp] = gid
+            if rid:
+                STATE["review"][srcp] = rid
 
 
 # =================================================================== execute
@@ -1976,6 +2721,45 @@ def _backfill_art(entries, manifest, cancel):
     set_exec(phaseDone=len(candidates))
 
 
+def _preflight_roots(scanned_root, target_root):
+    """Friendly up-front checks so a disconnected/mistyped drive fails with a
+    clear message instead of a mid-run WinError deep in makedirs."""
+    if not os.path.isdir(scanned_root):
+        return (f"Scanned folder is no longer available: {scanned_root} — "
+                "was a drive disconnected? Rescan, then rebuild the plan.")
+    drive = os.path.splitdrive(os.path.abspath(target_root))[0]
+    if drive and not os.path.exists(drive + os.sep):
+        return (f"Target drive {drive}\\ is not available — connect it or "
+                "pick a different target folder, then rebuild the plan.")
+    try:
+        os.makedirs(target_root, exist_ok=True)
+    except OSError as e:
+        return (f"Cannot create the target folder {target_root}: "
+                f"{type(e).__name__}: {e}")
+    return None
+
+
+def _apply_manifest_to_state(manifest):
+    """Mirror an executed move-manifest onto the IN-MEMORY recs so a second
+    plan in the same session (e.g. a restructure right after an organize)
+    sees where files actually are — the DB is already updated by
+    db_update_paths, but STATE keeps the pre-move paths otherwise."""
+    moves = {normcase_abs(e["from"]): e["to"] for e in manifest
+             if e.get("action") == "move" and e.get("from") and e.get("to")}
+    if not moves:
+        return
+    with LOCK:
+        for r in STATE["recs"]:
+            dst = moves.get(normcase_abs(r["path"]))
+            if dst:
+                r["path"] = dst
+                r["name"] = os.path.basename(dst)
+        groups = STATE.get("groups") or {}
+        if groups:
+            STATE["groups"] = {moves.get(normcase_abs(p), p): g
+                               for p, g in groups.items()}
+
+
 def run_execute():
     with LOCK:
         plan = STATE["plan"]
@@ -1989,6 +2773,10 @@ def run_execute():
     scanned_root = params["scannedRoot"]
     set_exec(total=len(entries), processed=0, phase="files",
              phaseDone=0, phaseTotal=len(entries))
+    err = _preflight_roots(scanned_root, target_root)
+    if err:
+        set_exec(state="error", error=err)
+        return
     manifest = []
     moved = copied = skipped = errors = 0
     cancelled = False
@@ -2052,6 +2840,7 @@ def run_execute():
         payload = {"app": "music", "version": 1,
                    "created": datetime.now().isoformat(sep=" "),
                    "action": action, "scannedRoot": scanned_root,
+                   "mode": params.get("mode"),
                    "targetRoot": target_root, "entries": manifest,
                    "stats": {"moved": moved, "copied": copied,
                              "skipped": skipped, "errors": errors,
@@ -2073,6 +2862,16 @@ def run_execute():
             try:
                 db_update_paths(
                     [e for e in manifest if e.get("from")], "move")
+            except Exception:
+                pass
+            if params.get("mode") == "dupes_only":
+                # first-pass cleanup: flag the relocated losers quarantined
+                # so identify/resume and later organize plans skip them.
+                # MUST run before _apply_manifest_to_state — it matches recs
+                # by their OLD paths, which _apply rewrites to the new ones.
+                _flag_quarantined(manifest)
+            try:
+                _apply_manifest_to_state(manifest)
             except Exception:
                 pass
         set_exec(state="cancelled" if cancelled else "done",
@@ -2143,6 +2942,10 @@ def run_undo(manifest_path):
                          and e.get("action", "move") == "move"], "restore")
     except Exception:
         pass
+    if manifest.get("mode") == "dupes_only":
+        # undoing a first-pass duplicate cleanup: clear the quarantined flag
+        # so the losers are visible to identify/organize again.
+        _unflag_quarantined(manifest.get("entries", []))
     # remove now-empty dirs under the target root (bottom-up, root excluded)
     troot = manifest.get("targetRoot")
     if troot and os.path.isdir(troot):
@@ -2326,6 +3129,8 @@ def api_get(path, qs):
         return 200, get_config_public()
     if p == "tagfix/status":
         return 200, tagfix_status()
+    if p == "supervise/status":
+        return 200, supervise_status()
     return 404, {"error": "not found"}
 
 
@@ -2371,11 +3176,23 @@ def api_post(path, body):
                                    body.get("fingerprint")))
         skip_identify = bool(body.get("skipIdentify",
                                       body.get("skip_identify")))
+        supervise = body.get("supervise", True) is not False
         ok, err = start_scan(root, max_files, hash_enabled, fp_enabled,
-                             skip_identify)
+                             skip_identify, supervise=supervise,
+                             sup_model=body.get("model"))
         if not ok:
             return 409, {"error": err}
         return 200, {"ok": True, "root": root}
+    if p == "supervise":
+        ok, err = start_supervise(body.get("model"),
+                                  body.get("minConfidence"))
+        if not ok:
+            return 409, {"error": err}
+        return 200, {"ok": True}
+    if p == "supervise/cancel":
+        if not cancel_scan():
+            return 409, {"error": "No supervisor run is active."}
+        return 200, {"ok": True}
     if p in ("identify", "identify/resume"):
         pending_n = len(pending_identify())
         ok, err = start_identify()

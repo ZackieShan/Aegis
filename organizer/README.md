@@ -19,9 +19,18 @@ build a **previewed, undoable** plan before a single file moves.
   values into empty tag fields only, with backups, payload verification, and
   one-click undo (needs `mutagen`).
 
+One **Scan** click runs the whole unattended part of the flow as a visible
+phase chain: scan & identify → **AI supervisor** (a local model proposes
+identities for whatever the parsers couldn't crack; TMDB / MusicBrainz must
+confirm every proposal — with TVmaze/TheTVDB episode-title and OMDb
+cross-checks — before anything is written) → duplicate re-group + a
+**best-copy audit** that flags the keeper decisions worth human eyes
+(quality ties, size-only picks, duration mismatches, a RAW losing to a
+JPEG). Nothing moves a file until you build and confirm a plan.
+
 Every organize is plan → preview (with an optional local-LLM plain-English
-summary) → execute → undo manifest. Duplicates are quarantined, never
-deleted.
+summary, and per-row exclusions — untick a file to leave it in place) →
+execute → undo manifest. Duplicates are quarantined, never deleted.
 
 Runs embedded in Aegis (each tool is its own window) or standalone:
 `python server.py` then open http://127.0.0.1:7100. Audio fingerprinting

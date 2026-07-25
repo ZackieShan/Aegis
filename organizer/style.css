@@ -552,3 +552,19 @@ body.single-app .app-window {
   box-shadow: none !important;
 }
 body.single-app .app-window > .title-bar { display: none !important; }
+
+/* ---- pipeline stepper (scan -> AI supervisor -> dupe check -> you) ---- */
+.pipe-steps { margin: 2px 0 6px; line-height: 1.9; }
+.pipe-steps .pipe-step {
+  display: inline-block; padding: 0 5px; border: 1px solid #808080;
+  background: #d4d0c8; white-space: nowrap;
+}
+.pipe-steps .pipe-step.running { background: #000080; color: #fff; }
+.pipe-steps .pipe-step.done { background: #008000; color: #fff; }
+.pipe-steps .pipe-step.skipped,
+.pipe-steps .pipe-step.pending { color: #666; }
+.pipe-steps .pipe-step.error,
+.pipe-steps .pipe-step.cancelled { background: #a00000; color: #fff; }
+.pipe-steps .pipe-detail { font-size: 90%; opacity: .85; }
+.pipe-steps .pipe-arrow { margin: 0 3px; color: #666; }
+.plan-row input[type="checkbox"] { vertical-align: middle; margin-right: 4px; }

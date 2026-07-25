@@ -31,6 +31,11 @@ let plan = null;         // /api/plan payload
 let pollTimer = null;
 
 /* ---------------------------------------------------------- utilities */
+/* Windows-ish path compare for "did the target change?" checks. */
+function normTargetPath(p) {
+  return String(p || "").trim().replace(/[\\/]+$/, "").replace(/\//g, "\\")
+    .toLowerCase();
+}
 async function api(path, opts) {
   // Root-relative (strip leading "/") so the app works both standalone at "/"
   // and mounted under a prefix like "/organizer/" (Aegis reverse proxy).
@@ -107,6 +112,8 @@ $("btnScan").addEventListener("click", async () => {
   if (!path) { alert("Enter a folder path first."); return; }
   $("btnScan").disabled = true;
   $("btnScanCancel").disabled = false;
+  pExcluded = new Set();
+  pAppliedExclude = new Set();
   $("scanProgressBox").classList.remove("hidden");
   $("scanCancelNote").classList.add("hidden");
   $("toStep2").disabled = true;
@@ -129,10 +136,17 @@ $("btnScan").addEventListener("click", async () => {
 async function pollScan() {
   let s;
   try { s = await api("/api/scan/status"); } catch (e) { return; }
-  $("scanText").textContent = `${s.processed} / ${s.total}`;
-  $("scanFile").textContent = s.currentFile || "";
-  setBar($("scanBar"), $("scanPct"), s.processed, s.total);
-  setStatus("Scanning…", undefined, `${s.processed}/${s.total}`);
+  if (s.phase === "duplicates") {
+    $("scanText").textContent = "Checking duplicate quality…";
+    $("scanFile").textContent = "";
+    setBar($("scanBar"), $("scanPct"), 1, 1);
+    setStatus("Duplicate check…");
+  } else {
+    $("scanText").textContent = `${s.processed} / ${s.total}`;
+    $("scanFile").textContent = s.currentFile || "";
+    setBar($("scanBar"), $("scanPct"), s.processed, s.total);
+    setStatus("Scanning…", undefined, `${s.processed}/${s.total}`);
+  }
   if (s.state === "done") {
     stopPoll();
     setBar($("scanBar"), $("scanPct"), 1, 1);
@@ -219,13 +233,18 @@ function renderResults(r) {
     warn.className = "date-warn hidden";
     warn.innerHTML = "";
   }
+  const audit = r.dupeAudit;
   statRows($("dupBody"), [
     ["Exact dupe groups", r.exactGroups],
     ["Wasted by exact dupes", fmtBytes(r.exactWastedBytes)],
     ["Near-dupe groups", r.nearGroups],
     ["Total dupe groups", r.totalGroups],
     ["Files in dupe groups", Object.values(r.groups).reduce((a, g) => a + g.length, 0)],
+    ["Best-copy audit", audit
+      ? `${audit.groups} checked, ${(audit.flagged || []).length} flagged`
+      : "(not run yet)"],
   ]);
+  renderPhotoAudit(r);
   const grid = $("thumbGrid");
   grid.innerHTML = "";
   r.thumbSample.forEach((p) => {
@@ -236,6 +255,35 @@ function renderResults(r) {
                       <div class="cap" title="${esc(p)}">${esc(name)}</div>`;
     grid.appendChild(cell);
   });
+}
+
+/* Flagged dupe groups from the best-copy audit: keeper picks that were
+   effectively coin tosses (or a RAW losing to a JPEG), surfaced so the user
+   reviews THOSE instead of distrusting every group. */
+const P_AUDIT_FLAG = {
+  "resolution-tie": "same resolution either way",
+  "no-dimension-data": "no dimensions — picked by file size",
+  "raw-loses-to-jpeg": "a RAW original loses to a JPEG",
+};
+function renderPhotoAudit(r) {
+  const box = $("pAuditBox");
+  if (!box) return;
+  const a = r.dupeAudit;
+  const fl = (a && a.flagged) || [];
+  if (!a || !a.groups || !fl.length) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  $("pAuditSummary").textContent =
+    `${a.groups} duplicate groups checked — ${fl.length} worth a look ` +
+    `(the other ${a.clean} have a clear best copy).`;
+  $("pAuditList").innerHTML = fl.slice(0, 100).map((g) => {
+    const why = (g.flags || []).map((f) => P_AUDIT_FLAG[f] || f).join("; ");
+    const files = (g.files || []).map((f) =>
+      `<div class="mono small ellipsis">${f.keep ? "&#10003; keep" : "&rarr; _Duplicates"} ` +
+      `${esc(f.name)} <span class="hint">(${f.quality ? f.quality.toLocaleString() + " px" : "? px"}, ` +
+      `${fmtBytes(f.size)})</span></div>`).join("");
+    return `<div class="plan-row"><b>${esc(g.groupId)}</b> ${esc(g.title || "")}` +
+      ` <span class="hint">— ${esc(why)}</span>${files}</div>`;
+  }).join("");
 }
 
 $("toStep2").addEventListener("click", () => { if (results) showStep(2); });
@@ -293,6 +341,7 @@ $("toStep4").addEventListener("click", async () => {
     action: document.querySelector('input[name="action"]:checked').value,
     removeEmpty: $("removeEmpty").checked,
     targetRoot: $("targetRoot").value.trim(),
+    ...(pExcluded.size ? { exclude: Array.from(pExcluded) } : {}),
   };
   $("toStep4").disabled = true;
   setStatus("Computing plan…");
@@ -305,12 +354,29 @@ $("toStep4").addEventListener("click", async () => {
     return;
   }
   $("toStep4").disabled = false;
+  pAppliedExclude = new Set(pExcluded);
   renderPlan(plan);
   showStep(4);
   setStatus("Plan ready", plan.stats.targetRoot, plan.stats.totalFiles + " files");
 });
 
 /* ---------------------------------------------------------- step 4: plan */
+let pExcluded = new Set();        // source paths unticked in the plan preview
+let pAppliedExclude = new Set();  // exclusions baked into the loaded plan
+
+function pUpdateExcludeBar() {
+  const bar = $("pExcludeBar");
+  if (!bar) return;
+  const pending = [...pExcluded].filter((x) => !pAppliedExclude.has(x)).length
+    + [...pAppliedExclude].filter((x) => !pExcluded.has(x)).length;
+  const n = pExcluded.size;
+  bar.classList.toggle("hidden", !n && !pending);
+  $("pExcludeText").textContent = pending
+    ? `${n} file(s) excluded — rebuild the plan to apply`
+    : n ? `${n} file(s) excluded from this plan` : "";
+  $("pBtnReplan").classList.toggle("hidden", !pending);
+}
+
 function renderPlan(p) {
   const s = p.stats;
   $("planStats").innerHTML =
@@ -319,6 +385,7 @@ function renderPlan(p) {
     (s.companionFiles ? `<b>${s.companionFiles}</b> sidecar companions move along with their files &middot; ` : "") +
     `<b>${s.foldersToCreate}</b> new folders &middot; ` +
     `<b>${s.dupeFiles}</b> duplicate files in <b>${s.groupCount}</b> groups &rarr; <code>_Duplicates\\</code> &middot; ` +
+    (s.inLibraryFiles ? `<b>${s.inLibraryFiles}</b> already in library &rarr; <code>_AlreadyInLibrary\\</code> &middot; ` : "") +
     `<b>${s.collisionsResolved}</b> name collisions resolved (-2, -3&hellip;)`;
   mountPlanReview($("planStats"), "/api/plan/summary", "photo");
   const list = $("planList");
@@ -329,12 +396,28 @@ function renderPlan(p) {
     row.className = "plan-row" + (e.isDupe ? " dupe" : "");
     const tag = e.isDupe
       ? `<span class="tag">DUPE ${esc(e.groupId || "")}</span>`
-      : `<span class="tag oktag">FILE</span>`;
-    row.innerHTML = `${tag}${esc(e.from)} <b>&rarr;</b> <span class="to">${esc(e.to)}</span>`;
+      : e.reason === "in-library"
+        ? `<span class="tag">IN LIBRARY</span>`
+        : `<span class="tag oktag">FILE</span>`;
+    row.innerHTML =
+      `<input type="checkbox" class="pExcl" checked title="untick to leave this file where it is">` +
+      `${tag}${esc(e.from)} <b>&rarr;</b> <span class="to">${esc(e.to)}</span>`;
+    const excl = row.querySelector && row.querySelector(".pExcl");
+    if (excl) excl.dataset.path = e.from;
     frag.appendChild(row);
   });
   list.appendChild(frag);
+  pUpdateExcludeBar();
 }
+$("planList").addEventListener("change", (ev) => {
+  const cb = ev.target;
+  if (!cb.classList || !cb.classList.contains("pExcl")) return;
+  if (cb.checked) pExcluded.delete(cb.dataset.path);
+  else pExcluded.add(cb.dataset.path);
+  pUpdateExcludeBar();
+});
+if ($("pBtnReplan"))
+  $("pBtnReplan").addEventListener("click", () => $("toStep4").click());
 
 /* LLM plan-review: an opt-in plain-English summary + anomaly flags, shown
    before Execute. Advisory only — it gates nothing. Generic across photos /
@@ -388,6 +471,25 @@ $("backTo3").addEventListener("click", () => showStep(3));
 $("btnExecute").addEventListener("click", async () => {
   if (!plan) return;
   const s = plan.stats;
+  // Execute replays the SAVED plan — if the target changed after it was
+  // built, executing would write to the old location. Force a rebuild.
+  if (normTargetPath($("targetRoot").value) !== normTargetPath(s.targetRoot)) {
+    alert("The target folder changed since this plan was built.\n\n" +
+          "The saved plan still targets:\n  " + s.targetRoot +
+          "\n\nGo back and build the plan again to apply your change.");
+    return;
+  }
+  let pExclStale = pExcluded.size !== pAppliedExclude.size;
+  if (!pExclStale) {
+    for (const x of pExcluded) {
+      if (!pAppliedExclude.has(x)) { pExclStale = true; break; }
+    }
+  }
+  if (pExclStale) {
+    alert("You changed the excluded files after this plan was built.\n\n" +
+          "Rebuild the plan to apply your exclusions before executing.");
+    return;
+  }
   if (!confirm(`Really ${s.action} ${s.totalFiles} files into\n${s.targetRoot} ?`)) return;
   showStep(5);
   $("doneWindow").classList.add("hidden");
@@ -474,6 +576,8 @@ function renderDone(r) {
 
 $("btnStartOver").addEventListener("click", () => {
   plan = null;
+  pExcluded = new Set();
+  pAppliedExclude = new Set();
   showStep(1);
   setStatus("Ready", "", "");
 });
