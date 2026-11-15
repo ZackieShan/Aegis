@@ -30,6 +30,19 @@ Installs Git/Python if needed, puts **Aegis in your Start Menu**, and opens
 the browser at **http://localhost:7000** when the server is up. From then on,
 launch it like any app: Start → Aegis.
 
+### Linux — paste into a terminal (Arch, Omarchy, Debian, Ubuntu, Fedora)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZackieShan/Aegis/main/install.sh | sh
+```
+
+Clones the repo, builds the Python environment, starts a local ChromaDB, and
+opens your browser at **http://localhost:7000**. For local models on your own
+GPU, run `scripts/setup-engine.sh` afterwards — on AMD (Strix Halo / Ryzen AI
+Max boxes included) see **[docs/engine-setup-linux.md](docs/engine-setup-linux.md)**
+for the full Arch/Omarchy walkthrough, and `./install-service.sh` to run Aegis
+as a systemd service.
+
 ### Docker (Windows / macOS / Linux)
 
 Requires [Docker](https://docs.docker.com/get-docker/) with Compose:
