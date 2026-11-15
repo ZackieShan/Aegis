@@ -47,17 +47,62 @@ def _config_path() -> str:
 
 # ── hardware ──────────────────────────────────────────────────────────────────
 def gpu_vram_mb() -> Optional[int]:
-    """Total VRAM of the first CUDA GPU, in MiB (None if no nvidia-smi)."""
+    """Usable GPU memory in MiB — NVIDIA via nvidia-smi, else AMD via sysfs
+    (/sys/class/drm). None when neither reports a GPU."""
     exe = _which("nvidia-smi")
-    if not exe:
-        return None
-    try:
-        out = subprocess.run([exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                             capture_output=True, text=True, timeout=10)
-        line = (out.stdout or "").strip().splitlines()
-        return int(line[0].strip()) if line else None
-    except Exception:
-        return None
+    if exe:
+        try:
+            out = subprocess.run([exe, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=10)
+            line = (out.stdout or "").strip().splitlines()
+            if line:
+                return int(line[0].strip())
+        except Exception:
+            pass
+    return _amd_vram_mb()
+
+
+def _amd_vram_mb(sysfs_root: str = "/sys/class/drm") -> Optional[int]:
+    """AMD GPU memory in MiB straight from the kernel — no rocm-smi needed.
+
+    Mirrors services/hwfit/hardware._detect_amd: a discrete card reports its
+    real pool in mem_info_vram_total, while an APU like Strix Halo carves out
+    a tiny BIOS VRAM slice and pages GPU allocations from GTT, so there the
+    usable budget is max(vis_vram, gtt). Returns the max across cards, None
+    when no AMD card is found.
+    """
+    import glob
+    mib = 1024 * 1024
+
+    def _read_int(path: str) -> int:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                raw = f.read().strip()
+            return int(raw) if raw.isdigit() else 0
+        except OSError:
+            return 0
+
+    best = None
+    for dev in glob.glob(os.path.join(sysfs_root, "card*", "device")):
+        if "-" in os.path.basename(os.path.dirname(dev)):
+            continue  # cardN-DP-1 etc. are connectors, not GPUs
+        try:
+            with open(os.path.join(dev, "vendor"), "r", encoding="utf-8", errors="replace") as f:
+                vendor = f.read().strip()
+        except OSError:
+            continue
+        if vendor != "0x1002":
+            continue
+        vram = _read_int(os.path.join(dev, "mem_info_vram_total"))
+        if vram >= 4 * 1024 * mib:
+            total = vram // mib  # discrete card — VRAM is the real pool
+        else:
+            # APU with a small carveout: GTT (or vis_vram) is the real pool.
+            total = max(_read_int(os.path.join(dev, "mem_info_vis_vram_total")),
+                        _read_int(os.path.join(dev, "mem_info_gtt_total"))) // mib
+        if total > 0 and (best is None or total > best):
+            best = total
+    return best
 
 
 def system_ram_mb() -> Optional[int]:
@@ -237,7 +282,7 @@ def recommend_context(model_path: str, mmproj_path: Optional[str] = None,
 
     if not (vram_mb and weights_mb and kv_ptok):
         result["recommended"] = None
-        result["reason"] = "insufficient info (need nvidia-smi + gguf metadata)"
+        result["reason"] = "insufficient info (need nvidia-smi or AMD sysfs + gguf metadata)"
         return result
 
     kv_ptok_mb = kv_ptok / (1024 * 1024)

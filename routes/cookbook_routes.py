@@ -2968,6 +2968,39 @@ def setup_cookbook_routes() -> APIRouter:
                 gpus[0]["busy"] = True
         return gpus
 
+    async def _estimate_swap_reclaimable(gpus: list[dict]) -> None:
+        """Reclaimable-VRAM estimate that needs no per-process memory data.
+
+        When per-process attribution left reclaimable_mb at 0, fall back to
+        what llama-swap says is running: weights (GGUF file size) + a KV/
+        runtime overhead allowance, attributed to GPU 0 (the engine's device),
+        capped at that GPU's actual used memory. Mutates `gpus` in place;
+        callers only run this for the local host.
+        """
+        try:
+            if gpus[0].get("reclaimable_mb", 0) == 0:
+                from routes.engine_routes import swap_running_models
+                from src import engine_tuner
+                running = await swap_running_models()
+                est = 0
+                if running:
+                    text = engine_tuner._read_config() or ""
+                    blocks = {b["name"]: b["text"] for b in engine_tuner._model_blocks(text)}
+                    for m in running:
+                        body = blocks.get(m, "")
+                        pm = engine_tuner._M_RE.search(body)
+                        dm = re.search(r'--diffusion-model\s+"([^"]+)"', body)
+                        path = (pm or dm).group(1) if (pm or dm) else None
+                        try:
+                            est += int(os.path.getsize(path) / (1024 * 1024)) + 1500 if path else 0
+                        except OSError:
+                            pass
+                if est:
+                    gpus[0]["reclaimable_mb"] = min(est, gpus[0].get("used_mb", 0))
+                    gpus[0]["reclaimable_models"] = running
+        except Exception:
+            pass
+
     async def _probe_apple_unified_memory(host: str | None, ssh_port: str | None) -> dict | None:
         """Best-effort Apple Silicon unified-memory probe, local or over SSH."""
         cmd = (
@@ -3134,32 +3167,8 @@ def setup_cookbook_routes() -> APIRouter:
             # Windows WDDM often hides per-process memory from nvidia-smi
             # ([N/A]), so process attribution can come back empty even while a
             # swap-managed model is resident. Fall back to estimating from what
-            # llama-swap says is running: weights (GGUF file size) + a KV/CUDA
-            # overhead allowance, attributed to GPU 0 (the engine's device),
-            # capped at that GPU's actual used memory.
-            try:
-                if gpus[0].get("reclaimable_mb", 0) == 0:
-                    from routes.engine_routes import swap_running_models
-                    from src import engine_tuner
-                    running = await swap_running_models()
-                    est = 0
-                    if running:
-                        text = engine_tuner._read_config() or ""
-                        blocks = {b["name"]: b["text"] for b in engine_tuner._model_blocks(text)}
-                        for m in running:
-                            body = blocks.get(m, "")
-                            pm = engine_tuner._M_RE.search(body)
-                            dm = re.search(r'--diffusion-model\s+"([^"]+)"', body)
-                            path = (pm or dm).group(1) if (pm or dm) else None
-                            try:
-                                est += int(os.path.getsize(path) / (1024 * 1024)) + 1500 if path else 0
-                            except OSError:
-                                pass
-                    if est:
-                        gpus[0]["reclaimable_mb"] = min(est, gpus[0].get("used_mb", 0))
-                        gpus[0]["reclaimable_models"] = running
-            except Exception:
-                pass
+            # llama-swap says is running (see _estimate_swap_reclaimable).
+            await _estimate_swap_reclaimable(gpus)
 
         if gpus:
             return {"ok": True, "gpus": gpus, "backend": "cuda", "source": "nvidia-smi"}
@@ -3212,6 +3221,14 @@ def setup_cookbook_routes() -> APIRouter:
 
         amd_gpus = await _probe_amd_sysfs(host, ssh_port)
         if amd_gpus:
+            # The sysfs probe carries no per-process VRAM figures, so the
+            # per-process reclaimable pass can't run here — but the llama-swap
+            # running-models estimate needs none. Local host only, same as the
+            # nvidia branch: remote GPUs aren't behind this machine's engine.
+            if not host:
+                for g in amd_gpus:
+                    g["reclaimable_mb"] = 0
+                await _estimate_swap_reclaimable(amd_gpus)
             # The per-GPU dict already carries the runtime label picked by
             # _probe_amd_sysfs (rocm vs vulkan); mirror that into the
             # wrapper so the frontend can read `data.backend` directly

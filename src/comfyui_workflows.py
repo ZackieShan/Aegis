@@ -21,6 +21,13 @@ def _models_dir() -> str:
     return os.path.join(BASE_DIR, "models")
 
 
+# Torch device for the few nodes that take an explicit device string. ROCm
+# torch masquerades as cuda, so "cuda:0" is right on NVIDIA and AMD GPU venvs
+# alike; set AEGIS_COMFY_DEVICE (e.g. "cpu") for CPU-only ComfyUI installs.
+def _comfy_device() -> str:
+    return os.environ.get("AEGIS_COMFY_DEVICE", "cuda:0")
+
+
 # lightx2v 4-step distillation LoRAs for Wan2.2 T2V — shared between this
 # module's ComfyUI graph and the native sd-server path (video_generation
 # splices them into the prompt via sd.cpp's <lora:...> syntax).
@@ -894,12 +901,12 @@ def seedvr2_upscale_graph(
         "1": {"class_type": "LoadVideo", "inputs": {"file": video_file}},
         "2": {"class_type": "GetVideoComponents", "inputs": {"video": ["1", 0]}},
         "3": {"class_type": "SeedVR2LoadDiTModel", "inputs": {
-            "model": "seedvr2_ema_7b_fp8_e4m3fn.safetensors", "device": "cuda:0",
+            "model": "seedvr2_ema_7b_fp8_e4m3fn.safetensors", "device": _comfy_device(),
             "blocks_to_swap": int(blocks_to_swap), "swap_io_components": False,
             "offload_device": "cpu", "cache_model": False, "attention_mode": "sdpa",
         }},
         "4": {"class_type": "SeedVR2LoadVAEModel", "inputs": {
-            "model": "ema_vae_fp16.safetensors", "device": "cuda:0",
+            "model": "ema_vae_fp16.safetensors", "device": _comfy_device(),
             "encode_tiled": True, "encode_tile_size": 1024, "encode_tile_overlap": 128,
             "decode_tiled": True, "decode_tile_size": 768, "decode_tile_overlap": 128,
             "tile_debug": "false", "offload_device": "cpu", "cache_model": False,
