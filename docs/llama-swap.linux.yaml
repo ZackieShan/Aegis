@@ -1,0 +1,613 @@
+# llama-swap config TEMPLATE for the Linux/Omarchy engine (AMD Strix Halo).
+# This is a GENERATED-TEMPLATE source: the literal tokens __ENGINE_DIR__ and
+# __MODELS_DIR__ are replaced with absolute paths (forward slashes) by
+# scripts/setup-engine.sh, which installs the result to
+# $ENGINE_DIR/llama-swap.yaml. Ported 2026-11-14 from the Windows engine
+# config (engine/llama-swap.yaml on the 4090 box).
+#
+# One stable OpenAI endpoint, hot-swaps GGUFs on demand. Each model loads on
+# first request and unloads after `ttl` idle seconds, so only one big model
+# occupies the GPU at a time.
+#
+# Serving surfaces per model type:
+#   text   -> llama-server (OpenAI chat)
+#   image  -> sd-server: /v1/images/generations + /v1/images/edits (multipart,
+#             routed by the form's model field)
+#   video  -> sd-server: async /sdcpp/v1/vid_gen + /sdcpp/v1/jobs/{id}, reached
+#             via llama-swap's /upstream/<alias>/ passthrough (Aegis /video)
+#
+# Strix Halo notes: the Radeon 8060S draws from 128GB of unified LPDDR5X, so
+# the 24GB-VRAM spill tunings the Windows config carried (partial offload and
+# expert-in-RAM flags) are gone -- every GPU-group entry runs full offload.
+# The 50GB+ models additionally need the GTT kernel tuning from the docs
+# (ttm pages_limit / page_pool_size) before they can load. If the engine was
+# built with --backend rocm, add --no-mmap to the llama-server entries (ROCm
+# >64GB mmap bug); the default Vulkan build needs no change.
+healthCheckTimeout: 300
+logLevel: info
+
+models:
+  # 32K context: agentic coding + tool schemas easily exceed 8K (that's the
+  # "request exceeds available context size" 400). At Q4 the 17GB weights + a
+  # 32K KV cache (~3GB with flash attn) are a light load for unified memory.
+  # Native ceiling is 256K -- raise -c further (add --cache-type-k/v q8_0 to
+  # halve KV memory) if you need it, watching GTT headroom.
+  "qwen3-coder-30b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3-Coder-30B-A3B-Instruct-Q4_0.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 45056 -fa on --jinja --no-webui
+    ttl: 600
+
+  # Uncensored Gemma finetune (16GB Q4). Full GPU offload; gemma KV is huge
+  # (~469MB/1k tokens) so the proven 8K context is kept -- raise -c if you
+  # need more, unified memory has the room.
+  "supergemma4-26b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/supergemma4-26b-uncensored-fast-v2-Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 8192 -fa on --jinja --no-webui
+    ttl: 600
+
+  # Uncensored 4B at BF16 (8.4GB) -- small enough to sit fully on the GPU with
+  # a large context. Fast daily driver for unfiltered offline work.
+  "qwen3.5-4b-uncensored":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-BF16.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 32768 -fa on --jinja --no-webui
+    ttl: 600
+
+  # Big generalist (22.9GB Q6). The Windows box ran this partially offloaded
+  # to dodge the 24GB 4090 spill; on unified memory it offloads fully.
+  "qwen3.6-27b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-27B-Q6_K.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 8192 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --jinja --no-webui
+    ttl: 600
+
+  # DavidAU NEO-CODE variant of the 27B (22.4GB Q6) -- same recipe as
+  # qwen3.6-27b above.
+  "qwen3.6-27b-neo":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q6_K.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 8192 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --jinja --no-webui
+    ttl: 600
+
+  # 35B MoE, A3B (only ~3B params active per token). The 36.9GB Q8 sits fully
+  # GPU-resident in unified memory.
+  # enable_thinking:false is REQUIRED on every Qwen3.6 (the template hard-starts
+  # reasoning; without it the model's chain-of-thought streams out as the visible
+  # reply). --dry-multiplier is the DRY anti-repetition sampler -- this MoE at Q8
+  # can fall into verbatim "Okay. I'm ready." loops in long chats without it.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwen3.6-35b-a3b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-35B-A3B-Q8_0.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --dry-multiplier 0.8
+      --jinja --no-webui
+    ttl: 600
+
+  # GLM-4.7-Flash (deepseek2 arch: 64x2.6B MoE, 4 active + 1 shared expert,
+  # MLA attention) finetuned on Claude 4.5 Opus high-reasoning traces -- the
+  # strongest generalist in models/. bf16 55.8GB: needs the GTT kernel tuning
+  # from the docs before it can load fully GPU-resident. MLA keeps the KV
+  # cache tiny, so 65536 ctx is cheap (native ceiling 202K -- raise -c freely).
+  # It is a reasoning distill: it emits <think> blocks, which --jinja parses
+  # into reasoning_content (kept out of the visible reply). If it ever leaks
+  # thinking into content, add --reasoning-format deepseek.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "glm-4.7-flash":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/glm-4.7-flash-claude-4.5-opus.bf16.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --jinja --no-webui
+    ttl: 600
+
+  # Same Claude-Opus-distilled GLM-4.7-Flash as above at Q4_K_M (18.1GB,
+  # TeichAI official quant) -- the fast daily driver of the pair. Keep the
+  # bf16 entry for max quality; this one for speed. MLA keeps KV tiny at
+  # 65K ctx.
+  "glm-4.7-flash-q4":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/glm-4.7-flash-claude-4.5-opus.q4_k_m.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --jinja --no-webui
+    ttl: 600
+
+  # DavidAU uncensored GLM-4.7-Flash (Heretic NEO-CODE imatrix, 18.5GB Q4) --
+  # same deepseek2 arch, fully GPU-resident. The uncensored counterpart to
+  # the Opus distill above.
+  "glm-4.7-flash-uncensored":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --jinja --no-webui
+    ttl: 600
+
+  # Qwen-AgentWorld-35B-A3B (unsloth UD-Q4_K_XL 22.3GB) -- agentic/tool-use
+  # specialist in the same 35B-A3B family as the daily drivers.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwen-agentworld-35b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen-AgentWorld-35B-A3B-UD-Q4_K_XL.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --jinja --no-webui
+    ttl: 600
+
+  # Kimi-Linear-48B-A3B-Instruct (bartowski Q4_K_M 30.1GB) -- Moonshot's
+  # linear-attention MoE; KV stays cheap even at huge contexts, so this is
+  # the long-document/research pick.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "kimi-linear-48b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/moonshotai_Kimi-Linear-48B-A3B-Instruct-Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --jinja --no-webui
+    ttl: 600
+
+  # Qwen3-Coder-Next 80B-A3B (unsloth UD-Q4_K_XL 49.6GB) -- current-gen big
+  # coder, the heavyweight upgrade over qwen3-coder-30b for agentic coding.
+  # Hybrid-linear attention keeps KV modest. Needs the GTT kernel tuning from
+  # the docs before the weights can load fully GPU-resident.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwen3-coder-next-80b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3-Coder-Next-UD-Q4_K_XL.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --jinja --no-webui
+    ttl: 600
+
+  # THE BIG ONE -- Qwopus3.5 122B-A10B (75.8GB Q4_K_M): Kimi-K2.6 distill with
+  # healed abliteration (post-abliteration retraining recovers the quality raw
+  # abliteration costs). Largest uncensored model this box can serve; the
+  # 75.8GB of weights need the GTT kernel tuning from the docs. Do not expect
+  # GLM speeds -- A10B active params move per token on the iGPU.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwopus-122b-uncensored":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwopus3.5-122B-A10B-Kimi-K2.6-destill-healed-abliterated-Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 32768 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --jinja --no-webui
+    ttl: 600
+
+  # DavidAU Qwen3.6-40B "Deckard" (28.2GB Q5_K_M) -- Claude 4.6 Opus THINKING
+  # flavor, heretic-uncensored, MoE upscale of the 35B-A3B family. Thinking is
+  # left ON (it is the point of this model); --jinja parses it into
+  # reasoning_content (verified). The Windows config carried a 24GB-4090
+  # partial-offload sweep for this entry; that spill choreography is moot on
+  # unified memory -- full offload. Vision variant below.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwen3.6-40b-deckard":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-Q5_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 16384 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --dry-multiplier 0.8
+      --jinja --no-webui
+    ttl: 600
+
+  # Vision-enabled Deckard: same weights + the F32 mmproj, context kept at the
+  # proven 8K to leave headroom for projector + image-encode buffers. Use this
+  # one only when a chat actually includes images.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwen3.6-40b-deckard-vision":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-40B-Deck-Opus-NEO-CODE-HERE-2T-OT-Q5_K_M.gguf"
+      --mmproj "__MODELS_DIR__/mmproj-Qwen3.6-40B-Deckard-F32.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 8192 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --dry-multiplier 0.8
+      --jinja --no-webui
+    ttl: 600
+
+  # Huihui abliterated 35B-A3B on the Claude 4.7 Opus distill base (25.3GB
+  # Q5_K) -- direct upgrade over the HauhauCS 35B uncensored: newer base, one
+  # quant tier up.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "huihui-35b-opus-abliterated":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-Q5_K.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --dry-multiplier 0.8
+      --jinja --no-webui
+    ttl: 600
+
+  # Phi-4-14B distilled from gpt-oss-120b (14.5GB Q8). Dense, fully
+  # GPU-resident with a 16K window.
+  "gpt-oss-distill-14b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/gpt-oss-120b-Distill-Phi-4-14B.Q8_0.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 16384 -fa on --jinja --no-webui
+    ttl: 600
+
+  # Qwen2.5-14B CIC-ACLARC finetune (14.6GB Q8) -- citation/classification
+  # specialist the user dropped in models/.
+  "qwen2.5-14b-aclarc":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen2.5-14B-CIC-ACLARC-Q8_0.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 16384 -fa on --jinja --no-webui
+    ttl: 600
+
+  # DavidAU Fable-Fus 27B merge at Q5_K_M (19.3GB) -- full offload with a q8
+  # KV cache at 8K. (The Windows note about dropping to partial offload on
+  # VRAM spill does not apply on unified memory.)
+  "qwen3.6-27b-fable-fus":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-Q5_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 8192 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --jinja --no-webui
+    ttl: 600
+
+  # Uncensored 35B MoE at Q4_K_P (21.8GB). Fastest variant; the Q8_K_P entry
+  # below trades ~40% speed for max quality.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwen3.6-35b-a3b-uncensored":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --dry-multiplier 0.8
+      --jinja --no-webui
+    ttl: 600
+
+  # Same uncensored 35B MoE at Q8_K_P (40.6GB) -- near-lossless quant; pick
+  # this one when answer quality matters more than speed.
+  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
+  "qwen3.6-35b-a3b-uncensored-q8":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 65536 -fa on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --dry-multiplier 0.8
+      --jinja --no-webui
+    ttl: 600
+
+  # sulphur_dev finetune (13.3GB Q4_K_M) -- generic serving flags; adjust if
+  # its template misbehaves.
+  "sulphur-dev":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/sulphur_dev-Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 16384 -fa on --jinja --no-webui
+    ttl: 600
+
+  # TableLLM-13b (CodeLlama-13B base, 7.3GB Q4) -- table/spreadsheet QA
+  # specialist.
+  "tablellm-13b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/TableLLM-13b.Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 8192 -fa on --jinja --no-webui
+    ttl: 600
+
+  # LOCAL IMAGE GENERATION -- Qwen-Image (diffusion) under stable-diffusion.cpp's
+  # sd-server, which speaks OpenAI's /v1/images/generations. Text encoder runs on
+  # CPU (one pass per prompt) so the 20.7GB Q8 diffusion model stays resident on
+  # the GPU. (The Windows 4090 did ~25s per 512x512 image; expect slower on the
+  # 8060S iGPU.) sd-server has no /health route, so health-check /v1/models
+  # instead.
+  "qwen-image":
+    cmd: |
+      "__ENGINE_DIR__/sdcpp/sd-server"
+      --diffusion-model "__MODELS_DIR__/qwen-image/qwen-image-2512-Q8_0.gguf"
+      --llm "__MODELS_DIR__/qwen-image/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
+      --vae "__MODELS_DIR__/qwen-image/qwen_image_vae.safetensors"
+      --backend clip=cpu
+      --diffusion-fa --vae-tiling
+      --lora-model-dir "__MODELS_DIR__/loras"
+      --listen-port ${PORT}
+    checkEndpoint: /v1/models
+    ttl: 300
+
+  # IMAGE EDITING -- Qwen-Image-Edit 2511 (img2img / inpaint / instruction edit)
+  # under sd-server's /v1/images/edits. Reuses the SAME VAE + Qwen2.5-VL text
+  # encoder as qwen-image. qwen_image_zero_cond_t=true is REQUIRED for the 2511
+  # checkpoint (edit quality collapses without it, per sd.cpp docs).
+  "qwen-image-edit":
+    cmd: |
+      "__ENGINE_DIR__/sdcpp/sd-server"
+      --diffusion-model "__MODELS_DIR__/qwen-image-edit-2511-Q8_0.gguf"
+      --llm "__MODELS_DIR__/qwen-image/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
+      --vae "__MODELS_DIR__/qwen-image/qwen_image_vae.safetensors"
+      --model-args qwen_image_zero_cond_t=true
+      --cfg-scale 2.5 --flow-shift 3
+      --backend clip=cpu
+      --offload-to-cpu
+      --diffusion-fa --vae-tiling
+      --lora-model-dir "__MODELS_DIR__/loras"
+      --listen-port ${PORT}
+    checkEndpoint: /v1/models
+    # Edits render slower than plain generation; keep a longer idle window so
+    # the TTL can never fire while a legitimate render is still in flight.
+    ttl: 600
+
+  # Uncensored Qwen-Image merge (Phr00t Rapid, 21.75GB Q8) -- same qwen_image
+  # architecture, reuses the stock VAE + Qwen2.5-VL text encoder. Rapid merges
+  # are step-distilled: server defaults set to 8 steps / CFG 1.0.
+  "qwen-image-rapid-nsfw":
+    cmd: |
+      "__ENGINE_DIR__/sdcpp/sd-server"
+      --diffusion-model "__MODELS_DIR__/Qwen-Rapid-NSFW-v18.1_Q8_0.gguf"
+      --llm "__MODELS_DIR__/qwen-image/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
+      --vae "__MODELS_DIR__/qwen-image/qwen_image_vae.safetensors"
+      --backend clip=cpu
+      --diffusion-fa --vae-tiling
+      --steps 8 --cfg-scale 1.0
+      --lora-model-dir "__MODELS_DIR__/loras"
+      --listen-port ${PORT}
+    checkEndpoint: /v1/models
+    ttl: 300
+
+  # LOCAL VIDEO GENERATION -- Wan2.2 T2V A14B (dual high/low-noise experts).
+  # Video is served on sd-server's native async API only: Aegis submits to
+  # /upstream/wan2.2-t2v/sdcpp/v1/vid_gen and polls the returned job (the
+  # /video slash command drives this). Flags per sd.cpp docs/wan.md. The umt5
+  # text encoder runs on CPU; both diffusion experts (7.2GB each) sit on the
+  # GPU.
+  #
+  # 4+4 steps assume the lightx2v Lightning LoRAs: Aegis splices
+  # <lora:...low_noise:1><lora:|high_noise|...high_noise:1> into every native
+  # Wan T2V prompt (src/video_generation.apply_wan_lightning) -- the distilled
+  # schedule converges in 4 steps where the base model needed 20+, which is
+  # both ~4x faster AND what fixes mushy hands/fingers at these step counts.
+  # If models/loras/wan2.2_t2v_lightx2v_* are ever removed, raise steps back
+  # to ~20/20.
+  "wan2.2-t2v":
+    cmd: |
+      "__ENGINE_DIR__/sdcpp/sd-server"
+      --diffusion-model "__MODELS_DIR__/Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf"
+      --high-noise-diffusion-model "__MODELS_DIR__/Wan2.2-T2V-A14B-HighNoise-Q3_K_M.gguf"
+      --t5xxl "__MODELS_DIR__/video/umt5-xxl-encoder-Q8_0.gguf"
+      --vae "__MODELS_DIR__/video/wan_2.1_vae.safetensors"
+      --backend clip=cpu
+      --sampling-method euler --steps 4 --cfg-scale 3.5
+      --high-noise-sampling-method euler --high-noise-steps 4 --high-noise-cfg-scale 3.5
+      --flow-shift 3.0
+      --diffusion-fa --vae-tiling
+      --lora-model-dir "__MODELS_DIR__/loras"
+      --listen-port ${PORT}
+    checkEndpoint: /v1/models
+    ttl: 600
+
+  # LTX-2.3 22B dev -- joint VIDEO+AUDIO generation, same async vid_gen API as
+  # wan2.2-t2v. Gemma-3-12B text encoder on CPU; flags per sd.cpp docs/ltx2.md
+  # (euler, cfg 6.0). ~18GB resident on the GPU: keep test renders modest
+  # (e.g. 512x288); very large sizes (1280x720) may need --offload-to-cpu.
+  #
+  # NOTE: the LTX-2 19B phr00t merges (ltx2-phr00tmerge-*.gguf in models/) are
+  # NOT servable by sd.cpp -- its LTX loader only parses the LTX-2.3
+  # companion tensor layout (vocoder fused into the audio VAE, connectors keyed
+  # text_embedding_projection.*); verified "model metadata validation failed".
+  # Those merges run in ComfyUI instead.
+  "ltx2.3-video":
+    cmd: |
+      "__ENGINE_DIR__/sdcpp/sd-server"
+      --diffusion-model "__MODELS_DIR__/ltx-2.3-22b-dev-UD-Q4_K_M.gguf"
+      --llm "__MODELS_DIR__/video/gemma-3-12b-it-UD-Q4_K_XL.gguf"
+      --vae "__MODELS_DIR__/video/ltx-2.3-22b-dev_video_vae.safetensors"
+      --audio-vae "__MODELS_DIR__/video/ltx-2.3-22b-dev_audio_vae.safetensors"
+      --embeddings-connectors "__MODELS_DIR__/video/ltx-2.3-22b-dev_embeddings_connectors.safetensors"
+      --backend clip=cpu
+      --sampling-method euler --cfg-scale 6.0
+      --diffusion-fa --vae-tiling
+      --lora-model-dir "__MODELS_DIR__/loras"
+      --listen-port ${PORT}
+    checkEndpoint: /v1/models
+    ttl: 600
+
+  # VOICE CLONING -- Chatterbox (Resemble AI, MIT) behind the same OpenAI
+  # surface: llama-swap body-routes /v1/audio/speech on model "chatterbox-tts".
+  # Voices are the user's cloned samples in data/voices (Settings -> TTS ->
+  # My Voices); __MODELS_DIR__ is <repo>/models, so ../data/voices resolves
+  # to the repo's data/voices. The server starts instantly (health passes)
+  # and lazy-loads the 3.2GB model on the first request; ~5GB of GPU memory
+  # while resident, ttl returns it. Kokoro (CPU) stays the instant default
+  # voice path.
+  "chatterbox-tts":
+    cmd: |
+      "__ENGINE_DIR__/chatterbox/venv/bin/python"
+      "__ENGINE_DIR__/chatterbox/server.py"
+      --host 127.0.0.1 --port ${PORT}
+      --voices-dir "__MODELS_DIR__/../data/voices"
+    checkEndpoint: /health
+    ttl: 300
+
+  # VOICE CLONING #2 -- Qwen3-TTS-12Hz-1.7B-Base (Apache-2.0) behind the same
+  # OpenAI surface: llama-swap body-routes /v1/audio/speech on model
+  # "qwen3-tts". Reads the SAME cloned samples in data/voices as Chatterbox;
+  # an optional <name>.txt sidecar transcript upgrades a clone from
+  # x-vector-only to full ICL quality. Starts instantly (health passes) and
+  # lazy-loads the 1.7B on first request; ~5GB of GPU memory while resident,
+  # warm synthesis ~2x realtime (Chatterbox is ~4x), ttl returns the memory.
+  "qwen3-tts":
+    cmd: |
+      "__ENGINE_DIR__/qwen3tts/venv/bin/python"
+      "__ENGINE_DIR__/qwen3tts/server.py"
+      --host 127.0.0.1 --port ${PORT}
+      --voices-dir "__MODELS_DIR__/../data/voices"
+    checkEndpoint: /health
+    ttl: 300
+
+  # Vision-capable model for screenshot-grounded browser/computer control (Phase 4).
+  # Qwen2.5-VL-3B (ggml-org GGUF + matching mmproj) -- a light (~3.3GB) multimodal
+  # model that SEES page screenshots. Browser automation defaults to the reliable
+  # a11y-snapshot mode; this adds screenshot vision as a failover for canvas/image
+  # -only pages. (The gemma-4-12b + mmproj-F32 files in models/ are a mismatched
+  # pair -- n_embd 3840 vs 2816 -- so they can't be used for vision.)
+  "qwen-vl":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen2.5-VL-3B-Instruct/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+      --mmproj "__MODELS_DIR__/Qwen2.5-VL-3B-Instruct/mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 126976 --no-webui
+    ttl: 600
+
+  # CPU-ONLY CHAT FALLBACK -- the escape hatch for GPU contention.
+  #
+  # While a render holds the GPU, llama-swap's answer to contention is
+  # eviction: a chat request for any GPU model STOPS the render mid-job
+  # (verified -- without the groups below, loading a second model unloads the
+  # first). This entry runs the small 3B entirely on CPU: --device none
+  # guarantees zero GPU allocation (backend-agnostic: it means the same thing
+  # on Vulkan and ROCm builds), so chat and an in-flight render coexist on the
+  # single iGPU. Aegis routes chat here automatically while a media job is in
+  # flight. Text-only: no --mmproj.
+  #
+  # 32K context, not 8K: agent mode spends thousands of tokens on tool schemas
+  # and the system prompt before the user's message even lands, and this model
+  # stands in for a 45K-context coder model. KV lives in ordinary CPU pages
+  # here, so the window costs no GTT. Keep gpu_guard.FALLBACK_CONTEXT in sync
+  # with it.
+  #
+  # NB: comments must stay OUT of the `cmd: |` literal block below -- YAML does
+  # not strip them there, so a '#' line would be handed to llama-server as
+  # arguments and the model would fail to load.
+  "chat-lite-cpu":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen2.5-VL-3B-Instruct/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      --device none -ngl 0 -c 32768 -fa on --jinja --no-webui
+    # Costs no GPU memory, so keep it warm far longer than the GPU models -- it
+    # should be ready the moment a render starts, not cold-loading while the
+    # user waits.
+    ttl: 1800
+
+  # CPU-ONLY CHAT FALLBACK, BIG EDITION -- the same uncensored 35B MoE the
+  # user chats on normally, run entirely on CPU threads (--device none: zero
+  # GPU allocation). A3B active params on the 16-core Zen 5 with LPDDR5X
+  # decode at usable chat speed; replies during renders come from the same
+  # brain as always instead of a 3B stand-in. ~22GB resident while warm --
+  # affordable in 128GB. chat-lite-cpu above stays wired as the lightweight
+  # option. Context matches gpu_guard.FALLBACK_CONTEXT (32K) like
+  # chat-lite-cpu does.
+  "chat-moe-cpu":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      --device none -ngl 0 -c 32768 -fa on
+      --chat-template-kwargs "{\"enable_thinking\":false}"
+      --dry-multiplier 0.8
+      --jinja --no-webui
+    ttl: 1800
+
+
+# -- Groups: who is allowed to share the GPU --
+# Without this section every model lands in one implicit group where any load
+# evicts whatever is already loaded -- including stopping an in-flight render.
+# Verified on llama-swap v238: no groups => second load evicts the first;
+# with these groups => the CPU model and a GPU model coexist in both orders.
+groups:
+  # Everything that wants the GPU. Each of these can claim most of the unified
+  # memory budget, so: one at a time (swap), and it may evict its peers
+  # (exclusive). This is exactly the behaviour these models already had --
+  # nothing changes for them.
+  gpu:
+    swap: true
+    exclusive: true
+    members:
+      - qwen3-coder-30b
+      - supergemma4-26b
+      - qwen3.5-4b-uncensored
+      - qwen3.6-27b
+      - qwen3.6-27b-neo
+      - qwen3.6-35b-a3b
+      - qwen3.6-35b-a3b-uncensored
+      - qwen3.6-35b-a3b-uncensored-q8
+      - glm-4.7-flash
+      - glm-4.7-flash-q4
+      - glm-4.7-flash-uncensored
+      - qwen-agentworld-35b
+      - kimi-linear-48b
+      - qwen3-coder-next-80b
+      - qwopus-122b-uncensored
+      - qwen3.6-40b-deckard
+      - qwen3.6-40b-deckard-vision
+      - huihui-35b-opus-abliterated
+      - qwen3.6-27b-fable-fus
+      - gpt-oss-distill-14b
+      - qwen2.5-14b-aclarc
+      - sulphur-dev
+      - tablellm-13b
+      - qwen-vl
+      - qwen-image
+      - qwen-image-edit
+      - qwen-image-rapid-nsfw
+      - wan2.2-t2v
+      - ltx2.3-video
+      - chatterbox-tts
+      - qwen3-tts
+  # The CPU fallback.
+  #   exclusive: false -> loading it never evicts a live render.
+  #   persistent: true -> a render loading never evicts it.
+  # Both halves are required; either alone still breaks in one direction.
+  cpu:
+    swap: false
+    exclusive: false
+    persistent: true
+    members:
+      - chat-lite-cpu
+      - chat-moe-cpu

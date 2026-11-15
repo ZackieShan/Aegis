@@ -1,0 +1,45 @@
+# Aegis model drop folder — every category points into the same models/ tree
+# llama-swap/sd-server already serve from, so nothing is duplicated on disk.
+# Model files live flat in the root plus the video/, qwen-image/ and audio/
+# subdirs; LTX/Wan companions (VAEs, text encoders, connectors) live in
+# video/, ACE-Step music files in audio/.
+aegis:
+  base_path: __MODELS_DIR__
+  is_default: true
+  checkpoints: |
+    .
+    video
+    image
+    audio
+  diffusion_models: |
+    .
+    video
+    qwen-image
+    image
+    audio
+  vae: |
+    .
+    video
+    qwen-image
+    image
+    audio
+  text_encoders: |
+    .
+    video
+    qwen-image
+    image
+    audio
+  controlnet: controlnet
+  # Custom-node categories: registering them here (yaml loads BEFORE custom
+  # nodes import) points the packs at the aegis tree instead of their default
+  # ComfyUI/models/<name> dirs.
+  mmaudio: audio
+  seedvr2: video
+  foley: audio
+  loras: loras
+  embeddings: loras
+  upscale_models: upscale_models
+  clip_vision: |
+    .
+    video
+  audio_encoders: video

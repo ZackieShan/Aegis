@@ -10,6 +10,10 @@ This guide gets a fresh clone from "app only" to the full local stack.
 > **Platform:** Windows + an NVIDIA GPU. The prebuilt binaries are CUDA 12; the
 > setup script is PowerShell. On Linux/macOS the same pieces exist — grab the
 > matching release binaries and mirror the layout below.
+>
+> **Linux / AMD?** There is a dedicated installer and guide for Linux (Arch/
+> Omarchy, AMD Strix Halo, Vulkan/ROCm — no CUDA): see
+> [engine-setup-linux.md](engine-setup-linux.md) and `scripts/setup-engine.sh`.
 
 ## Layout
 
