@@ -91,14 +91,6 @@ you fit them to your machine:
 - **Coding agent** (`/code`) — edits real files in a git-aware workspace.
 - **Code Canvas** (`/canvas`) — generate code, edit it inline, tell the AI what to change, and **run it**.
 - **Repo → Wiki** (`/wiki`) — turn any local repo into a structured Overview / Architecture / module guide.
-- A **Coder Model** setting (Settings → AI Defaults) pins both to the model you want —
-  or leave it on auto-pick (local endpoints first, coder-named models preferred).
-
-**Organize your media library**
-- The Photos / Movies & TV / Music organizer suite has grown into its own standalone
-  project: **[Media Organizer](https://github.com/ZackieShan/media-organizer)** — read-only
-  scans, dedupe, TMDB/MusicBrainz identification, Plex-ready layouts, and a
-  plan → preview → execute → undo design where duplicates are quarantined, never deleted.
 
 **Create & converse**
 - **Studio** (`/studio`) — one home for all your media, organized as explicit makers:
@@ -151,6 +143,10 @@ you fit them to your machine:
 - **Y2K easter eggs** — Bonzi Buddy (`/bonzi`) supervises your chats, and the **Aegis Amp**
   (`/winamp`) is a classic-late-90s-skinned floating player for your Studio songs — green
   LCD, spectrum bars, beveled buttons. It really whips the llama's ass.
+- **Aegis 98** (`/win98`) — the full Windows 98 desktop mode: teal desktop with
+  double-clickable program icons (Aegis Instant Messenger, AegisWire, Aegis Encarta 99,
+  My Brain...), a taskbar with a Start menu and clock, navy title bars, chunky beveled
+  everything, and DOS-blue code blocks. Start → Shut Down returns you to the future.
 
 **Stay organized**
 - AI-assisted **Documents**, **Email** (IMAP/SMTP triage + drafts), **Notes / Tasks / Calendar**

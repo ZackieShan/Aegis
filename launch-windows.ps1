@@ -214,6 +214,61 @@ if (Test-Path $cudaBase) {
     }
 }
 
+function Test-PortOpen($h, $p) {
+    try { $c = New-Object Net.Sockets.TcpClient; $c.Connect($h, [int]$p); $c.Close(); return $true }
+    catch { return $false }
+}
+
+# Repair mode: Aegis itself is already up. Re-running the launcher then must
+# only ensure the background engines are alive — no PowerShell.Exiting kill
+# handlers (this shell exits right away and would take the engines with it)
+# and no uvicorn (the port is taken; it would exit and fire those handlers).
+# An open port alone isn't proof it's Aegis: require /api/health to answer,
+# otherwise a foreign listener would make this run exit claiming "already
+# running" — or, worse, fall through to uvicorn's port-in-use crash, which
+# fires the kill handlers. Probe the real bind host, not just loopback, so
+# -BindHost <LAN IP> runs are detected as duplicates too.
+$repairMode = $false
+$browseHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
+if (Test-PortOpen $browseHost $Port) {
+    try {
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 ("http://{0}:{1}/api/health" -f $browseHost, $Port) | Out-Null
+        $repairMode = $true
+        Write-Host ""
+        Write-Host ("Aegis is already running on port {0} - repair mode: ensuring engines are up, leaving the server alone." -f $Port) -ForegroundColor Cyan
+    } catch {
+        Fail ("Port {0} on {1} is in use but /api/health does not answer, so it isn't Aegis. Stop whatever holds the port, or re-run with a different -Port." -f $Port, $browseHost)
+    }
+}
+
+# All engine spawns log via -RedirectStandardOutput/-Error. In normal mode the
+# direct spawn is right: -PassThru hands back the exact process the exit
+# handlers kill. But those redirect parameters force the non-ShellExecute
+# CreateProcess path with no console-creation flag, so the child ATTACHES to
+# this console — and closing the window delivers CTRL_CLOSE_EVENT, killing it.
+# Repair mode's engines must outlive this shell (on the double-click path the
+# console closes the instant `exit 0` runs), so there they are spawned through
+# a hidden wrapper powershell instead: plain Start-Process = ShellExecute = the
+# wrapper owns a fresh console, which it keeps alive (-Wait) while doing the
+# same redirection. Returns $null then; repair mode registers no kill handlers.
+function Format-PsLiteral($s) { "'" + ($s -replace "'", "''") + "'" }
+function Start-Engine($exe, $engineArgs, $log, $workDir) {
+    if (-not $repairMode) {
+        $params = @{
+            FilePath = $exe; ArgumentList = $engineArgs; WindowStyle = "Hidden"
+            RedirectStandardOutput = $log; RedirectStandardError = "$log.err"; PassThru = $true
+        }
+        if ($workDir) { $params.WorkingDirectory = $workDir }
+        return Start-Process @params
+    }
+    $inner = "Start-Process -FilePath {0} -ArgumentList @({1}) -WindowStyle Hidden -RedirectStandardOutput {2} -RedirectStandardError {3} -Wait" -f `
+        (Format-PsLiteral $exe), (($engineArgs | ForEach-Object { Format-PsLiteral $_ }) -join ', '), (Format-PsLiteral $log), (Format-PsLiteral "$log.err")
+    if ($workDir) { $inner += " -WorkingDirectory " + (Format-PsLiteral $workDir) }
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+    Start-Process powershell -WindowStyle Hidden -ArgumentList @("-NoProfile", "-EncodedCommand", $encoded) | Out-Null
+    return $null
+}
+
 # 6b. ChromaDB backs vector RAG, semantic memory, and the tool index. Start a
 #     local server from the venv unless one is already reachable, or the app is
 #     configured to use a remote/Docker Chroma (CHROMADB_HOST set to something
@@ -221,31 +276,29 @@ if (Test-Path $cudaBase) {
 $chromaProc = $null
 $chromaHost = if ($env:CHROMADB_HOST) { $env:CHROMADB_HOST } else { "localhost" }
 $chromaPort = if ($env:CHROMADB_PORT) { $env:CHROMADB_PORT } else { "8100" }
-function Test-PortOpen($h, $p) {
-    try { $c = New-Object Net.Sockets.TcpClient; $c.Connect($h, [int]$p); $c.Close(); return $true }
-    catch { return $false }
-}
 if (Test-PortOpen "127.0.0.1" $chromaPort) {
     Write-Host ("ChromaDB already running on 127.0.0.1:{0} - using it." -f $chromaPort) -ForegroundColor Cyan
 } elseif ($chromaHost -notin @("localhost", "127.0.0.1")) {
     Write-Host ("CHROMADB_HOST={0} is remote - not starting a local ChromaDB." -f $chromaHost)
 } else {
-    $chromaExe = Join-Path $PSScriptRoot "venv\Scripts\chroma.exe"
-    if (Test-Path $chromaExe) {
+    # NOT chroma.exe / python -m chromadb: chromadb 1.5.x's CLI mis-parses argv
+    # when argv[0] isn't the literal program name and exits silently with no
+    # server. run_chroma.py calls the Rust CLI correctly (see its docstring).
+    $runChroma = Join-Path $PSScriptRoot "run_chroma.py"
+    if (Test-Path $runChroma) {
         $chromaLog = Join-Path $env:TEMP "aegis-chromadb.log"
         Write-Step ("Starting ChromaDB in the background on 127.0.0.1:{0}" -f $chromaPort)
         Write-Host ("  logging to {0}" -f $chromaLog)
         $chromaDataPath = Join-Path $PSScriptRoot "data\chroma"
-        $chromaProc = Start-Process -FilePath $chromaExe `
-            -ArgumentList @("run", "--host", "127.0.0.1", "--port", "$chromaPort", "--path", $chromaDataPath) `
-            -WindowStyle Hidden -RedirectStandardOutput $chromaLog -RedirectStandardError "$chromaLog.err" -PassThru
+        $chromaProc = Start-Engine $venvPy @($runChroma, "--host", "127.0.0.1", "--port", "$chromaPort", "--path", $chromaDataPath) $chromaLog $PSScriptRoot
     } else {
-        Write-Host "ChromaDB CLI not found in venv; vector search will be degraded (keyword fallback)." -ForegroundColor Yellow
+        Write-Host "run_chroma.py not found; vector search will be degraded (keyword fallback)." -ForegroundColor Yellow
     }
 }
 
 # Stop the background ChromaDB when this launcher exits (Ctrl+C / window close).
-if ($chromaProc) {
+# Skipped in repair mode: this shell exits immediately and the engines must live on.
+if ($chromaProc -and -not $repairMode) {
     $stopChroma = { if ($chromaProc -and -not $chromaProc.HasExited) { try { $chromaProc.Kill() } catch {} } }.GetNewClosure()
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopChroma | Out-Null
 }
@@ -263,13 +316,12 @@ if (Test-PortOpen "127.0.0.1" 11434) {
     if ($ollamaCmd) {
         $ollamaLog = Join-Path $env:TEMP "aegis-ollama.log"
         Write-Step "Starting Ollama in the background"
-        $ollamaProc = Start-Process -FilePath $ollamaCmd.Source -ArgumentList @("serve") `
-            -WindowStyle Hidden -RedirectStandardOutput $ollamaLog -RedirectStandardError "$ollamaLog.err" -PassThru
+        $ollamaProc = Start-Engine $ollamaCmd.Source @("serve") $ollamaLog
     } else {
         Write-Host "Ollama not installed - install it from https://ollama.com/download for one-click local models." -ForegroundColor Yellow
     }
 }
-if ($ollamaProc) {
+if ($ollamaProc -and -not $repairMode) {
     $stopOllama = { if ($ollamaProc -and -not $ollamaProc.HasExited) { try { $ollamaProc.Kill() } catch {} } }.GetNewClosure()
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopOllama | Out-Null
 }
@@ -291,13 +343,11 @@ if (Test-PortOpen "127.0.0.1" $swapPort) {
     Write-Step ("Starting llama-swap in the background on 127.0.0.1:{0}" -f $swapPort)
     # -watch-config: llama-swap hot-reloads the YAML on change, so Aegis's
     # context auto-tuner (/engine) can resize model windows without a restart.
-    $swapProc = Start-Process -FilePath $swapExe `
-        -ArgumentList @("-config", $swapCfg, "-watch-config", "-listen", ("127.0.0.1:{0}" -f $swapPort)) `
-        -WindowStyle Hidden -RedirectStandardOutput $swapLog -RedirectStandardError "$swapLog.err" -PassThru
+    $swapProc = Start-Engine $swapExe @("-config", $swapCfg, "-watch-config", "-listen", ("127.0.0.1:{0}" -f $swapPort)) $swapLog
 } else {
     Write-Host ("llama-swap engine not found at {0} - skipping (Ollama still available)." -f $engineDir) -ForegroundColor DarkGray
 }
-if ($swapProc) {
+if ($swapProc -and -not $repairMode) {
     $stopSwap = { if ($swapProc -and -not $swapProc.HasExited) { try { $swapProc.Kill() } catch {} } }.GetNewClosure()
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopSwap | Out-Null
 }
@@ -316,14 +366,11 @@ if (Test-PortOpen "127.0.0.1" $comfyPort) {
 } elseif ((Test-Path $comfyMain) -and (Test-Path $comfyPy)) {
     $comfyLog = Join-Path $env:TEMP "aegis-comfyui.log"
     Write-Step ("Starting ComfyUI in the background on 127.0.0.1:{0}" -f $comfyPort)
-    $comfyProc = Start-Process -FilePath $comfyPy `
-        -ArgumentList @($comfyMain, "--listen", "127.0.0.1", "--port", $comfyPort, "--disable-auto-launch") `
-        -WorkingDirectory (Split-Path $comfyMain) `
-        -WindowStyle Hidden -RedirectStandardOutput $comfyLog -RedirectStandardError "$comfyLog.err" -PassThru
+    $comfyProc = Start-Engine $comfyPy @($comfyMain, "--listen", "127.0.0.1", "--port", $comfyPort, "--disable-auto-launch") $comfyLog (Split-Path $comfyMain)
 } else {
     Write-Host ("ComfyUI not found at {0} - skipping (sd-server still handles image/video)." -f $comfyDir) -ForegroundColor DarkGray
 }
-if ($comfyProc) {
+if ($comfyProc -and -not $repairMode) {
     $stopComfy = { if ($comfyProc -and -not $comfyProc.HasExited) { try { $comfyProc.Kill() } catch {} } }.GetNewClosure()
     Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $stopComfy | Out-Null
 }
@@ -339,6 +386,18 @@ if (Test-Path (Join-Path $nodeDir "node.exe")) {
     Write-Host ("Using portable Node at {0}" -f $nodeDir) -ForegroundColor DarkGray
 }
 
+# Repair mode ends here: the server is already up, so starting uvicorn would
+# just die on "port already in use" — and historically that exit fired the kill
+# handlers above and took down the engines this very run had started.
+if ($repairMode) {
+    Write-Host ""
+    Write-Host ("Aegis already running on port {0} - engines checked/started and left running." -f $Port) -ForegroundColor Cyan
+    # The Start Menu shortcut's whole point is "click icon, app opens" — honor
+    # it even when this run only repaired engines. Health already answered above.
+    if ($OpenBrowser) { Start-Process ("http://{0}:{1}" -f $browseHost, $Port) }
+    exit 0
+}
+
 # 7. Start the server (use `python -m uvicorn` - bare `uvicorn` may not be on PATH)
 Write-Step ("Starting Aegis at http://{0}:{1}" -f $BindHost, $Port)
 Write-Host "Press Ctrl+C to stop."
@@ -347,7 +406,6 @@ if ($OpenBrowser) {
     # Detached poller: opens the browser only once the server actually answers,
     # so the user never stares at a connection-refused tab. Detached (not a PS
     # job) because uvicorn blocks this console until shutdown.
-    $browseHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
     $pollCmd = "for (`$i=0; `$i -lt 120; `$i++) { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 'http://$browseHost`:$Port/api/health' | Out-Null; Start-Process 'http://$browseHost`:$Port'; break } catch { Start-Sleep -Seconds 2 } }"
     Start-Process powershell -WindowStyle Hidden -ArgumentList @("-NoProfile", "-Command", $pollCmd) | Out-Null
 }

@@ -175,6 +175,10 @@ concerns from earlier are resolved:
 - **`markitdown`** (Microsoft) is **MIT** and used only as an *optional* dependency for Office/EPUB text
   extraction (`src/markitdown_runtime.py`), lazy-imported with graceful fallback — the MIT core runs without
   it. The cloud `az-doc-intel` extra is deliberately **not** installed, keeping extraction fully local.
+- **98.css** by Jordan Scales (**MIT**) — the "Aegis 98" easter-egg skin
+  (`static/win98.css`) borrows its stacked-inset bevel technique, and the
+  vendored **"Pixelated MS Sans Serif"** webfonts
+  (`static/fonts/ms_sans_serif*.woff2`) come from the 98.css distribution.
 
 ---
 

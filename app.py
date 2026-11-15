@@ -1117,6 +1117,14 @@ async def _startup_event():
         _startup_tasks.append(start_bg_monitor())
     except Exception as _e:
         logger.warning("Failed to start background-job monitor: %s", _e)
+    # Engine watchdog: probes llama-swap/ChromaDB/ComfyUI and respawns dead
+    # ones, so an engine crash can't silently degrade chat for days (7/26
+    # incident). Kill switch: settings key "engine_watchdog".
+    try:
+        from src.engine_watchdog import start_engine_watchdog
+        _startup_tasks.append(start_engine_watchdog())
+    except Exception as _e:
+        logger.warning("Failed to start engine watchdog: %s", _e)
     # MCP servers can be slow or blocked by local tooling. Connect them after
     # the web server is accepting traffic instead of delaying the whole UI.
     async def _startup_mcp_connections():
