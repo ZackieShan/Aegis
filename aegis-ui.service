@@ -1,18 +1,33 @@
-# Copy to /etc/systemd/system/aegis-ui.service
-# Edit User, WorkingDirectory, and ExecStart paths to match your setup
+# Aegis UI systemd unit (TEMPLATE).
+#
+# Do not copy this file by hand: run ./install-service.sh, which fills in the
+# __PLACEHOLDER__ tokens from the repo checkout it lives in and installs the
+# rendered unit for you.
+#
+#   ./install-service.sh          # system-wide unit (sudo, starts on boot)
+#   ./install-service.sh --user   # per-user unit (no sudo; see lingering note)
+
 [Unit]
 Description=Aegis UI
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-# CHANGE THESE to match your user and install path:
-User=YOURUSER
-WorkingDirectory=/home/YOURUSER/aegis-ui
-ExecStart=/home/YOURUSER/aegis-ui/venv/bin/uvicorn app:app --port 7000 --host 0.0.0.0
+__USER_LINE__
+WorkingDirectory=__REPO_DIR__
+# Bind to loopback on the repo's standard port 7000 by default. Remote access
+# is expected via `tailscale serve` (tailnet-only TLS), NOT an open
+# 0.0.0.0 bind. Override by editing the Environment= lines below, or by
+# setting APP_BIND / APP_PORT in __REPO_DIR__/.env -- values from
+# EnvironmentFile= win over Environment= lines.
+Environment=APP_BIND=127.0.0.1
+Environment=APP_PORT=7000
+__ENGINE_LINE__
+EnvironmentFile=-__REPO_DIR__/.env
+ExecStart=__REPO_DIR__/venv/bin/python -m uvicorn app:app --host ${APP_BIND} --port ${APP_PORT}
 Restart=always
-RestartSec=3
-EnvironmentFile=-/home/YOURUSER/aegis-ui/.env
+RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=__WANTED_BY__

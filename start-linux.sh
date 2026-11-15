@@ -119,11 +119,13 @@ AEGIS_SKIP_RUN_HINT=1 ./venv/bin/python setup.py
 
 # 5. ChromaDB backs the tool index and vector RAG. Start a local server before
 #    launching. Skip when one is already reachable, or when CHROMADB_HOST
-#    points at a remote host.
+#    points at a remote host. Started through run_chroma.py, not the venv
+#    `chroma` console script: the chromadb 1.5.x CLI exits silently (code 0,
+#    no output) when argv[0] isn't the literal program name — see
+#    run_chroma.py's docstring.
 CHROMA_PID=""
 CHROMA_HOST="${CHROMADB_HOST:-localhost}"   # what the app connects to
 CHROMA_PORT="${CHROMADB_PORT:-8100}"
-CHROMA_BIN="$(dirname "$VENV_PY")/chroma"
 case "$CHROMA_HOST" in
     localhost|127.0.0.1) CHROMA_BIND="127.0.0.1" ;;
     0.0.0.0)             CHROMA_BIND="0.0.0.0" ;;
@@ -133,14 +135,41 @@ if (exec 3<>"/dev/tcp/127.0.0.1/$CHROMA_PORT") 2>/dev/null; then
     echo "▶ ChromaDB already running on 127.0.0.1:$CHROMA_PORT - using it."
 elif [ -z "$CHROMA_BIND" ]; then
     echo "▶ CHROMADB_HOST=$CHROMA_HOST is remote - not starting a local ChromaDB."
-elif [ -x "$CHROMA_BIN" ]; then
+elif "$VENV_PY" -c 'import chromadb_rust_bindings' >/dev/null 2>&1; then
     CHROMA_LOG="${TMPDIR:-/tmp}/aegis-chromadb.log"
     echo "▶ Starting ChromaDB in the background on $CHROMA_BIND:$CHROMA_PORT…"
     echo "  logging to $CHROMA_LOG"
-    nohup "$CHROMA_BIN" run --host "$CHROMA_BIND" --port "$CHROMA_PORT" --path "$PWD/data/chroma" >"$CHROMA_LOG" 2>&1 &
+    nohup "$VENV_PY" run_chroma.py --host "$CHROMA_BIND" --port "$CHROMA_PORT" --path "$PWD/data/chroma" >"$CHROMA_LOG" 2>&1 &
     CHROMA_PID=$!
 else
-    echo "▶ ChromaDB CLI not found in venv; skipping (tool index will be degraded)."
+    echo "▶ chromadb not installed in venv; skipping (tool index will be degraded)."
+fi
+
+# 5b. Ollama — the easiest local-model backend on Linux (one install, bundled
+#     GPU llama.cpp). If it's installed but its server isn't running, start it
+#     so its models are reachable the moment Aegis launches, same as the macOS
+#     and Windows launchers do. Optional — Aegis boots fine without it.
+if (exec 3<>"/dev/tcp/127.0.0.1/11434") 2>/dev/null; then
+    echo "▶ Ollama already running on 127.0.0.1:11434 - models will be offered in-app."
+elif command -v ollama >/dev/null 2>&1; then
+    OLLAMA_LOG="${TMPDIR:-/tmp}/aegis-ollama.log"
+    echo "▶ Starting Ollama in the background (logging to $OLLAMA_LOG)…"
+    nohup ollama serve >"$OLLAMA_LOG" 2>&1 &
+else
+    echo "  ⚠ ollama not found — optional; install from https://ollama.com/download/linux for easy local models."
+fi
+
+# 5c. Local engine stack (llama-swap, ComfyUI, TTS…): only wire up paths here.
+#     The in-app engine watchdog starts and restarts the engine processes
+#     itself, so nothing engine-side is spawned by this script.
+ENGINE_DIR="${AEGIS_ENGINE_DIR:-$(dirname "$PWD")/engine}"
+if [ -d "$ENGINE_DIR" ]; then
+    export AEGIS_ENGINE_DIR="$ENGINE_DIR"
+    if [ -d "$ENGINE_DIR/node/bin" ]; then
+        export PATH="$ENGINE_DIR/node/bin:$PATH"
+    fi
+else
+    echo "  ⚠ No engine dir at $ENGINE_DIR — optional; build one with scripts/setup-engine.sh (see docs/engine-setup-linux.md)."
 fi
 
 # 6. Launch. Bind to loopback by default; opt into LAN/Tailscale with
