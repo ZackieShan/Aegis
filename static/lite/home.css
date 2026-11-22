@@ -1,0 +1,88 @@
+/* The simple home screen (/home). Builds on lite.css. Phone first. */
+body.home { padding-bottom: calc(74px + var(--safe-bottom)); }
+#app { max-width: 720px; margin: 0 auto; }
+.screen { padding: 0 16px 24px; }
+
+/* ── top and bottom bars ────────────────────────────────────────────────── */
+.hello { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 8px; position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.hello h1 { flex: 1 1 auto; min-width: 0; font-size: 1.35rem; }
+.hello .sub { display: block; font-size: .84rem; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+.avatar { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--accent-soft); color: var(--accent); font-weight: 600; cursor: pointer; flex: 0 0 auto; }
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; justify-content: center; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: var(--safe-bottom); }
+.nav-inner { display: flex; width: 100%; max-width: 720px; }
+.nav button { flex: 1 1 0; min-width: 0; border: none; background: none; padding: 9px 2px 8px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--faint); cursor: pointer; font-size: .72rem; position: relative; }
+.nav button[aria-current="page"] { color: var(--accent); font-weight: 600; }
+.nav .dot { position: absolute; top: 5px; left: calc(50% + 8px); min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: .66rem; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+
+/* ── chat ───────────────────────────────────────────────────────────────── */
+.chat { display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 12px; }
+.bubble { max-width: 88%; padding: 10px 14px; border-radius: 18px; overflow-wrap: anywhere; }
+.bubble.me { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 6px; white-space: pre-wrap; }
+.bubble.them { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+.bubble.them a { font-weight: 500; }
+.bubble.oops { border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); }
+.working { align-self: flex-start; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .88rem; padding: 2px 6px; }
+.suggest { display: flex; flex-direction: column; gap: 8px; }
+.suggest button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px 14px; cursor: pointer; display: flex; gap: 10px; align-items: center; }
+.suggest button svg { color: var(--accent); }
+.composer { position: fixed; left: 0; right: 0; bottom: calc(58px + var(--safe-bottom)); z-index: 25; display: flex; justify-content: center; padding: 8px 12px; background: linear-gradient(to top, var(--bg) 70%, transparent); }
+.composer-inner { display: flex; align-items: flex-end; gap: 8px; width: 100%; max-width: 696px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 6px 6px 6px 14px; box-shadow: var(--shadow); }
+.composer textarea { flex: 1 1 auto; border: none; outline: none; background: transparent; resize: none; max-height: 140px; padding: 8px 0; line-height: 1.4; }
+.send { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
+.send:disabled { opacity: .45; }
+body.home.on-chat { padding-bottom: calc(150px + var(--safe-bottom)); }
+
+/* ── due today ──────────────────────────────────────────────────────────── */
+.due { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.due + .due { border-top: 1px solid var(--line); }
+.tick { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; color: transparent; }
+.tick.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.late { color: var(--danger); }
+
+/* ── lists ──────────────────────────────────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; cursor: pointer; text-align: left; min-height: 104px; display: flex; flex-direction: column; gap: 4px; }
+.tile h3 { font-size: 1rem; }
+.tile .peek { color: var(--muted); font-size: .84rem; flex: 1 1 auto; overflow: hidden; }
+.tile .left { font-size: .8rem; color: var(--accent); font-weight: 500; }
+.item { display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 12px; }
+.item + .item { border-top: 1px solid var(--line); }
+.item .text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.item.done .text { text-decoration: line-through; color: var(--faint); }
+.addline { display: flex; gap: 8px; margin-bottom: 12px; }
+
+/* ── trackers ───────────────────────────────────────────────────────────── */
+.tracker { display: flex; flex-direction: column; gap: 10px; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 42px; }
+.bars i { flex: 1 1 0; background: var(--accent-soft); border-radius: 3px 3px 0 0; min-height: 3px; }
+.bars i.on { background: var(--accent); }
+.bars.tall { height: 110px; }
+.scale { display: flex; gap: 8px; }
+.scale button { flex: 1 1 0; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-weight: 600; }
+.scale button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.bigdone { display: flex; align-items: center; justify-content: center; gap: 8px; height: 46px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-weight: 500; }
+.bigdone.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.progress { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.choice { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: 13px; padding: 11px 13px; cursor: pointer; }
+.choice.on { border-color: var(--accent); background: var(--accent-soft); }
+.choice input { margin-top: 3px; accent-color: var(--accent); }
+
+/* ── boards ─────────────────────────────────────────────────────────────── */
+.boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.board { border: none; background: none; padding: 0; text-align: left; cursor: pointer; }
+.mosaic { aspect-ratio: 1; border-radius: var(--radius); overflow: hidden; background: var(--surface-2); display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; border: 1px solid var(--line); }
+.mosaic.one { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.mosaic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mosaic .blank { display: flex; align-items: center; justify-content: center; color: var(--faint); grid-column: 1 / -1; grid-row: 1 / -1; }
+.board h3 { margin-top: 7px; font-size: .96rem; }
+.pins { columns: 2; column-gap: 10px; }
+@media (min-width: 620px) { .pins { columns: 3; } }
+.pin { break-inside: avoid; margin-bottom: 10px; border-radius: 14px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); cursor: pointer; display: block; width: 100%; padding: 0; text-align: left; }
+.pin img { width: 100%; display: block; background: var(--surface-2); }
+.pin .cap { padding: 8px 10px; font-size: .86rem; }
+.pin .cap .site { display: block; color: var(--muted); font-size: .74rem; margin-top: 2px; }
+.pin.note .cap { font-size: .92rem; white-space: pre-wrap; padding: 12px; }
+.pinbig { width: 100%; border-radius: 12px; display: block; }
+.addbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }

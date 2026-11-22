@@ -136,6 +136,11 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "app_api": "Generic loopback to allowed Aegis internal endpoints. Use this when the user wants something the UI can do but there's no named tool for it. Covers calendar, gallery, library/documents, memory, notes, tasks, settings, research, compare, cookbook GPUs/state — allowed UI buttons hit /api/* endpoints and you can hit them too. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked; do NOT use app_api for shell commands, package installs, engine rebuilds, or PID signalling. Use named command tooling for shell commands. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). EMAIL ACCOUNTS: do NOT use /api/email/accounts via app_api; use list_email_accounts, list_emails, and read_email instead. To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
     "edit_image": "Edit an image in the gallery: upscale (increase resolution), remove background (rembg), inpaint (fill selected area), or harmonize (blend edits). Specify image ID and action.",
     "trigger_research": "Start a deep research job on any topic — appears in the Deep Research sidebar, streams progress, produces a detailed report. Use for 'research X', 'look into Y', 'do deep research on Z', 'investigate'. NOT a scheduled task — it runs now and surfaces in the sidebar.",
+    "manage_lists": "Lists and plans for the user: shopping list, grocery list, packing list, to-do list, a plan for a party or trip. Add items to a list, tick items off, remove items, read a list back, start a new list.",
+    "manage_reminders": "Reminders for the user: remind me to do something at a time, tomorrow, tonight, every day or every week; show upcoming reminders; mark one done, snooze it, move it or cancel it.",
+    "manage_trackers": "Trackers for habits and numbers the user follows over time: log water, steps, weight, mood, sleep, exercise, medication taken; start a new tracker; show the streak and the last days.",
+    "manage_boards": "Boards for collecting ideas like pinning: save links, pictures and notes to a board for a project such as decorating, recipes, gifts, outfits, a party or a trip; show a board.",
+    "manage_library": "Add documents to the offline reference library (the survival library) so they can be searched later: PDF manuals, guides and books from a link on the internet or from PDFs the user uploaded in the chat; list what has been added; remove a document.",
     "manage_projects": "Code projects on this server: create a new app or project, clone a git or GitHub repository, open a project so this chat works in it (file tools and shell), list projects, show git status. Use when the user wants to build, start, continue, pull or open an app, project, repo or codebase.",
     "manage_apps": "Host and deploy apps on this server: turn a project's start command into a service that keeps running, restarts after crashes and reboots, and gets an HTTPS address for the phone and other PCs over Tailscale. List running apps, status, logs, restart, stop, remove. Use for deploy, host, serve, run permanently, make it available, is my app up, app logs.",
     "manage_hosts": "Remote control of the user's other computers over SSH: run PowerShell on the Windows PC, bash on Linux or macOS machines, copy files between machines, list machines on the network or tailnet. Use for anything on 'my Windows machine', 'my PC', 'the other computer', remote commands, installing or checking something on another machine, automating Windows.",
@@ -415,6 +420,23 @@ class ToolIndex:
                    "on the internet", "google", "latest", "current", "news",
                    "weather", "forecast", "stock price", "price of"}):
             {"web_search", "web_fetch"},
+        # Home: lists, reminders, trackers, boards.
+        # (Not the bare word "list": "list the files" is not about a shopping list.)
+        frozenset({"my list", "my lists", "the list", "shopping", "grocery", "groceries", "packing list",
+                   "to-do", "todo", "to do list", "checklist", "add to my", "put on my", "cross off",
+                   "tick off", "on my list", "plan for", "plan my", "plan the", "plan a"}):
+            {"manage_lists"},
+        frozenset({"remind", "reminder", "reminders", "don't let me forget", "alert me", "ping me",
+                   "nudge me", "wake me", "coming up", "upcoming", "what do i have today",
+                   "what do i have tomorrow", "what do i have this week", "what's due", "due today",
+                   "on my plate"}):
+            {"manage_reminders"},
+        frozenset({"track", "tracker", "trackers", "log my", "log that", "habit", "habits", "streak",
+                   "glasses of water", "my steps", "my weight", "my mood", "took my", "i drank", "i walked"}):
+            {"manage_trackers"},
+        frozenset({"board", "boards", "pin this", "pin it", "pin these", "pinterest", "mood board",
+                   "moodboard", "save this idea", "collect ideas", "inspiration", "ideas for"}):
+            {"manage_boards"},
         # Workbench: projects, hosted apps, other machines, other agents.
         frozenset({"project", "projects", "repo", "repository", "codebase", "clone", "git clone",
                    "new app", "build an app", "build me", "start a new", "scaffold", "open the app",
@@ -433,6 +455,12 @@ class ToolIndex:
                    "delegate", "hand off", "hand this to", "another agent", "other agent",
                    "second agent", "send this to"}):
             {"delegate_agent", "manage_projects"},
+        # Growing the library: add PDFs from a link or a chat upload.
+        frozenset({"add to the library", "add to your library", "add to my library", "add them to", "add it to the library",
+                   "add this to the library", "to the survival library", "survival library", "into the library",
+                   "library add", "put these in the library", "put this in the library", "save to the library",
+                   "added to the library", "remove from the library"}):
+            {"manage_library", "library_search"},
         # Offline reference library (Kiwix + PDF manuals).
         frozenset({"offline library", "reference library", "the library", "kiwix",
                    "wikipedia", "encyclopedia", "field manual", "army manual",

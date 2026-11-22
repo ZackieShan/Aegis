@@ -93,7 +93,10 @@ async def _run_followup(rec: dict) -> bool:
     sm = get_session_manager()
     if not sm:
         return False  # not ready yet — retry
-    sess = sm.get_session(rec["session_id"])
+    try:
+        sess = sm.get_session(rec["session_id"])
+    except KeyError:
+        sess = None          # get_session raises for a chat that no longer exists
     if not sess:
         # Session was deleted — nothing to continue. Consider it handled so we
         # don't retry forever.

@@ -182,8 +182,13 @@ def _bash_script(command: str, cwd: str) -> str:
     return prefix + command + "\n"
 
 
-def run(name: str, command: str, shell: str = "", timeout: float = DEFAULT_TIMEOUT, cwd: str = "") -> dict:
-    """Run a command or a whole script on a host. Returns exit code and output."""
+def run(name: str, command: str, shell: str = "", timeout: float = DEFAULT_TIMEOUT, cwd: str = "",
+        audit_line: Optional[str] = None, output_limit: int = 8000) -> dict:
+    """Run a command or a whole script on a host. Returns exit code and output.
+
+    ``audit_line`` replaces the command in the audit log (a file write would
+    otherwise log the file); ``output_limit`` raises the cap on what comes
+    back, for callers that read files through this."""
     host = get(name)
     command = (command or "").strip("\n")
     if not command.strip():
@@ -192,7 +197,7 @@ def run(name: str, command: str, shell: str = "", timeout: float = DEFAULT_TIMEO
     shell = (shell or host.get("shell") or "bash").strip().lower()
     if shell not in SHELLS:
         raise WorkbenchError("shell must be bash, powershell or cmd.")
-    common.audit("host-run", f"{host['name']} [{shell}] {' ⏎ '.join(command.splitlines())}")
+    common.audit("host-run", f"{host['name']} [{shell}] " + (audit_line or ' ⏎ '.join(command.splitlines())))
 
     with _lock_for(host["name"]):
         if host.get("builtin"):
@@ -203,7 +208,12 @@ def run(name: str, command: str, shell: str = "", timeout: float = DEFAULT_TIMEO
         elif shell == "powershell":
             rc, out, err = _raw_ssh(
                 host,
-                'powershell -NoLogo -NoProfile -NonInteractive -Command "[Console]::In.ReadToEnd() | Invoke-Expression"',
+                # The script arrives on stdin as UTF-8. Say so before the first
+                # read, or Windows PowerShell decodes it with the console's code
+                # page and every accented letter or curly quote in a command or
+                # a path turns into mojibake.
+                'powershell -NoLogo -NoProfile -NonInteractive -Command '
+                '"[Console]::InputEncoding = [Text.Encoding]::UTF8; [Console]::In.ReadToEnd() | Invoke-Expression"',
                 _powershell_script(command, cwd), timeout)
         elif shell == "cmd":
             if "\n" in command:
@@ -214,7 +224,7 @@ def run(name: str, command: str, shell: str = "", timeout: float = DEFAULT_TIMEO
             rc, out, err = _raw_ssh(host, "bash -s", _bash_script(command, cwd), timeout)
 
     out, err = out.replace("\r\n", "\n"), err.replace("\r\n", "\n")
-    result = {"host": host["name"], "shell": shell, "exit_code": rc, "output": common.clip(out, 8000)}
+    result = {"host": host["name"], "shell": shell, "exit_code": rc, "output": common.clip(out, output_limit)}
     if err.strip():
         result["stderr"] = common.clip(err, 3000)
     if rc == 255 and not out.strip():

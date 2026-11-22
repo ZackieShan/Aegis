@@ -39,6 +39,29 @@ from src.tool_utils import _truncate, get_mcp_manager
 _AGENT_WORKDIR = DATA_DIR
 
 
+def _keep_git_out_of_own_checkout() -> str:
+    """Stop git from finding Aegis's own repository by walking up.
+
+    The agent's shell starts in Aegis's data folder, which sits inside the
+    checkout Aegis runs from. A bare ``git add -A && git commit`` there — from
+    a model that believed it was inside a project it had just created —
+    committed the whole of Aegis, private files included (2026-11-22, during a
+    skill audit). ``GIT_CEILING_DIRECTORIES`` makes git stop below the
+    checkout: from the data folder or any other folder inside it there is "no
+    repository". Aegis's own repository still works from its top folder,
+    entered on purpose. Set for this process, so the shell and python tools,
+    background jobs and hand-offs all inherit it. Returns the folder.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    listed = [part for part in os.environ.get("GIT_CEILING_DIRECTORIES", "").split(os.pathsep) if part]
+    if root not in listed:
+        os.environ["GIT_CEILING_DIRECTORIES"] = os.pathsep.join([root] + listed)
+    return root
+
+
+_OWN_CHECKOUT = _keep_git_out_of_own_checkout()
+
+
 
 # ---------------------------------------------------------------------------
 # Path confinement for read_file / write_file
@@ -330,6 +353,7 @@ _ADMIN_TOOLS = {
     "manage_apps",
     "manage_hosts",
     "delegate_agent",
+    "manage_library",
 }
 
 
@@ -542,6 +566,7 @@ async def _direct_fallback(
         "COLUMNS": "120",
         "LINES": "40",
         "HOME": _AGENT_WORKDIR,
+        "GIT_CEILING_DIRECTORIES": os.environ.get("GIT_CEILING_DIRECTORIES", _OWN_CHECKOUT),
     }
     try:
         # git identity, GitHub login and the user's tool managers, which the
@@ -593,6 +618,18 @@ def _session_project(session_id: Optional[str]) -> Optional[str]:
     try:
         from services.workbench import projects
         return projects.bound_workspace(session_id)
+    except Exception:
+        return None
+
+
+def _session_remote_target(session_id: Optional[str], owner: Optional[str]) -> Optional[dict]:
+    """The other machine this chat's Code mode is working on, if any. Only an
+    administrator's chat can have one — checked again here, on every call."""
+    if not session_id or not _owner_is_admin(owner):
+        return None
+    try:
+        from services.workbench import targets
+        return targets.remote(session_id)
     except Exception:
         return None
 
@@ -746,6 +783,18 @@ async def _execute_tool_block_impl(
         return desc, result
 
 
+    # Code mode on another machine: the shell and the file tools act there
+    # (over SSH), everything else runs here as usual.
+    _remote = _session_remote_target(session_id, owner)
+    if _remote is not None:
+        from services.workbench import remote_tools
+        _there = await remote_tools.execute(tool, content, _remote, progress_cb=progress_cb)
+        if _there is not None:
+            first_line = content.split(chr(10))[0][:80]
+            desc = f"{tool} @ {_remote['name']}: {first_line}"
+            logger.info(f"Tool executed on {_remote['name']}: {desc} -> exit_code={_there.get('exit_code', 'n/a')}")
+            return desc, _there
+
     # Background execution: a `bash` block whose first line is the `#!bg`
     # marker runs DETACHED — returns a job id immediately so the chat stream
     # isn't held open for a multi-minute install/ffmpeg/download. The always-on
@@ -797,6 +846,18 @@ async def _execute_tool_block_impl(
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb) \
+            or {"error": f"{tool}: execution failed", "exit_code": 1}
+    elif tool in ("manage_lists", "manage_reminders", "manage_trackers", "manage_boards"):
+        # Home tools act on the things of the account this chat belongs to.
+        desc = f"{tool}: {' '.join(content.split())[:80]}"
+        result = await _direct_fallback(tool, content, progress_cb=progress_cb,
+                                        session_id=session_id, owner=owner) \
+            or {"error": f"{tool}: execution failed", "exit_code": 1}
+    elif tool == "manage_library":
+        # Records who added a document.
+        desc = f"{tool}: {' '.join(content.split())[:80]}"
+        result = await _direct_fallback(tool, content, progress_cb=progress_cb,
+                                        session_id=session_id, owner=owner) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool in ("manage_projects", "manage_apps", "manage_hosts", "delegate_agent"):
         # Workbench tools need the chat (project binding, background jobs) and

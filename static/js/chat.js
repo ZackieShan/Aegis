@@ -1257,6 +1257,16 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         fd.set('mode', 'chat');
       }
       fd.append('allow_bash', el('bash-toggle').checked ? 'true' : 'false');
+      // Code mode: a coding agent on the machine picked in the composer. It
+      // implies the shell; the server decides whether this account may use it.
+      try {
+        const _code = (isAgentMode && window.aegisCodeMode) ? window.aegisCodeMode.sendFields(sessionModule.getCurrentSessionId()) : {};
+        if (_code.code_mode) {
+          fd.append('code_mode', _code.code_mode);
+          fd.append('code_host', _code.code_host);
+          fd.set('allow_bash', 'true');
+        }
+      } catch (_) {}
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');

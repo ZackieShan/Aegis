@@ -1,173 +1,290 @@
-# Memory, profiles and more than one user
+# Memory, and more than one person
 
-Aegis remembers who it is talking to. Each account has its own memories and
-its own **profile** — a standing picture of that person written from those
-memories — and nothing crosses from one account to another.
+Aegis remembers who it is talking to, in depth, and shows you all of it. Each
+account has its own memory; nothing crosses from one account to another, and
+an administrator cannot read anyone else's.
 
-- [What is remembered](#what-is-remembered)
-- [The profile](#the-profile)
-- [Nobody mode and the off switches](#nobody-mode-and-the-off-switches)
+- [What is kept](#what-is-kept)
+- [How it stays current](#how-it-stays-current)
+- [What the model is given](#what-the-model-is-given)
+- [Seeing, tracing and changing it: `/mind`](#seeing-tracing-and-changing-it-mind)
+- [Nobody mode and the switches](#nobody-mode-and-the-switches)
 - [`/me`](#me)
-- [More than one user](#more-than-one-user)
+- [People, roles and each person's app](#people-roles-and-each-persons-app)
+- [Signing in](#signing-in)
 - [API](#api)
-- [How it works](#how-it-works)
+- [Where it lives](#where-it-lives)
 
-## What is remembered
+## What is kept
 
-**Memories** are single facts: *"Keeps bees: three hives"*, *"Prefers metric
-units"*, *"Allergic to penicillin"*. They come from three places:
+Four layers, from single facts to the whole picture:
 
-| Source | When |
+| Layer | What it is | Example |
+|---|---|---|
+| **Facts** | Single lasting statements, each with the words you said that showed it and the chat it came from. | *Keeps bees, four hives* — you said: "I'm up to four hives now" |
+| **Topics** | One dossier per subject in your life — a hobby, a project, a person, your home. Every chat that touches it adds dated notes; a digest (summary, where things stand, timeline, open questions) is rewritten from the notes. | **Beekeeping**: 7 notes · "Runs four hives and treats for varroa with oxalic acid vapor after losing a colony last winter." |
+| **Conversations** | A short digest of each chat: what you wanted, what came of it, what you said you would do. | *Hive split and mite treatment* — "Reported four hives after a May split…" |
+| **Profile** | The standing picture written from all of the above: who you are, people, preferences, interests, projects, goals, and patterns Aegis has noticed (marked as its own inference). | |
+
+Facts have a kind — `identity`, `preference`, `interest`, `contact`,
+`project`, `goal`, `fact`, `event`, `task` — and may be marked as sensitive
+(`health`, `money`, `location`, `relationships`, `work`, `beliefs`).
+
+## How it stays current
+
+After the first exchange of a chat, then every second exchange, and at once
+when you say something like *"remember that…"* or *"from now on…"*, one
+background pass by the utility model looks at the latest messages next to
+what is already known and returns everything the conversation changes:
+
+- **add** — new lasting facts (at most five per pass), each with a quote;
+- **update** — a known fact that changed or got more precise: *three hives*
+  becomes *four hives*, in place, with the old wording kept in the history;
+- **remove** — a known fact you said is no longer true;
+- **topic notes** — the details, numbers, gear, events and plans for each
+  subject the chat went into, including small ones not worth a fact;
+- **a digest** of the conversation.
+
+Then, when enough is new, the slower layers are rewritten: a topic's digest
+once it has two notes it has not seen, the profile once two facts are new
+(or one has waited twelve hours).
+
+Guards:
+
+- Only your own memory is shown to the model and touched by it.
+- A fact **you wrote or pinned** is never rewritten or removed by the
+  learner. If you later say something different, that is kept beside it.
+- Kinds of information you have blocked are dropped.
+- A quote is kept only if you actually said it.
+- A restated fact replaces the old one only when it is plainly the same fact
+  (identical but for the numbers, or a near-identical match); anything looser
+  is kept as its own fact rather than risk overwriting a different one.
+- If the model cannot be reached, plain pattern matching still catches the
+  obvious ("my name is…", "I prefer…").
+
+## What the model is given
+
+Before every reply, in this order:
+
+1. **Your profile** — every message. The same text from turn to turn, so a
+   local backend keeps it cached. About 600–800 tokens.
+2. **Your three latest other conversations** — every message, for continuity.
+3. **Pinned facts** — every message.
+4. **Facts recalled for this message** — the few that match it.
+5. **Topic notes** — the dossier of each subject the message is about (matched
+   against the message and the one before it, so a follow-up still finds it).
+6. **Earlier conversations** that bear on the message.
+
+All of it reaches the model as guarded reference data — something to take
+into account, never instructions. The assistant is told that conversation
+digests record what was said then, not how things stand now, and to read
+lists, reminders and trackers with its tools rather than from memory.
+
+`/mind` → *Overview* → **What Aegis is told about you** shows the exact text
+for any message you type, built by the same code a chat turn uses.
+
+## Seeing, tracing and changing it: `/mind`
+
+Open **Brain → See everything & history**, the link under `/me`, or `/mind`.
+
+<p>
+  <img src="media/mind-overview.png" alt="Overview: counts, the summary, and what the model is told" width="230">
+  <img src="media/mind-topic.png" alt="A topic dossier" width="230">
+  <img src="media/mind-history.png" alt="History, with undo" width="230">
+</p>
+
+| Tab | What you can do |
 |---|---|
-| Automatic extraction | In the background, every second exchange of a chat, and straight away when you say something like *"remember that…"*, *"don't forget…"*, *"from now on…"*. The utility model picks out at most five lasting facts per pass. |
-| You | **Brain** in the sidebar, `/memory add …`, or `/me add …`. |
-| The agent | The `manage_memory` tool in agent mode (administrators). |
+| **Overview** | Counts, the summary, the preview of what the model is given, the two switches. |
+| **Profile** | Every line, editable. A line you add or change is kept word for word; a line you remove never comes back, and you can forget the facts behind it in the same step. *Rewrite now* has the model write it again. |
+| **Facts** | Every fact with its kind, where it was learned (the chat, the date, your words), how often it was used and reaffirmed. Search, filter, edit, pin, forget. The clock opens that fact's own history. |
+| **Topics** | Each dossier: summary, where things stand, open questions, timeline, and every note with its date and source. Add or delete notes, edit or rewrite the digest, rename, merge two topics, delete. |
+| **Conversations** | The digests. Deleting one does not delete the chat. |
+| **History** | Every change ever made, newest first: what it was before and after, when, and who or what caused it — *you*, *learned automatically* (with the chat), *the assistant*, *tidy-up*. Changes to facts can be undone. |
+| **Controls** | The switches, kinds of information never to keep (optionally deleting what is already stored of those kinds), download everything as JSON or text, and *Forget everything about me*. |
 
-Each memory has a category: `identity`, `preference`, `interest`, `contact`,
-`project`, `goal`, `fact`, `event`, `task`. `interest` is for what you are
-into — a hobby, a field, a subject you keep working on. One question about a
-topic does not make it an interest; what you say you do, own, practise or
-plan does.
+Nothing is kept that is not on that page.
 
-On any one turn only a handful of memories are recalled — the ones that match
-what you just asked. That is what the profile is for.
+**It never outlives its sources.** The profile records which facts it was
+written from; delete or edit one and the written profile is set aside at once
+for one assembled from what is left. Delete a topic note and that topic's
+digest is cleared until it is rewritten from the notes that remain.
 
-## The profile
+## Nobody mode and the switches
 
-The profile is the whole picture, given to the model on **every** turn:
-
-```
-Who you are talking to: what has been learned about the user so far. …
-- Dana is an ER nurse who works nights and lives outside Bozeman. She keeps bees and bakes sourdough.
-- About them: Name: Dana Whitlock; ER nurse (night shifts); Allergic to penicillin
-- Interests: Beekeeping, Sourdough baking
-- Preferences: Prefers short, practical answers; Prefers metric units
-- People: Reid – husband; two kids
-- Projects: Restoring a 1984 Toyota pickup with dad
-- Goals: Ham radio Technician license this year
-- Beekeeping: Keeps three hives; Uses oxalic acid vapor; Lost one hive to varroa last winter
-- Sourdough baking: Bakes every Sunday; Starter is two months old
-```
-
-So a bare "hi" is answered by name, a question about boiling eggs is answered
-in metric and nothing else, and a question about amoxicillin starts with the
-penicillin allergy.
-
-It is written by the utility model from your memories, in the background,
-when at least two new ones have arrived (or one has waited twelve hours), and
-no more often than every ten minutes. Until the model has written one — or
-if no model is available — it is assembled directly from the memories by
-category. It is around 600–800 tokens and identical from turn to turn, so a
-local backend keeps it in its prompt cache.
-
-**The profile never outlives its sources.** It records which memories it was
-written from. Delete or edit one of them and the written profile is set aside
-at once in favour of one assembled from what is left; the model writes a new
-one later. To make Aegis forget something, delete the memory — that is enough.
-
-It is handed to the model as untrusted reference data, in the same guarded
-block as other saved memories: something to take into account, never
-instructions to follow.
-
-## Nobody mode and the off switches
-
-| | Profile and memories used | New things learned | Chat saved |
+| | Memory used | New things learned | Chat saved |
 |---|---|---|---|
 | Normal chat | yes | yes | yes |
 | **Nobody** (the eye on the welcome screen, or `/incognito`) | no | no | no |
-| `/me off` (or the two switches in **Brain**) | no | no | yes |
+| *Use my memory* off (`/me off`) | no | — | yes |
+| *Keep learning* off | yes | no | yes |
 | Compare mode | no | no | — |
-
-Nobody mode is per chat and is chosen before the first message. In it the
-model is told nothing about you, nothing is extracted, and the chat is not
-kept. `/me off` is the standing version: memory stays off for your account
-until `/me on`, and nothing is deleted.
 
 ## `/me`
 
 | Command | Does |
 |---|---|
-| `/me` | Shows what Aegis knows about you. |
+| `/me` | Shows your profile, with a link to `/mind`. |
 | `/me add <fact>` | Remembers something about you. |
-| `/me refresh` | Rewrites the profile from your memories now. |
+| `/me refresh` | Rewrites the profile now. |
 | `/me off` · `/me on` | Stops · resumes using and learning. Deletes nothing. |
-| `/me forget` | Explains, then with `/me forget everything` deletes your profile and all of your memories. |
+| `/me forget` | Explains, then with `/me forget everything` deletes it all: facts, profile, topics, digests, rules, history. |
 
-Aliases: `/whoami`, `/profile`, `/aboutme`. Single memories are edited,
-pinned and deleted in **Brain**. A reply that used the profile says so in its
-memory pill.
+## People, roles and each person's app
 
-## More than one user
+**Settings → Users → Open the console**, or `/admin` (administrators only).
 
-Every account has its own chats, memories, profile, uploads, documents,
-notes, calendar, tasks and gallery. An administrator adds accounts under
-**Settings → Users → Add User**.
+![One person's page: role, their app, what they can do, sign-in](media/admin-person.png)
 
-Two things decide whether a new account can chat straight away:
+### Roles: what an account may do
 
-1. **Which model endpoints it can see.** An endpoint is either shared (every
-   account sees it) or belongs to whoever added it. Add the endpoints the
-   household should use as shared.
-2. **Its default model.** Turn on **Settings → Users → Model Defaults → Share
-   defaults with users** and accounts without a default of their own inherit
-   the global one. Otherwise each user picks a model once.
+| Role | For | The assistant may, for them |
+|---|---|---|
+| **Administrator** | whoever runs the server | everything, including the shell, server files, other machines, settings |
+| **Member** | the full app with their own data | keep lists, reminders, trackers and boards; remember on request; use their calendar |
+| **Household** | the [simple home screen](home.md) | the same, in plain language |
+| **Guest** | chat only | nothing; nothing is remembered |
 
-What a regular account cannot do, whatever it asks the agent: run shell
-commands or code on the server, read or write server files, use the
-workbench (projects, hosted apps, other machines, hand-offs to coding
-agents), manage endpoints, settings, tokens or other users, or use the email
-tools. It can chat, use agent mode with the web, the offline library and
-photo identification, generate images, do research, and keep its own
-documents, notes, calendar and gallery. Per-account switches are under
-**Settings → Users** (agent mode, browser, documents, research, images,
-memory, allowed models, daily message limit).
+A role is a set of switches (assistant can act, browser, documents, research,
+images, memory, recipes, messages per day) plus the groups of things the
+assistant may do on the person's behalf. You can adjust the built-in roles
+(not *Administrator*) and add your own. For one person you can override any
+switch; the override is shown as such and can be dropped to follow the role
+again.
 
-### Signing in
+**No role can give access to the server.** Shell, code execution, server
+files, the workbench, other machines, settings, endpoints, tokens and the
+email tools belong to administrators and cannot be granted.
 
-Sign-in is rate-limited per client address, and — separately — **per
-account**: after five wrong passwords for one account, each further miss
-locks that account for 30 seconds, doubling up to 15 minutes, wherever the
-attempts come from. A correct sign-in clears the count. This matters behind a
-reverse proxy, where every client can appear as one address, and it is what
-makes a short password tolerable on a private network. It is still a short
-password: use a longer one, or two-factor sign-in, for anything reachable
-from the internet. The account file and the session-token file are written
-readable by the server's own user only.
+### Each person's app
 
-The interface asks for at least eight characters when a password is set.
+Per account, set by an administrator:
+
+- **Which app they get** — the simple home screen or the full app (and
+  whether a home-screen person may also open the full one).
+- **What they are called**, and **what the assistant is called** for them.
+- **How it should talk to them** — a note in your words ("Not technical. Keep
+  it warm and short, one step at a time."). It becomes part of the
+  assistant's standing instructions for that person.
+- **Home screen**: which sections they see, light / dark, an accent colour.
+- **Full app**: parts of the interface to hide for them. This is a matter of
+  tidiness, not security — what they may do is the role's business.
+- **Their default model**, when it should differ from the shared one.
+
+A new account can chat straight away when the model endpoints it should use
+are *shared* and **Share defaults with users** is on (Settings → Users).
+
+### What the console shows
+
+For each person: role, last sign-in, how many chats and facts they have —
+never their content. **Activity** lists sign-ins (successful, wrong password,
+locked out, refused), password changes, and everything done in the console,
+with who did it and from where. A mistyped name is never written down: a
+failed sign-in names an account only when that account exists.
+
+Switching an account off signs it out everywhere at once and refuses new
+sign-ins, without deleting anything.
+
+### Deleting an account
+
+Deleting removes the sign-in: the person is signed out everywhere, their API
+tokens stop working, their phones stop getting notifications. What they
+stored is a separate question, and you answer it in the same step:
+
+- **Keep it** (the default). It stays on the server where nobody can reach
+  it, listed on the People page under **Deleted accounts** with how much there
+  is — never what. The username stays reserved: nobody can create or rename an
+  account into it, and open sign-up cannot take it. From there you can
+  **Erase what they stored** whenever you like, or **Free the name**, which
+  erases nothing and gives everything to the next account created with that
+  username — the way to give the same person their account back.
+- **Erase it.** Chats, memory (facts, profile, topics, digests, history),
+  lists, reminders, trackers, boards and their pictures, notes, calendars,
+  tasks, documents, uploaded files, generated images, research reports and
+  skills they wrote. Other people's data and anything shared are not
+  touched. If part of it cannot be removed, the account is still deleted,
+  the name stays reserved and the console says what is left so you can try
+  again.
+
+An account that never stored anything leaves no reserved name behind.
+
+Renaming an account (Settings → Users) carries its memory with it.
+
+The server-wide wipes under **Settings → Danger Zone** are a different thing:
+they clear one kind of data for *every* account at once. Wiping memory there
+also removes everyone's profile, topics, digests and change history.
+
+## Signing in
+
+- A password is at least eight characters and at most 72 (all the
+  password hash reads; longer ones used to end in a server error).
+- An administrator can allow one account a **PIN** of 4–12 digits instead
+  (not `1234`, `1111` and the like). This is meant for a phone on a private
+  network, not for anything reachable from the internet.
+- Failed sign-ins are slowed down **per account**, wherever they come from:
+  five free misses, then a wait of 30 seconds that doubles up to 15 minutes.
+  A correct sign-in clears it. This is separate from the per-address limit
+  and is what keeps a PIN from being walked through behind a reverse proxy.
+- Two-step sign-in is available under Settings → Account.
+- The account file, the session tokens and the activity log are readable by
+  the server's own user only.
 
 ## API
 
-All under `/api/memory`, all scoped to the signed-in account.
+Everything is scoped to the signed-in account unless it says administrator.
 
 | | |
 |---|---|
-| `GET /profile` | `{profile, markdown, memories, using, learning}` |
-| `POST /profile/rebuild` | Rewrite it now. Optional form field `session` (its model is the fallback when no utility model is set). Adds `written_by_model`. |
-| `DELETE /profile` | Drop the profile; it is assembled again from the memories on the next turn. |
-| `DELETE /profile?memories=true` | Delete the profile **and every memory of this account**. |
+| `GET /api/mind/overview` | counts, profile, switches, rules |
+| `POST /api/mind/preview` `{message}` | what the model would be given |
+| `GET/POST /api/mind/memories`, `PUT/DELETE /api/mind/memories/{id}` | facts, with provenance |
+| `GET /api/mind/related?text=` | facts that say much the same as a text |
+| `POST /api/mind/profile/line` `{action, section, text, new_text?, forget?}` | add / edit / remove a profile line |
+| `POST /api/mind/profile/rewrite` | rewrite the profile now |
+| `GET/POST /api/mind/topics`, `GET/PUT/DELETE /api/mind/topics/{id}` | dossiers |
+| `POST /api/mind/topics/{id}/notes`, `DELETE …/notes/{note}` | notes |
+| `POST /api/mind/topics/{id}/rewrite`, `…/merge` `{into}` | rewrite the digest, fold into another topic |
+| `GET /api/mind/conversations`, `DELETE …/{session}` | digests |
+| `GET /api/mind/history`, `POST /api/mind/history/{id}/undo` | the change log |
+| `PUT /api/mind/rules` `{blocked_kinds, purge?}` | what never to keep |
+| `GET /api/mind/export?format=json\|md` | everything, as one file |
+| `DELETE /api/mind/everything?confirm=yes` | forget this account entirely |
+| `GET/PUT /api/me` | who am I; my own name, theme, colour |
+| `GET /api/admin/overview` *(administrator)* | people, roles, catalogues |
+| `POST /api/admin/users`, `PUT /api/admin/users/{name}` | accounts. In `experience`, a key sent as `null` goes back to following the role; a privilege must be the kind of value it holds (a switch is `true`/`false`, a limit a whole number ≥ 0) |
+| `DELETE /api/admin/users/{name}?data=keep\|erase` | delete the account; keep (default) or erase what it stored |
+| `POST /api/admin/removed/{name}/erase`, `DELETE /api/admin/removed/{name}` | erase what a deleted account left; free its name without erasing |
+| `POST /api/admin/users/{name}/password`, `…/sign-out` | reset, sign out everywhere |
+| `PUT/DELETE /api/admin/roles/{name}` | roles. `PUT` changes only what is sent |
+| `GET /api/admin/activity` | sign-ins and changes |
 
-The existing memory routes (`GET /api/memory`, `POST /api/memory/add`,
-`PUT`/`DELETE /api/memory/{id}`, `POST /api/memory/{id}/pin`, …) are unchanged.
+The earlier routes (`/api/memory…`, `/api/memory/profile…`, `/api/auth/users…`)
+still work.
 
-## How it works
+## Where it lives
 
-| Piece | Where |
+| What | File |
 |---|---|
-| Profile: shape, storage, rebuild rules, prompt block | `services/memory/profile.py` |
-| Stored at | `data/profiles/<account>.json`, beside `data/memory.json` |
-| Added to each turn | `ChatProcessor.build_context_preface` (`src/chat_processor.py`) |
-| On/off per turn (memory switches, Nobody, greetings) | `build_chat_context` (`routes/chat_helpers.py`) |
-| Background rebuild, after memory extraction | `run_post_response_tasks` (`routes/chat_helpers.py`) |
-| Extraction prompt | `services/memory/memory_extractor.py` |
-| Routes | `routes/memory/memory_routes.py` |
-| `/me` | `static/js/slashCommands.js` |
-| Per-account sign-in slowdown | `FailureBackoff` (`src/rate_limiter.py`), `routes/auth_routes.py` |
+| Facts, all accounts | `data/memory.json` |
+| Profile | `data/profiles/<account>.json` |
+| Topics, conversation digests, rules, change log | `data/mind/<account>/` |
+| Accounts (role, overrides, experience, PIN rule), names of deleted accounts still reserved | `data/auth.json` |
+| Role definitions that differ from the built-in ones | `data/roles.json` |
+| Account activity, last sign-ins | `data/accounts_audit.jsonl`, `data/accounts_state.json` |
 
-The vector index used for recall is one collection shared by all accounts;
-results are filtered to the caller's own memories, and the search is widened
-in proportion when the index holds other accounts' entries so they cannot
-crowd the caller's out.
+| Piece | Code |
+|---|---|
+| The learning pass | `services/memory/learn.py` |
+| Topics, digests, rules, export | `services/memory/mind.py` |
+| Change log and undo | `services/memory/journal.py` (hooked into `MemoryManager.save`) |
+| Profile | `services/memory/profile.py` |
+| What a turn is given | `ChatProcessor.memory_messages` (`src/chat_processor.py`) |
+| Inspector API and page | `routes/mind_routes.py`, `static/mind.html`, `static/lite/mind.js` |
+| Roles, experience, activity log | `core/access.py`, `core/auth.py` |
+| Console API and page | `routes/account_routes.py`, `static/admin.html`, `static/lite/admin.js` |
+| What an account leaves behind: counting, erasing, moving on rename | `services/account_data.py` |
+| What the assistant may do for whom | `blocked_tools_for_owner` (`src/tool_security.py`) |
 
-Not covered yet: scheduled tasks run without the profile, and the profile is
-not editable line by line — you change it by changing memories.
+Not covered yet: scheduled tasks run without the person's memory; topics are
+matched to a message by words, not meaning, so a synonym ("truck" for a
+dossier that only says "pickup") can miss until a keyword is learned.

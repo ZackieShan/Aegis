@@ -604,6 +604,16 @@ def setup_chat_routes(
         # manual form posts that still send plan_mode=true.
         plan_mode = False
         chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
+        # Code mode: agent mode pointed at software work, on a chosen machine
+        # (this server unless another is picked in the composer). It implies
+        # the shell. Whether this account may use it is decided further down,
+        # with the other privileges.
+        code_mode = str(form_data.get("code_mode") or (body or {}).get("code_mode") or "").lower() == "true"
+        code_host = str(form_data.get("code_host") or (body or {}).get("code_host") or "").strip().lower() or "local"
+        code_target = None
+        if code_mode:
+            chat_mode = "agent"
+            allow_bash = "true"
         # Workspace: confine the agent's file/shell tools to this folder.
         workspace, workspace_rejected = _resolve_request_workspace(
             request, form_data.get("workspace")
@@ -991,6 +1001,23 @@ def setup_chat_routes(
         _user = ctx.user
         if _user and hasattr(request.app.state, 'auth_manager') and request.app.state.auth_manager:
             _privs = request.app.state.auth_manager.get_privileges(_user)
+        # Which machine this chat's shell and file tools act on. Only an
+        # administrator can point a chat at one; any other request (and any
+        # turn that is not in Code mode) puts the chat back on this server.
+        try:
+            from services import workbench as _workbench
+            from services.workbench import targets as _code_targets
+            from src.tool_security import owner_is_admin_or_single_user as _is_admin_user
+            _may_code = bool(code_mode and session and _workbench.enabled() and _is_admin_user(_user))
+            if _may_code:
+                code_target = await asyncio.to_thread(_code_targets.for_turn, str(session), code_host)
+                logger.info("code mode: session=%s machine=%s folder=%s", session, code_target.get("host"),
+                            code_target.get("folder") or "-")
+            elif session:
+                _code_targets.clear(str(session))
+        except Exception as _code_err:
+            logger.warning("code mode: could not set the machine for this turn: %s", _code_err)
+            code_target = None
         if _privs:
             if not _privs.get("can_use_bash", True):
                 disabled_tools.update({"bash", "python", "read_file", "write_file"})
@@ -1516,6 +1543,7 @@ def setup_chat_routes(
                         approved_plan=approved_plan or None,
                         workspace=workspace or None,
                         forced_tools=_forced_tools,
+                        code_target=code_target,
                         uploaded_files=ctx.uploaded_files,
                         active_toolboxes=_active_toolboxes,
                     ):

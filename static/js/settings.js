@@ -2139,9 +2139,17 @@ function initAppearance() {
 function syncAppearanceCheckboxes() {
   var s = window.loadUIVis ? window.loadUIVis() : {};
   var defaultOff = window.UI_VIS_DEFAULT_OFF || new Set();
+  // Sections an administrator turned off for this account: shown as off and
+  // not switchable, so the box never claims something is on that is not.
+  var forced = Array.isArray(window._forcedHiddenUI) ? window._forcedHiddenUI : [];
   modalEl.querySelectorAll('[data-ui-key]').forEach(function(chk) {
     var key = chk.dataset.uiKey;
     chk.checked = key in s ? s[key] !== false : !defaultOff.has(key);
+    if (forced.indexOf(key) !== -1) {
+      chk.checked = false;
+      chk.disabled = true;
+      chk.title = 'Turned off for your account by an administrator';
+    }
   });
 }
 

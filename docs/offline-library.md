@@ -102,10 +102,42 @@ Not in Kiwix's catalog at all: modern field guides to plants, mushrooms and
 insects. Wikipedia's species articles (with photos) carry that load; free
 government and extension-service PDFs can be added as described next.
 
-### Adding your own PDFs
+### Adding documents by asking
 
-Anything served by kiwix-serve is indexed, so loose PDFs are added by wrapping
-a folder of them in a collection of their own:
+An administrator can grow the library from a chat, in agent mode:
+
+> *Take these PDFs and add them to the survival library.* (with the files attached)
+> *Add this to the library, in the water section: https://…/emergency-disinfection.pdf*
+> *Go out to the internet, find an official first-aid guide for snake bites and add it.*
+
+The assistant's `manage_library` tool keeps each document under
+`<library>/added/<section>/`, reads it page by page into the same index the
+manuals use, and it is found by the very next search — no repacking, no
+restart. Each one is recorded in `added/catalogue.json` with where it came
+from, who added it and when.
+
+- **PDFs** from a link or from the chat's attachments, up to 300 MB each. The
+  same file is never stored twice. Password-protected files are refused.
+- **A link to a web page** is refused with the list of PDF files that page
+  links to, so the right one can be added; asking for the page itself keeps
+  its text as a document (`"as_page": true`).
+- **Scanned PDFs** are read with OCR in the background (about a second per
+  page); until that finishes they are in the library but their text cannot be
+  searched. Reading that a restart cut short is picked up again.
+- **Downloads are guarded** the same way the assistant's web fetch is: public
+  addresses only, checked again on every redirect.
+- Links to added documents are paths on Aegis itself
+  (`/api/reference/added/…#page=N`), open to anyone signed in; adding and
+  removing is for administrators. `manage_library` `list` shows what was
+  added, `remove` takes one out.
+
+Added documents live beside the packed collections, not inside them, so the
+Kiwix reader does not list them — Aegis's own search, answers and links do.
+
+### Adding a whole folder of PDFs
+
+Anything served by kiwix-serve is indexed, so a folder of PDFs can also be
+wrapped in a collection of its own:
 
 ```bash
 # ~/library/manuals/<section>/<file>.pdf   — first-level folders become sections

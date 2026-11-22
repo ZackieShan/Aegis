@@ -5,6 +5,7 @@
 import Storage from './js/storage.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
+import codeMode from './js/codeMode.js';
 import fileHandlerModule from './js/fileHandler.js';
 import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
@@ -1329,6 +1330,8 @@ function initializeEventListeners() {
     .then(r => r.json())
     .then(d => {
       window._isAdmin = !!d.is_admin;
+      // Code mode needs the shell, which only administrators have.
+      try { codeMode.setAvailable(!!d.is_admin || d.configured === false); } catch (_) {}
       if (d.is_admin && userBarAdmin) userBarAdmin.style.display = '';
       const userBarName = el('user-bar-name');
       const userBarAvatar = el('user-bar-avatar');
@@ -1346,6 +1349,15 @@ function initializeEventListeners() {
       // Apply per-user privilege restrictions
       if (d.privileges) {
         window._userPrivileges = d.privileges;
+        // Parts of the interface the administrator chose not to show this
+        // person (People and access → their app). Display only: what they
+        // may actually do is decided by their role on the server.
+        try {
+          window._forcedHiddenUI = (d.experience && Array.isArray(d.experience.hidden_ui)) ? d.experience.hidden_ui : [];
+          if (typeof window.applyUIVis === 'function' && typeof window.loadUIVis === 'function') {
+            window.applyUIVis(window.loadUIVis());
+          }
+        } catch (_) { /* cosmetic */ }
         const p = d.privileges;
         // Hide agent mode toggle
         if (!p.can_use_agent) {
@@ -1799,10 +1811,16 @@ function initializeEventListeners() {
     }
 
     function setMode(mode) {
+      // 'code' is agent mode with the Code bit on (see js/codeMode.js): the
+      // rest of the app keeps asking "agent or chat?" and gets the right answer.
+      const wantsCode = mode === 'code';
+      if (wantsCode) mode = 'agent';
       currentMode = mode;
       const st = loadToggleState();
       st.mode = mode;
+      st.code = wantsCode;
       saveToggleState(st);
+      try { codeMode.applyMode(wantsCode); } catch (_) {}
       agentBtn.classList.toggle('active', mode === 'agent');
       chatBtn.classList.toggle('active', mode === 'chat');
       agentBtn.setAttribute('aria-pressed', String(mode === 'agent'));
@@ -1823,7 +1841,13 @@ function initializeEventListeners() {
       setMode('agent');
     });
     chatBtn.addEventListener('click', () => setMode('chat'));
-    setMode(currentMode);
+    try {
+      codeMode.initCodeMode({
+        setMode,
+        currentSession: () => (sessionModule && sessionModule.getCurrentSessionId ? sessionModule.getCurrentSessionId() : ''),
+      });
+    } catch (_) {}
+    setMode(currentMode === 'agent' && state.code === true ? 'code' : currentMode);
   })();
 
   // ── Tool splash explainer messages (shown first 2 times per tool) ──
@@ -2675,10 +2699,13 @@ function initializeEventListeners() {
   }
 
   function applyUIVis(state) {
+    // Parts an administrator chose not to show this person stay hidden
+    // whatever their own toggles say (People and access → their app).
+    const forced = new Set(Array.isArray(window._forcedHiddenUI) ? window._forcedHiddenUI : []);
     Object.entries(UI_VIS_MAP).forEach(([key, selector]) => {
       // section-drag-reorder uses a body class instead of inline styles
       if (key === 'section-drag-reorder') return;
-      const visible = key in state ? state[key] !== false : !UI_VIS_DEFAULT_OFF.has(key);
+      const visible = !forced.has(key) && (key in state ? state[key] !== false : !UI_VIS_DEFAULT_OFF.has(key));
       document.querySelectorAll(selector).forEach(el => {
         el.style.display = visible ? '' : 'none';
       });

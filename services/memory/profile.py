@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 
 VERSION = 1
 SOURCE_LABEL = "saved memory: user profile"     # how the block is labelled in the prompt
-LIST_SECTIONS = ("identity", "people", "preferences", "projects", "goals")
-_CAPS = {"identity": 10, "people": 10, "preferences": 12, "projects": 8, "goals": 8}
+LIST_SECTIONS = ("identity", "people", "preferences", "projects", "goals", "patterns")
+_CAPS = {"identity": 10, "people": 10, "preferences": 12, "projects": 8, "goals": 8, "patterns": 4}
 _LABELS = (("identity", "About them", "About you"), ("people", "People", "People"),
            ("preferences", "Preferences", "Preferences"), ("projects", "Projects", "Projects"),
            ("goals", "Goals", "Goals"))
@@ -85,9 +85,14 @@ PROFILE_SYSTEM_PROMPT = (
     '  "preferences": ["how they like things done and how they want to be answered, at most 12"],\n'
     '  "interests": [{"name": "short topic name", "notes": ["what is known about their involvement, at most 6"]}],\n'
     '  "projects": ["ongoing projects, at most 8"],\n'
-    '  "goals": ["what they are working toward, at most 8"]\n'
+    '  "goals": ["what they are working toward, at most 8"],\n'
+    '  "patterns": ["a habit or tendency that shows across several notes or conversations — how they work, '
+    'when, what they keep asking for; at most 4"]\n'
     "}\n"
-    "Use empty lists for sections the notes say nothing about."
+    "Use empty lists for sections the notes say nothing about. Leave patterns empty unless at least two "
+    "notes or conversations support one; a pattern is an observation, never a guess about what they think.\n"
+    "Lines under [written by the person] are theirs: carry each into its section word for word. Never "
+    "include anything listed under [removed by the person], in any wording."
 )
 
 
@@ -303,6 +308,59 @@ def _notes_text(shown: List[dict]) -> str:
     return "\n".join(lines)
 
 
+def _extras_text(owner: Optional[str], memory_manager) -> str:
+    """Beyond single facts: the person's own profile lines, what they removed,
+    their topic dossiers and their latest conversations."""
+    try:
+        from services.memory import mind
+    except Exception:
+        return ""
+    lines: List[str] = []
+    rules = mind.get_rules(memory_manager, owner)
+    mine = [(section, line) for section, items in (rules.get("profile_locked") or {}).items() for line in items]
+    if mine:
+        lines.append("[written by the person]")
+        lines.extend(f"- ({section}) {line}" for section, line in mine[:40])
+    if rules.get("profile_suppressed"):
+        lines.append("[removed by the person]")
+        lines.extend(f"- {line}" for line in rules["profile_suppressed"][-40:])
+    topics = [t for t in mind.list_topics(memory_manager, owner) if t.get("summary") or t.get("note_count")][:15]
+    if topics:
+        lines.append("[topics they keep coming back to]")
+        for topic in topics:
+            detail = topic.get("summary") or "; ".join(topic.get("state") or [])
+            lines.append(f"- {topic['name']} ({topic.get('kind')}, {topic.get('note_count')} notes)"
+                         + (f": {detail[:300]}" if detail else ""))
+    episodes = mind.list_episodes(memory_manager, owner, limit=10)
+    if episodes:
+        lines.append("[recent conversations, newest first]")
+        lines.extend(f"- {e.get('title')}: {str(e.get('summary'))[:240]}" for e in episodes)
+    return "\n".join(lines)
+
+
+def _with_rules(profile: dict, owner: Optional[str], memory_manager) -> dict:
+    """The person's own edits, enforced on whatever profile is in use."""
+    try:
+        from services.memory import mind
+        out = mind.apply_rules_to_profile(profile or {}, mind.get_rules(memory_manager, owner))
+    except Exception as exc:
+        logger.debug("profile rules not applied: %s", exc)
+        return profile
+    return out if not is_empty(out) else {}
+
+
+def invalidate(owner: Optional[str], memory_manager) -> None:
+    """Something the written profile may rest on was deleted elsewhere (a
+    topic, a note, a conversation digest): set it aside until it is rewritten."""
+    current = load_profile(owner, memory_manager)
+    if current and current.get("source") == "model":
+        current["stale"] = True
+        try:
+            save_profile(owner, current, memory_manager)
+        except OSError:
+            pass
+
+
 def _parse_object(raw: str) -> dict:
     """First JSON object in a model reply, tolerating reasoning blocks, code
     fences and commentary around it."""
@@ -381,7 +439,7 @@ def needs_rebuild(owner: Optional[str], memories: List[dict], memory_manager,
         return True
     if now - float(current.get("attempted") or 0) < MIN_ATTEMPT_INTERVAL_S:
         return False
-    if current.get("source") != "model" or not basis_intact(current, memories):
+    if current.get("source") != "model" or current.get("stale") or not basis_intact(current, memories):
         return True
     fresh = new_since(current, memories)
     if fresh >= MIN_NEW_FOR_REBUILD:
@@ -403,8 +461,13 @@ def get_profile(owner: Optional[str], memory_manager=None, memories: Optional[Li
             logger.debug("profile: could not load memories: %s", exc)
             memories = []
     memories = _relevant(memories)
+    return _with_rules(_stored_or_assembled(owner, memory_manager, memories), owner, memory_manager)
+
+
+def _stored_or_assembled(owner: Optional[str], memory_manager, memories: List[dict]) -> dict:
     current = load_profile(owner, memory_manager)
-    usable = bool(current) and current.get("version") == VERSION and not is_empty(current)
+    usable = (bool(current) and current.get("version") == VERSION and not is_empty(current)
+              and not current.get("stale"))
     if usable and basis_intact(current, memories):
         return current
     if not memories:
@@ -455,6 +518,7 @@ async def _rebuild(owner, memory_manager, endpoint_url, model, headers) -> dict:
         return {}
 
     shown = _notes_shown(memories)
+    extras = _extras_text(owner, memory_manager)
     written: dict = {}
     if endpoint_url and model:
         try:
@@ -466,7 +530,9 @@ async def _rebuild(owner, memory_manager, endpoint_url, model, headers) -> dict:
                     {"role": "system", "content": PROFILE_SYSTEM_PROMPT},
                     {"role": "user", "content": (
                         "Notes about the person, grouped by kind, oldest first within each group:\n\n"
-                        + _notes_text(shown) + "\n\nReturn the profile JSON now."
+                        + _notes_text(shown)
+                        + (("\n\n" + extras) if extras else "")
+                        + "\n\nReturn the profile JSON now."
                     )},
                 ],
                 temperature=0.1,
@@ -509,7 +575,7 @@ async def _rebuild(owner, memory_manager, endpoint_url, model, headers) -> dict:
                     profile.get("source"), profile.get("memory_count") or 0, len(profile.get("interests") or []))
     except OSError as exc:
         logger.warning("profile rebuild: could not save: %s", exc)
-    return profile
+    return _with_rules(profile, owner, memory_manager)
 
 
 async def maybe_rebuild(owner: Optional[str], memory_manager, endpoint_url: str, model: str,
@@ -518,6 +584,11 @@ async def maybe_rebuild(owner: Optional[str], memory_manager, endpoint_url: str,
     memory extraction queued just before this may have added something)."""
     try:
         if needs_rebuild(owner, memory_manager.load(owner=owner), memory_manager):
+            try:                                       # the chat comes first: wait for a lull
+                from src.interactive_gate import wait_for_interactive_quiet
+                await wait_for_interactive_quiet("profile rewrite")
+            except Exception:
+                pass
             await rebuild_profile(owner, memory_manager, endpoint_url, model, headers)
     except Exception as exc:
         logger.warning("profile rebuild skipped: %s", exc)
@@ -527,7 +598,8 @@ async def maybe_rebuild(owner: Optional[str], memory_manager, endpoint_url: str,
 
 # Per-section share of the prompt block, in characters. Without these a long
 # list of preferences pushes the interests — last in the profile — out of it.
-_SECTION_ROOM = {"identity": 450, "preferences": 450, "people": 250, "projects": 300, "goals": 300}
+_SECTION_ROOM = {"identity": 450, "preferences": 450, "people": 250, "projects": 300, "goals": 300,
+                 "patterns": 300}
 _INTEREST_LINE_ROOM = 240
 
 
@@ -573,6 +645,9 @@ def render_for_prompt(profile: dict, budget: int = 3200) -> str:
     section("people")
     section("projects")
     section("goals")
+    patterns = _fit(profile.get("patterns") or [], _SECTION_ROOM["patterns"])
+    if patterns:
+        lines.append("- Patterns noticed (inferred from past conversations, may be wrong): " + "; ".join(patterns))
     for item in interests:
         notes = _fit((item.get("notes") or [])[:3], _INTEREST_LINE_ROOM)
         if notes:
@@ -605,6 +680,9 @@ def to_markdown(profile: dict) -> str:
         for item in interests:
             block.append(f"- **{item['name']}**" + (": " + "; ".join(item["notes"]) if item.get("notes") else ""))
         parts.append("\n".join(block))
+    if profile.get("patterns"):
+        parts.append("**Patterns I have noticed** (inferred — remove any that are wrong)\n"
+                     + "\n".join(f"- {item}" for item in profile["patterns"]))
     return "\n\n".join(parts)
 
 

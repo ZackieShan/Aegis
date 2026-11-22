@@ -2830,6 +2830,86 @@ body.bg-pattern-sparkles {
     #mode-chat-btn {
       border-radius: 0 10px 10px 0;
     }
+    /* Code is the third mode (js/codeMode.js). Inside the app it IS agent
+       mode, so the Agent button keeps its `active` class; while Code is the
+       selected mode it must not look selected. */
+    #mode-code-btn {
+      border-radius: 0 10px 10px 0;
+    }
+    .mode-toggle.mode-toggle-three #mode-chat-btn {
+      border-radius: 0;
+    }
+    .mode-toggle.mode-third #mode-agent-btn.active,
+    .mode-toggle.mode-third #mode-agent-btn.active:focus {
+      color: color-mix(in srgb, var(--fg) 40%, transparent) !important;
+      cursor: pointer;
+    }
+    .mode-toggle.mode-third #mode-agent-btn.active:hover {
+      color: color-mix(in srgb, var(--fg) 60%, transparent) !important;
+    }
+    /* Code mode's machine picker: a pill among the composer's indicators,
+       with a small menu that opens upward. */
+    .code-host-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+    #code-host-btn.code-host-remote #code-host-name {
+      font-weight: 700;           /* working on another computer: make that hard to miss */
+    }
+    .code-host-menu {
+      position: fixed;            /* placed by codeMode.js; it sits on <body> */
+      min-width: 230px;
+      max-width: min(320px, 86vw);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 4px;
+      box-shadow: var(--shadow-md);
+      z-index: 1000;
+    }
+    .code-host-menu[hidden] {
+      display: none;
+    }
+    .code-host-head {
+      font-size: 11px;
+      color: color-mix(in srgb, var(--fg) 55%, transparent);
+      padding: 6px 10px 4px;
+    }
+    .code-host-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      width: 100%;
+      height: auto;               /* buttons in the composer have a fixed height */
+      min-height: 0;
+      line-height: 1.25;
+      padding: 8px 10px;
+      background: none;
+      border: none;
+      border-radius: 8px;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .code-host-item:hover {
+      background: color-mix(in srgb, var(--fg) 8%, transparent);
+    }
+    .code-host-item.active {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+    .code-host-item-about {
+      font-size: 11px;
+      color: color-mix(in srgb, var(--fg) 55%, transparent);
+    }
+    .code-host-hint {
+      font-size: 11px;
+      line-height: 1.45;
+      color: color-mix(in srgb, var(--fg) 55%, transparent);
+      padding: 6px 10px 8px;
+    }
     .mode-toggle-btn {
       background: none;
       border: none;
@@ -4624,6 +4704,8 @@ body.bg-pattern-sparkles {
       }
       #mode-agent-btn { border-radius: 12px 0 0 12px; }
       #mode-chat-btn { border-radius: 0 12px 12px 0; }
+      #mode-code-btn { border-radius: 0 12px 12px 0; }
+      .mode-toggle.mode-toggle-three .mode-toggle-btn { padding: 0 11px; }
       /* Diff mode — stack toolbar, bigger buttons */
       .diff-toolbar {
         padding: 8px 12px;

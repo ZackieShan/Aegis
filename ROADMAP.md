@@ -9,11 +9,17 @@ Feedback and contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTI
 
 The local-first foundation is in place:
 
-- **A profile of each user, and more than one user** — every account has its own memories
-  and a running profile written from them (who they are, what they are into, how they like
-  answers), used on every turn and switched off in Nobody mode; `/me` shows and manages it.
-  Separate accounts with separate data, shared model defaults, and a per-account sign-in
-  slowdown. See [docs/memory-and-users.md](docs/memory-and-users.md).
+- **Deep memory you can inspect** — facts with the user's own words as evidence, a dossier
+  per subject, a digest of every conversation and a profile written from all of it, kept
+  current by one background pass that adds, updates and retires; and `/mind`, a page that
+  shows every item, where it came from and every change made to it, with undo, export and
+  delete. See [docs/memory-and-users.md](docs/memory-and-users.md).
+- **People and access** — roles (Administrator, Member, Household, Guest, or your own),
+  per-person app and assistant manner, PINs with a per-account sign-in slowdown, and an
+  administrator's console with an activity log.
+- **A home screen for non-technical people** — chat, lists, reminders with phone
+  notifications, trackers and boards on one plain phone screen, with assistant tools for
+  each. See [docs/home.md](docs/home.md).
 - **Offline reference library** — Kiwix collections (Wikipedia, medicine, how-to, Stack
   Exchange) plus a page-level index of every PDF manual inside them, used automatically
   when the internet is down and available to the agent as `library_search`.
@@ -100,9 +106,11 @@ The local-first foundation is in place:
   bundled ffmpeg already has `xfade`, and TTS is already local.
 
 ### Deepen the loop
-- **The profile everywhere** — scheduled tasks and automations still run without the
-  user's profile; give them the same picture chat has. Let a user correct the profile line
-  by line instead of only through its memories.
+- **Memory everywhere** — scheduled tasks and automations still run without the person's
+  memory; give them the same picture chat has. Match topics to a message by meaning, not
+  only by words.
+- **More for the home screen** — lists shared between two accounts, photos in chat,
+  drag to reorder, a weekly look-back on trackers.
 - **Workbench reach** — optional LAN publishing for hosted apps (today: the server itself
   and a private network), and desktop (GUI) automation on remote machines, not only
   commands.

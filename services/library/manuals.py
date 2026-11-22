@@ -102,6 +102,8 @@ def _fts_query(terms: Iterable[str], joiner: str) -> str:
 
 
 def pdf_url(book: str, path: str, page: int = 0) -> str:
+    if book == config.ADDED_BOOK:                       # kept and served by Aegis, not by Kiwix
+        return config.added_url(path, page)
     url = f"{config.kiwix_public_url()}/content/{quote(book, safe='')}/{quote(path, safe='/')}"
     return f"{url}#page={page}" if page else url
 
@@ -287,12 +289,15 @@ def passage(url: str, budget: int = 4000) -> dict:
     before it while the budget lasts. Same keys as ``kiwix.fetch_article``."""
     result = {"url": url, "title": "", "content": "", "success": False, "error": ""}
     parts = urlsplit(url)
-    match = re.match(r"^/content/([^/]+)/(.+)$", parts.path)
-    if not match:
-        result["error"] = "not a library document link"
-        return result
-    book = re.sub(r"_\d{4}-\d{2}(?:-\d{2})?$", "", unquote(match.group(1)))
-    path = unquote(match.group(2))
+    if parts.path.startswith(config.ADDED_URL_PREFIX):
+        book, path = config.ADDED_BOOK, unquote(parts.path[len(config.ADDED_URL_PREFIX):])
+    else:
+        match = re.match(r"^/content/([^/]+)/(.+)$", parts.path)
+        if not match:
+            result["error"] = "not a library document link"
+            return result
+        book = re.sub(r"_\d{4}-\d{2}(?:-\d{2})?$", "", unquote(match.group(1)))
+        path = unquote(match.group(2))
     page_match = re.search(r"page=(\d+)", parts.fragment or "")
     page = int(page_match.group(1)) if page_match else 1
     conn = connect(readonly=True)
@@ -358,7 +363,8 @@ def stats() -> dict:
             "pages": row["pages"] or 0,
             "text_pages": row["text_pages"] or 0,
             "scanned_documents": row["scanned"] or 0,
-            "complete": bool(sources[row["book"]]["complete"]) if row["book"] in sources else False,
+            "complete": (bool(sources[row["book"]]["complete"]) if row["book"] in sources
+                         else row["book"] == config.ADDED_BOOK),      # added one by one: never half-scanned
         } for row in docs]
         return {
             "built": True,

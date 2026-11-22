@@ -4,6 +4,7 @@ other machines. The agent reaches the same functions through its tools
 (``src/agent_tools/workbench_tools.py``); both go through ``services/workbench``.
 
     GET  /api/workbench/overview?session_id=…   projects, apps, hosts, agents
+    GET  /api/workbench/machines?session_id=…   the machines Code mode can work on, and this chat's choice
     POST /api/workbench/project                  open / close / create / clone for a chat
     POST /api/workbench/app                      start / stop / restart / remove / expose / unexpose
     GET  /api/workbench/app/{name}/logs
@@ -65,6 +66,14 @@ def setup_workbench_routes() -> APIRouter:
             }
 
         return await _call(work)
+
+    @router.get("/api/workbench/machines")
+    async def machines(request: Request, session_id: str = "") -> Dict[str, Any]:
+        """What the Code-mode machine picker shows. Cheap: the registry only,
+        nothing is contacted."""
+        _guard(request)
+        from services.workbench import targets
+        return await _call(lambda: {"machines": targets.machines(), "current": targets.describe(session_id)})
 
     @router.post("/api/workbench/project")
     async def project(request: Request) -> Dict[str, Any]:

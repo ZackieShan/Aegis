@@ -1261,6 +1261,82 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "manage_lists",
+            "description": "The user's lists and plans (shopping, packing, to-do, a plan for an event). add puts items on a list by name and creates the list if it does not exist; check / uncheck tick items off by what they say; remove takes items off; show reads a list back; list names every list. Use this whenever the user wants something put on, taken off or read from a list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["add", "show", "check", "uncheck", "remove", "clear_done", "list", "rename", "delete"]},
+                    "list": {"type": "string", "description": "The list's name as the user says it, e.g. 'groceries'"},
+                    "items": {"type": "array", "items": {"type": "string"}, "description": "One entry per item, e.g. ['milk', 'eggs']"},
+                    "kind": {"type": "string", "enum": ["list", "plan"], "description": "add: 'plan' for a step-by-step plan toward something"},
+                    "new_name": {"type": "string", "description": "rename: the new name"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_reminders",
+            "description": "Reminders for the user: add sets one for a time (once or repeating) and it is delivered when due; list shows what is coming up; done marks one finished; snooze pushes it back; update changes its time; delete removes it. Use this whenever the user asks to be reminded of something. If no time was given, ask for one first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["add", "list", "done", "snooze", "update", "delete"]},
+                    "text": {"type": "string", "description": "What to be reminded of, in a few words — also how an existing reminder is found"},
+                    "when": {"type": "string", "description": "The time on the user's own clock: ISO like 2026-11-23T15:00, or words like 'tomorrow at 3pm', 'in 2 hours'"},
+                    "repeat": {"type": "string", "enum": ["none", "daily", "weekly", "monthly", "yearly"]},
+                    "minutes": {"type": "integer", "description": "snooze: how long (default 60)"},
+                    "new_text": {"type": "string", "description": "update: new wording"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_trackers",
+            "description": "Things the user follows day by day: a habit ticked off (kind check), an amount that adds up (kind number, e.g. glasses of water, with an optional daily goal) or a 1-5 rating (kind scale, e.g. mood). create starts a tracker; log records today's entry (or another day's); show gives the last two weeks and the streak; list summarises all of them.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["create", "log", "show", "list", "delete"]},
+                    "tracker": {"type": "string", "description": "The tracker's name as the user says it"},
+                    "kind": {"type": "string", "enum": ["check", "number", "scale"], "description": "create only"},
+                    "unit": {"type": "string", "description": "create: for kind number, e.g. 'glasses', 'km'"},
+                    "goal": {"type": "number", "description": "create: daily goal for kind number"},
+                    "value": {"type": "number", "description": "log: the amount to add (number), the rating 1-5 (scale); omit for a check"},
+                    "day": {"type": "string", "description": "log: 'today' (default), 'yesterday' or YYYY-MM-DD"},
+                    "note": {"type": "string", "description": "log: a few words to keep with the entry"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_boards",
+            "description": "The user's boards: collections of links, pictures and notes around one idea (a room to redecorate, a party, recipes to try). pin saves one or more web links (the page's title and picture are fetched) or a note to a board by name, creating the board if needed; show lists what is on a board; list names the boards. To collect ideas, search the web first and then pin the best pages.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["pin", "create", "show", "list", "delete"]},
+                    "board": {"type": "string", "description": "The board's name as the user says it"},
+                    "urls": {"type": "array", "items": {"type": "string"}, "description": "pin: web addresses of pages or pictures"},
+                    "text": {"type": "string", "description": "pin: a note to pin instead of (or with one) link"},
+                    "title": {"type": "string", "description": "pin: a title for the pin"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "manage_projects",
             "description": "Code projects on this server (git repositories under the projects folder). create makes a new one, clone fetches one from a git URL or GitHub owner/repo, open ties an existing one to THIS chat — after create/clone/open the file tools and the shell work inside that project on every later message. list shows them all, status shows git state and what is deployed, close unties the chat.",
             "parameters": {
@@ -1304,8 +1380,9 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "peers", "run", "copy", "add", "remove", "test"]},
+                    "action": {"type": "string", "enum": ["list", "peers", "run", "copy", "add", "remove", "test", "workdir"]},
                     "host": {"type": "string", "description": "Host name from list ('local' is this server)"},
+                    "path": {"type": "string", "description": "workdir: in Code mode on another machine, the folder there to work in from now on"},
                     "command": {"type": "string", "description": "run: the command or multi-line script"},
                     "shell": {"type": "string", "enum": ["bash", "powershell", "cmd"], "description": "run: override the host's default shell"},
                     "cwd": {"type": "string", "description": "run: folder on the host to run in"},
@@ -1316,6 +1393,26 @@ FUNCTION_TOOL_SCHEMAS = [
                     "address": {"type": "string", "description": "add: host name or IP"},
                     "user": {"type": "string", "description": "add: account to log in as"},
                     "os": {"type": "string", "enum": ["linux", "windows", "macos"], "description": "add: detected when omitted"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_library",
+            "description": "Add documents to the offline reference library (the survival library) so library_search finds them: PDF files from links on the internet (urls) or PDFs the user uploaded in this chat (files). Also list what was added, or remove one. Each added document is read page by page and is searchable at once; scanned ones are read with OCR in the background.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["add", "list", "remove", "sections"]},
+                    "urls": {"type": "array", "items": {"type": "string"}, "description": "add: direct links to PDF files (a link to a web page is refused, with the PDF links found on it)"},
+                    "as_page": {"type": "boolean", "description": "add: true keeps the web pages at urls themselves (their text, saved as documents) instead of expecting PDF files"},
+                    "files": {"type": "array", "items": {"type": "string"}, "description": "add: uploaded PDFs, each by the path or id shown in the uploaded-files list"},
+                    "section": {"type": "string", "description": "add: shelf to file it under, e.g. medical, survival, plants (action sections lists them); default general"},
+                    "title": {"type": "string", "description": "add: title to file a single document under (otherwise taken from the document)"},
+                    "document": {"type": "string", "description": "remove: the document's title or path"}
                 },
                 "required": ["action"]
             }

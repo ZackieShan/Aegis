@@ -588,6 +588,7 @@ memory_manager    = components["memory_manager"]
 memory_vector     = components.get("memory_vector")
 upload_handler    = components["upload_handler"]
 app.state.upload_handler = upload_handler
+app.state.memory_manager = memory_manager      # account deletion and renaming reach a person's memory through it
 personal_docs_mgr = components["personal_docs_manager"]
 app.state.personal_docs_manager = personal_docs_mgr
 api_key_manager   = components["api_key_manager"]
@@ -631,7 +632,18 @@ webhook_manager = WebhookManager(api_key_manager=api_key_manager)
 
 # Auth
 auth_router = setup_auth_routes(auth_manager)
+# Accounts: /api/me for the signed-in person, /api/admin/* for the
+# administrator's console (people, roles, experience, activity).
+from routes.account_routes import setup_account_routes
 app.include_router(auth_router)
+app.include_router(setup_account_routes(auth_manager, session_manager, memory_manager, memory_vector=memory_vector))
+# Home: lists and plans, reminders, trackers, boards (the simple home screen
+# and the assistant's home tools share services/home).
+from routes.home_routes import setup_home_routes
+app.include_router(setup_home_routes(auth_manager))
+# Notifications on a person's own phone with the app closed (Web Push).
+from routes.push_routes import setup_push_routes
+app.include_router(setup_push_routes())
 
 
 @app.post("/api/activity/heartbeat")
@@ -671,6 +683,10 @@ app.include_router(setup_admin_wipe_routes(session_manager))
 from routes.memory.memory_routes import setup_memory_routes
 memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)
 app.include_router(memory_router)
+# Memory inspector: see, trace, change and remove everything kept about you.
+from routes.mind_routes import setup_mind_routes
+app.include_router(setup_mind_routes(memory_manager, session_manager, memory_vector=memory_vector,
+                                     chat_processor=chat_processor))
 from routes.skills_routes import setup_skills_routes
 app.include_router(setup_skills_routes(skills_manager))
 
@@ -952,8 +968,25 @@ app.include_router(setup_companion_routes())
 
 # ========= ROUTES (kept in app.py) =========
 
+def _lands_on_home(request: Request) -> bool:
+    """True when this person's account is set up for the simple home screen
+    and they have not been allowed, and asked, to open the full app."""
+    try:
+        user = getattr(request.state, "current_user", None)
+        if not user or user not in auth_manager.users:
+            return False
+        experience = auth_manager.get_experience(user)
+        if experience.get("mode") != "simple":
+            return False
+        return not (experience.get("allow_full_app") and "full" in request.query_params)
+    except Exception:
+        return False
+
+
 @app.get("/")
 async def serve_index(request: Request):
+    if _lands_on_home(request):
+        return RedirectResponse(url="/home", status_code=302)
     static_path = abs_join(BASE_DIR, "static/index.html")
     if os.path.exists(static_path):
         return serve_html_with_nonce(request, static_path)
@@ -1004,6 +1037,39 @@ async def serve_library(request: Request):
 async def serve_backgrounds(request: Request):
     """Sandbox page for prototyping background effects. No auth required."""
     return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/backgrounds.html"))
+
+@app.get("/home")
+async def serve_home(request: Request):
+    """The simple home screen: chat, lists, reminders, trackers and boards
+    for people who do not want the full app."""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/home.html"))
+
+
+@app.get("/home-sw.js")
+async def serve_home_worker():
+    """The notification service worker. Served from the root so that its
+    scope can cover /home (a worker under /static/ could not)."""
+    from fastapi.responses import FileResponse
+    return FileResponse(abs_join(BASE_DIR, "static/lite/home-sw.js"), media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
+@app.get("/admin")
+async def serve_admin(request: Request):
+    """The administrator's console: people, roles, experience, activity."""
+    user = getattr(request.state, "current_user", None)
+    if AUTH_ENABLED and not (user and auth_manager.is_admin(user)):
+        return RedirectResponse(url="/", status_code=302)
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/admin.html"))
+
+
+@app.get("/mind")
+async def serve_mind(request: Request):
+    """The memory inspector: everything Aegis keeps about the signed-in
+    person, where it came from, and the means to change or remove it.
+    (AuthMiddleware sends anyone not signed in to /login.)"""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/mind.html"))
+
 
 @app.get("/login")
 async def serve_login(request: Request):

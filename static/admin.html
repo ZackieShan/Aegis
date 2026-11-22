@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-theme="app">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0512">
+<title>People and access — Aegis</title>
+<link rel="icon" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<script nonce="{{CSP_NONCE}}">
+// Match the main app's theme before first paint (same idea as the sign-in page).
+(function () {
+  try {
+    var theme = JSON.parse(localStorage.getItem('aegis-theme'));
+    if (!theme || !theme.colors) return;
+    var c = theme.colors, s = document.documentElement.style;
+    if (c.bg) s.setProperty('--bg', c.bg);
+    if (c.panel) s.setProperty('--surface', c.panel);
+    if (c.fg) s.setProperty('--text', c.fg);
+    if (c.border) s.setProperty('--line', c.border);
+    if (c.red) s.setProperty('--accent', c.red);
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(c.bg || '');
+    if (m) {
+      var light = (parseInt(m[1], 16) * 299 + parseInt(m[2], 16) * 587 + parseInt(m[3], 16) * 114) / 1000 > 150;
+      s.setProperty('color-scheme', light ? 'light' : 'dark');
+    }
+  } catch (e) { /* default theme */ }
+})();
+</script>
+<link rel="stylesheet" href="/static/lite/lite.css?v=1">
+<link rel="stylesheet" href="/static/lite/admin.css?v=1">
+</head>
+<body>
+<div class="page wide" id="app"><div class="loading"><span class="spinner"></span></div></div>
+<script type="module" src="/static/lite/admin.js?v=1"></script>
+</body>
+</html>

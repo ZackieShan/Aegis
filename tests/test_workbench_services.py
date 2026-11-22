@@ -348,8 +348,11 @@ def test_powershell_scripts_travel_on_stdin_never_the_command_line(wb, ssh):
     script = 'if ($true) {\n  "it\'s; | & > fine"\n}'
     result = hosts.run("desk", script, cwd="C:\\Users\\me\\it's")
     call = calls[0]
+    # The script is read from stdin as UTF-8 (declared before the first read, or
+    # accented letters and curly quotes arrive as mojibake on Windows PowerShell).
     assert call["argv"][-1] == ('powershell -NoLogo -NoProfile -NonInteractive -Command '
-                                '"[Console]::In.ReadToEnd() | Invoke-Expression"')
+                                '"[Console]::InputEncoding = [Text.Encoding]::UTF8; '
+                                '[Console]::In.ReadToEnd() | Invoke-Expression"')
     assert script not in " ".join(call["argv"]) and script in call["stdin"]
     assert "Set-Location -LiteralPath 'C:\\Users\\me\\it''s'" in call["stdin"]
     assert call["stdin"].rstrip().endswith("if ($LASTEXITCODE) { exit $LASTEXITCODE }")

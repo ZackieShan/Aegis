@@ -657,7 +657,9 @@ async def audit_memories(
             ]
         else:
             saved_entries = final_entries + added_during_audit
-        memory_manager.save(saved_entries)
+        from services.memory import journal as _journal
+        with _journal.cause("tidy"):
+            memory_manager.save(saved_entries)
         logger.info(
             f"Memory audit complete: {before_count} -> {after_count} entries "
             f"({before_count - after_count} removed/merged)"

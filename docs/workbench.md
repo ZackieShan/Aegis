@@ -20,6 +20,41 @@ You rarely name the tools. In agent mode: *"build me a workout tracker and host
 it"*, *"restart the tracker and show me its log"*, *"how much disk is free on my
 Windows PC"*, *"have Claude Code add login to the tracker"*.
 
+## Code mode
+
+The mode switch in the composer has a third position for administrators:
+**Agent · Chat · Code**. Code mode is agent mode set up for software work —
+the shell is on, the coding tools are always on offer whatever the wording,
+and the assistant is told to look before it changes, make the change, run it,
+and say what it ran to check.
+
+![Code mode with the machine picker open](media/code-mode.png)
+
+Next to the attachments a pill names **the machine being worked on**:
+
+- **This server** — the default, for every new chat. Projects live in
+  `~/apps/<name>`; the assistant opens or creates one and works inside it.
+- **Another machine** from the [hosts registry](#other-machines), picked from
+  the pill's menu. From then on that chat's shell and file tools
+  (`read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`) act **on that
+  machine**, over the same SSH connection `manage_hosts` uses. On Windows the
+  shell is PowerShell and the assistant is told to write PowerShell. It sets
+  the folder to work in with `manage_hosts` `workdir`.
+
+The choice belongs to the chat and is kept on the server, so a chat that was
+working on your desktop is still on your desktop when you come back to it,
+and a new chat is on the server again. Leaving Code mode puts the chat's
+tools back on the server. On a narrow phone, where the switch is hidden:
+`/codemode`, `/codemode <machine>`, `/codemode off`.
+
+On another machine, files travel base64-encoded in both directions, so
+quoting, accents and line endings survive: a file with Windows line endings
+(or a byte-order mark) is shown to the assistant with plain newlines and
+written back the way it was found. Reads are limited to 2 MB and writes to
+1.5 MB per file (copy larger ones with `manage_hosts` copy); the `python` tool
+and background jobs stay on the server. Only an administrator's chat can be
+pointed at another machine, and that is checked again on every tool call.
+
 ## Projects
 
 A project is a git repository under the projects folder (`projects_dir`

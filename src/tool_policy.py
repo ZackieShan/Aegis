@@ -119,10 +119,15 @@ _COMMON_TOOL_NAMES = {
     "web_fetch",
     "web_search",
     "library_search",
+    "manage_library",
     "manage_projects",
     "manage_apps",
     "manage_hosts",
     "delegate_agent",
+    "manage_lists",
+    "manage_reminders",
+    "manage_trackers",
+    "manage_boards",
     "write_file",
 }
 

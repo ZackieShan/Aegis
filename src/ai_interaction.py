@@ -294,6 +294,14 @@ async def do_pipeline(content: str, session_id: Optional[str] = None, owner: Opt
 # ---------------------------------------------------------------------------
 
 async def do_manage_memory(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
+    """The agent's memory tool. Changes it makes are journaled as the
+    assistant's, with the conversation they were made in."""
+    from services.memory import journal as _journal
+    with _journal.cause("assistant", session_id=session_id):
+        return await _do_manage_memory(content, session_id=session_id, owner=owner)
+
+
+async def _do_manage_memory(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
     """Manage memories: list, add, edit, delete, search.
 
     Content format:
@@ -358,6 +366,14 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
                         "results": f"Already remembered (duplicate skipped): {text[:120]}"}
             if _memory_vector and getattr(_memory_vector, "healthy", False):
                 _near = _memory_vector.find_similar(text)
+                # The vector index is shared by every account: a match may be
+                # someone else's memory. Only the caller's own counts — or
+                # their fact would be skipped, and the reply would name the
+                # other account's memory id.
+                if _near and owner:
+                    _mine = next((m for m in _existing if m.get("id") == _near), None)
+                    if _mine is None or (_mine.get("owner") or None) != owner:
+                        _near = None
                 if _near:
                     return {"action": "add", "memory_id": _near,
                             "results": f"Already remembered something very similar (skipped): {text[:120]}"}

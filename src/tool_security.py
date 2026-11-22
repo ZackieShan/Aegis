@@ -47,6 +47,9 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "manage_apps",
     "manage_hosts",
     "delegate_agent",
+    # Adds documents to the shared reference library (downloads to the
+    # server, changes what everyone's searches find). Administrators only.
+    "manage_library",
     "read_file",
     "write_file",
     "edit_file",
@@ -144,7 +147,8 @@ PLAN_MODE_READONLY_TOOLS = {
 # new mutating tools.
 _PLAN_MODE_KNOWN_MUTATORS = {
     "write_file", "create_document", "edit_document", "update_document",
-    "manage_projects", "manage_apps", "manage_hosts", "delegate_agent",
+    "manage_projects", "manage_apps", "manage_hosts", "delegate_agent", "manage_library",
+    "manage_lists", "manage_reminders", "manage_trackers", "manage_boards",
     "suggest_document", "manage_documents", "create_session", "manage_session",
     "send_to_session", "pipeline", "manage_memory", "manage_skills",
     "manage_tasks", "manage_notes", "manage_endpoints", "manage_mcp",
@@ -267,8 +271,43 @@ def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
         return False
 
 
+# Tools that act on the caller's own lists, reminders, trackers and boards.
+# Open to non-administrators unless their role leaves the "home" group out.
+HOME_TOOLS = frozenset({"manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes"})
+
+
+def owner_uses_home_screen(owner: Optional[str]) -> bool:
+    """True for an account whose app is the simple home screen (its role or
+    its own setting says so). For such a person the home tools are what the
+    assistant is for, whatever words they use."""
+    if not owner:
+        return False
+    try:
+        from core.auth import AuthManager
+        return (AuthManager().get_experience(owner) or {}).get("mode") == "simple"
+    except Exception:
+        return False
+
+
 def blocked_tools_for_owner(owner: Optional[str]) -> Set[str]:
-    """Tools to hide/disable for this owner under public-user policy."""
+    """Tools to hide/disable for this owner under public-user policy.
+
+    Administrators (and single-user installs) get everything. Everyone else
+    starts from NON_ADMIN_BLOCKED_TOOLS; their role (core/access.py) can hand
+    back the few owner-scoped tools that are grantable — memory, calendar —
+    and can withhold the home tools. Nothing that reaches the server, its
+    files, other machines, settings or email is ever grantable.
+    """
     if owner_is_admin_or_single_user(owner):
         return set()
-    return set(NON_ADMIN_BLOCKED_TOOLS)
+    blocked = set(NON_ADMIN_BLOCKED_TOOLS)
+    try:
+        from core import access
+        from core.auth import AuthManager
+
+        granted = access.granted_tools(AuthManager().get_role(owner or ""))
+        blocked -= (granted & access.GRANTABLE_TOOLS)
+        blocked |= (HOME_TOOLS - granted)
+    except Exception as exc:
+        logger.warning("Role lookup failed; keeping the strict tool policy: %s", exc)
+    return blocked

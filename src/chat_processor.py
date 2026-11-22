@@ -2,6 +2,7 @@
 import logging
 import math
 import re
+import os
 import time
 from collections import Counter
 from typing import List, Dict, Any, Optional, Tuple
@@ -78,6 +79,33 @@ def _content_tokens(text: str) -> list:
     """Extract meaningful content words: no stopwords, min 3 chars, lowercase."""
     words = re.findall(r'[a-z0-9]+(?:[-_][a-z0-9]+)*', text.lower())
     return [w for w in words if len(w) >= 3 and w not in _STOPWORDS]
+
+
+_persona_cache: Dict[str, Tuple[float, str]] = {}
+
+
+def _persona_for(owner: Optional[str]) -> str:
+    """The extra system instruction for this account (see
+    core.access.persona_prompt), or "" when nothing was customised.
+    Re-read at most every 20 seconds."""
+    if not owner or not isinstance(owner, str) or os.environ.get("AEGIS_PERSONA_DISABLED"):
+        return ""
+    now = time.time()
+    hit = _persona_cache.get(owner)
+    if hit and now - hit[0] < 20:
+        return hit[1]
+    text = ""
+    try:
+        from core import access
+        from core.auth import AuthManager
+
+        manager = AuthManager()
+        if owner in manager.users:
+            text = access.persona_prompt(manager.get_experience(owner), owner)
+    except Exception as exc:
+        logger.debug("persona not added: %s", exc)
+    _persona_cache[owner] = (now, text)
+    return text
 
 
 class ChatProcessor:
@@ -206,6 +234,143 @@ class ChatProcessor:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [mem for _, mem in scored[:k]]
 
+    def memory_messages(
+        self,
+        message: str,
+        session: Any,
+        owner: Optional[str] = None,
+        use_memory: bool = True,
+        use_profile: Optional[bool] = None,
+        incognito: bool = False,
+        count_uses: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Everything from the user's memory that goes to the model for one
+        message, as (context messages, what was used).
+
+        In order: the profile and the latest other conversations (the same
+        from turn to turn), pinned facts, facts recalled for this message,
+        the dossiers of the subjects it is about, and earlier conversations
+        that bear on it. ``count_uses=False`` leaves the use counters alone —
+        the memory inspector calls it that way to show a person exactly what
+        the model would be given.
+        """
+        # Memory: the user's profile (who they are — every turn), then pinned
+        # (always included) + extended (RAG-retrieved when relevant)
+        out: List[Dict[str, Any]] = []
+        used: List[Dict[str, Any]] = []
+        mem_entries = None
+        _recent_ids: list = []
+        if use_profile is None:
+            use_profile = use_memory
+        if use_profile and not incognito:
+            # Ahead of the per-turn recall on purpose: this block is the same
+            # bytes from one turn to the next, so it extends the prefix a
+            # local backend can keep cached.
+            try:
+                from services.memory import profile as _profile
+                mem_entries = self.memory_manager.load(owner=owner)
+                _profile_text = _profile.render_for_prompt(
+                    _profile.get_profile(owner, self.memory_manager, memories=mem_entries)
+                )
+                if _profile_text:
+                    out.append(untrusted_context_message(_profile.SOURCE_LABEL, _profile_text))
+                    used.append({
+                        "text": "Your profile: who you are and what you are into (/me shows it)",
+                        "category": "profile", "type": "profile",
+                    })
+                # Continuity across chats: the latest other conversations.
+                # Does not change while this chat goes on, so it sits in the
+                # stable part of the prompt with the profile.
+                from services.memory import mind as _mind
+                _recent = _mind.recent_episodes(self.memory_manager, owner,
+                                                exclude_session=getattr(session, "id", None), k=3)
+                _recent_text = _mind.render_episodes_for_prompt(_recent, _mind.RECENT_HEADING)
+                if _recent_text:
+                    out.append(untrusted_context_message("deep memory: recent conversations", _recent_text))
+                    _recent_ids = [e.get("session_id") for e in _recent]
+            except Exception as _e:
+                logger.debug("User profile not added to the context: %s", _e)
+                mem_entries = None
+        if use_memory:
+            if mem_entries is None:
+                mem_entries = self.memory_manager.load(owner=owner)
+
+            pinned = [m for m in mem_entries if m.get("pinned")]
+            extended = [m for m in mem_entries if not m.get("pinned")]
+
+            _used_ids: list = []
+            if pinned:
+                pinned_text = "\n- ".join([m["text"] for m in pinned])
+                out.append(untrusted_context_message(
+                    "saved memory: pinned user facts",
+                    f"Core facts about the user:\n- {pinned_text}",
+                ))
+                for m in pinned:
+                    used.append({"text": m["text"], "category": m.get("category", "fact"), "type": "pinned"})
+                    if m.get("id"):
+                        _used_ids.append(m["id"])
+
+            if extended:
+                relevant = self._hybrid_retrieve(message, extended, k=3)
+                if relevant:
+                    ext_text = "\n".join([f"- {m['text']}" for m in relevant])
+                    out.append(untrusted_context_message(
+                        "saved memory: retrieved context",
+                        (
+                            "Memory context. Do not reference unless the user asks "
+                            f"about these topics.\n{ext_text}"
+                        ),
+                    ))
+                    for m in relevant:
+                        used.append({"text": m["text"], "category": m.get("category", "fact"), "type": "recalled"})
+                        if m.get("id"):
+                            _used_ids.append(m["id"])
+
+            # Deep memory: the dossier of each subject this message is about,
+            # and older conversations that bear on it. Matched against this
+            # message and the one before it, so a follow-up ("how often should
+            # I do that?") still finds its subject.
+            if not incognito:
+                try:
+                    from services.memory import mind as _mind
+                    _said = [message]
+                    for _m in reversed(list(getattr(session, "history", None) or [])[-8:]):
+                        _role = getattr(_m, "role", None) or (_m.get("role") if isinstance(_m, dict) else None)
+                        _text = getattr(_m, "content", None) if not isinstance(_m, dict) else _m.get("content")
+                        if _role == "user" and isinstance(_text, str) and _text.strip() and _text not in _said:
+                            _said.append(_text)
+                            if len(_said) >= 3:
+                                break
+                    _query = "\n".join(_said)
+                    _topics = _mind.relevant_topics(self.memory_manager, owner, _query, k=2)
+                    _topics_text = _mind.render_topics_for_prompt(_topics)
+                    if _topics_text:
+                        out.append(untrusted_context_message("deep memory: topic notes", _topics_text))
+                        for _t in _topics:
+                            used.append(
+                                {"text": f"Topic: {_t['name']}", "category": "topic", "type": "topic"})
+                    _earlier = _mind.relevant_episodes(
+                        self.memory_manager, owner, _query,
+                        exclude=[getattr(session, "id", None)] + _recent_ids, k=2)
+                    _earlier_text = _mind.render_episodes_for_prompt(_earlier, _mind.EARLIER_HEADING)
+                    if _earlier_text:
+                        out.append(untrusted_context_message("deep memory: earlier conversations", _earlier_text))
+                        for _e in _earlier:
+                            used.append(
+                                {"text": f"Earlier conversation: {_e.get('title')}", "category": "conversation",
+                                 "type": "conversation"})
+                except Exception as _e:
+                    logger.debug("Deep memory not added to the context: %s", _e)
+
+            # Bump usage counters for the memories that were actually injected.
+            if count_uses and _used_ids and hasattr(self.memory_manager, "increment_uses"):
+                try:
+                    self.memory_manager.increment_uses(_used_ids)
+                except Exception as _e:
+                    logger.warning("Failed to increment memory uses: %s", _e)
+
+        return out, used
+
     def build_context_preface(
         self,
         message: str,
@@ -253,73 +418,20 @@ class ChatProcessor:
             "role": "system",
             "content": UNTRUSTED_CONTEXT_POLICY,
         })
+        # How an administrator set the assistant up for this person: its name,
+        # who it is talking to, the manner to take. A system message on
+        # purpose — it is the operator's instruction, not retrieved data —
+        # and the same from turn to turn, so it stays in the cached prefix.
+        _persona = _persona_for(owner)
+        if _persona:
+            preface.append({"role": "system", "content": _persona})
 
-        # Memory: the user's profile (who they are — every turn), then pinned
-        # (always included) + extended (RAG-retrieved when relevant)
-        self._last_used_memories = []  # track what was injected
-        mem_entries = None
-        if use_profile is None:
-            use_profile = use_memory
-        if use_profile and not incognito:
-            # Ahead of the per-turn recall on purpose: this block is the same
-            # bytes from one turn to the next, so it extends the prefix a
-            # local backend can keep cached.
-            try:
-                from services.memory import profile as _profile
-                mem_entries = self.memory_manager.load(owner=owner)
-                _profile_text = _profile.render_for_prompt(
-                    _profile.get_profile(owner, self.memory_manager, memories=mem_entries)
-                )
-                if _profile_text:
-                    preface.append(untrusted_context_message(_profile.SOURCE_LABEL, _profile_text))
-                    self._last_used_memories.append({
-                        "text": "Your profile: who you are and what you are into (/me shows it)",
-                        "category": "profile", "type": "profile",
-                    })
-            except Exception as _e:
-                logger.debug("User profile not added to the context: %s", _e)
-                mem_entries = None
-        if use_memory:
-            if mem_entries is None:
-                mem_entries = self.memory_manager.load(owner=owner)
-
-            pinned = [m for m in mem_entries if m.get("pinned")]
-            extended = [m for m in mem_entries if not m.get("pinned")]
-
-            _used_ids: list = []
-            if pinned:
-                pinned_text = "\n- ".join([m["text"] for m in pinned])
-                preface.append(untrusted_context_message(
-                    "saved memory: pinned user facts",
-                    f"Core facts about the user:\n- {pinned_text}",
-                ))
-                for m in pinned:
-                    self._last_used_memories.append({"text": m["text"], "category": m.get("category", "fact"), "type": "pinned"})
-                    if m.get("id"):
-                        _used_ids.append(m["id"])
-
-            if extended:
-                relevant = self._hybrid_retrieve(message, extended, k=3)
-                if relevant:
-                    ext_text = "\n".join([f"- {m['text']}" for m in relevant])
-                    preface.append(untrusted_context_message(
-                        "saved memory: retrieved context",
-                        (
-                            "Memory context. Do not reference unless the user asks "
-                            f"about these topics.\n{ext_text}"
-                        ),
-                    ))
-                    for m in relevant:
-                        self._last_used_memories.append({"text": m["text"], "category": m.get("category", "fact"), "type": "recalled"})
-                        if m.get("id"):
-                            _used_ids.append(m["id"])
-
-            # Bump usage counters for the memories that were actually injected.
-            if _used_ids and hasattr(self.memory_manager, "increment_uses"):
-                try:
-                    self.memory_manager.increment_uses(_used_ids)
-                except Exception as _e:
-                    logger.warning("Failed to increment memory uses: %s", _e)
+        # Memory: profile, recent conversations, pinned and recalled facts,
+        # topic dossiers, earlier conversations — see memory_messages().
+        _memory_msgs, self._last_used_memories = self.memory_messages(
+            message, session, owner=owner, use_memory=use_memory, use_profile=use_profile, incognito=incognito,
+        )
+        preface.extend(_memory_msgs)
 
             # (skills index injection moved out — see below; only fires in
             # agent mode so chat mode and incognito stay clean.)

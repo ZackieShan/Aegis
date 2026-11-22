@@ -3228,7 +3228,7 @@ function _meView(d) {
   if (d.using && !d.learning) state.push('not learning new things (auto-memory is off)');
   return [
     '**What I know about you**', '', d.markdown || '', '', `_${state.join(' · ')}_`, '',
-    '`/me add …` tells me something · `/me refresh` rewrites this now · `/me off` pauses · `/me forget` deletes · single memories are in **Brain**',
+    '`/me add …` tells me something · `/me refresh` rewrites this now · `/me off` pauses · `/me forget` deletes · [see everything, where it came from and every change](/mind)',
   ].join('\n');
 }
 
@@ -3288,6 +3288,33 @@ async function _cmdMe(args) {
       return true;
     }
     slashReplyMd(_meView(await _wbFetch('/api/memory/profile')));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+// /codemode — Code mode from the keyboard (the mode switch is hidden on a
+// narrow phone): /codemode, /codemode <machine>, /codemode off.
+// (/code is the older command that hands a task to the local coding agent.)
+async function _cmdCodeMode(args) {
+  const mode = window.aegisCodeMode;
+  const setMode = window.__aegisSetChatMode;
+  if (!mode || typeof setMode !== 'function' || !mode.isAvailable()) {
+    slashReplyMd('Code mode is for administrators: it runs commands and changes files on the server and other machines.');
+    return true;
+  }
+  const wanted = String(args || '').trim();
+  if (/^(off|stop|exit|quit|agent)$/i.test(wanted)) {
+    setMode('agent');
+    slashReplyMd('Code mode is off. Back in Agent mode.');
+    return true;
+  }
+  try {
+    setMode('code');
+    const label = await mode.setHost(wanted);
+    slashReplyMd(`**Code mode is on** — working on **${label}**.\n\nSay what to build or change. `
+      + '`/codemode <machine>` works on another computer (`/hosts` lists them), `/codemode off` leaves Code mode.');
   } catch (e) {
     slashReplyMd('✗ ' + e.message);
   }
@@ -7632,6 +7659,13 @@ const COMMANDS = {
     help: 'Apps hosted on this server, with their addresses: /apps, /apps restart|stop|start|logs|remove <name>',
     handler: (args) => _cmdApps(args),
     usage: '/apps [restart|stop|start|logs|remove <name>]'
+  },
+  codemode: {
+    alias: ['coding', 'dev'],
+    category: 'Tools',
+    help: 'Code mode — a coding agent on this server or another machine: /codemode, /codemode <machine>, /codemode off',
+    handler: (args) => _cmdCodeMode(args),
+    usage: '/codemode [machine | off]'
   },
   hosts: {
     alias: ['machines', 'pcs'],

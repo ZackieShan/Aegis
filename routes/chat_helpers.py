@@ -1207,24 +1207,37 @@ def run_post_response_tasks(
     # Memory extraction — only every 4th message pair to avoid excess LLM calls,
     # or straight away when the user asks for something to be remembered.
     _msg_count = len(sess.history) if hasattr(sess, 'history') else 0
-    _should_extract = ((_msg_count >= 4) and (_msg_count % 4 == 0)) or _asks_to_remember(message)
+    # A first exchange with some substance is learned from too, so a one-
+    # question chat still leaves a trace (a greeting does not).
+    _first_exchange = (
+        _msg_count == 2 and len(str(message or "").split()) >= 4 and not _is_casual_low_signal(message)
+    )
+    _should_extract = (
+        ((_msg_count >= 4) and (_msg_count % 4 == 0)) or _first_exchange or _asks_to_remember(message)
+    )
     if allow_background_extraction and not incognito and not compare_mode and _should_extract and uprefs.get("auto_memory", True):
-        from services.memory.memory_extractor import extract_and_store
+        from services.memory.learn import learn_from_session
         from src.task_endpoint import resolve_task_endpoint
         t_url, t_model, t_headers = resolve_task_endpoint(
             sess.endpoint_url, sess.model, sess.headers, owner=owner,
         )
-        _extraction_jobs.append(("memory", extract_and_store(
+        _mem_owner = owner if owner is not None else getattr(sess, "owner", None)
+        # One pass: new facts, changed and retired ones, notes for the topics
+        # the conversation touched, and a digest of the conversation.
+        _extraction_jobs.append(("memory", learn_from_session(
             sess, memory_manager, memory_vector,
             t_url, t_model, t_headers,
         )))
-        # Then bring the user's profile up to date with whatever was just
-        # learned. It decides for itself, when its turn in the queue comes,
-        # whether a rewrite is due (most of the time it is not).
+        # Then the slower-moving layers, each of which decides for itself,
+        # when its turn in the queue comes, whether a rewrite is due (most of
+        # the time it is not): topic dossiers first, the profile after them.
+        from services.memory.mind import maybe_consolidate
+        _extraction_jobs.append(("topics", maybe_consolidate(
+            memory_manager, _mem_owner, t_url, t_model, t_headers,
+        )))
         from services.memory.profile import maybe_rebuild
         _extraction_jobs.append(("profile", maybe_rebuild(
-            owner if owner is not None else getattr(sess, "owner", None),
-            memory_manager, t_url, t_model, t_headers,
+            _mem_owner, memory_manager, t_url, t_model, t_headers,
         )))
 
     # Skill extraction from complex agent runs. Only when the user actually

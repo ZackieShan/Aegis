@@ -143,15 +143,28 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(429, "Too many requests — try again later")
         # Verify password first
         username = body.username.strip().lower()
+        from core import access as _access
+        from routes.account_routes import client_address as _client_address
+        _ip = _client_address(request)
+        # The activity log names an account only when it exists: whatever was
+        # typed into the name box by mistake is never written down.
+        _named = username if username in auth_manager.users else None
         _wait = _login_backoff.retry_after(username)
         if _wait:
+            _access.audit("sign_in_locked", user=_named, ip=_ip, detail=f"{_wait} s left")
             raise HTTPException(
                 429, f"Too many failed sign-ins for this account — try again in {_wait} seconds",
                 headers={"Retry-After": str(_wait)},
             )
         if not await asyncio.to_thread(auth_manager.verify_password, username, body.password):
             _login_backoff.failure(username)
+            _access.audit("sign_in_failed", user=_named, ip=_ip, detail=None if _named else "unknown name")
             raise HTTPException(401, "Invalid credentials")
+        # Checked after the password so that it tells nothing to someone
+        # who does not have it.
+        if auth_manager.is_disabled(username) is True:
+            _access.audit("sign_in_refused", user=username, ip=_ip, detail="account switched off")
+            raise HTTPException(403, "This account is switched off. Ask whoever runs this server.")
         # Check 2FA if enabled
         if auth_manager.totp_enabled(username):
             if not body.totp_code:
@@ -159,12 +172,15 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 return {"ok": False, "requires_totp": True, "username": username}
             if not auth_manager.totp_verify(username, body.totp_code):
                 _login_backoff.failure(username)
+                _access.audit("sign_in_failed", user=username, ip=_ip, detail="wrong second factor")
                 raise HTTPException(401, "Invalid 2FA code")
         # All checks passed — create session (password already verified above)
         token = await asyncio.to_thread(auth_manager.create_session_trusted, username)
         if not token:
             raise HTTPException(401, "Invalid credentials")
         _login_backoff.success(username)
+        _access.audit("sign_in", user=username, ip=_ip)
+        _access.note_sign_in(username)
         cookie_kwargs = dict(
             key=SESSION_COOKIE,
             value=token,
@@ -199,6 +215,8 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             u = result.get("username")
             if u:
                 result["privileges"] = auth_manager.get_privileges(u)
+                result["role"] = auth_manager.get_role(u)
+                result["experience"] = auth_manager.get_experience(u)
         except Exception:
             pass
         return result
@@ -213,13 +231,17 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         user = _get_current_user(request)
         if not user:
             raise HTTPException(401, "Not authenticated")
-        if len(body.new_password) < PASSWORD_MIN_LENGTH:
-            raise HTTPException(400, f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
+        from core import access as _access
+        from routes.account_routes import client_address as _client_address, password_problem as _password_problem
+        _problem = _password_problem(body.new_password, auth_manager.allows_pin(user) is True)
+        if _problem:
+            raise HTTPException(400, _problem)
         current_token = request.cookies.get(SESSION_COOKIE)
         ok = await asyncio.to_thread(auth_manager.change_password, user, body.current_password, body.new_password)
         if not ok:
             raise HTTPException(400, "Current password is incorrect")
         await asyncio.to_thread(auth_manager.revoke_user_sessions, user, current_token)
+        _access.audit("password_changed", user=user, by=user, ip=_client_address(request))
         return {"ok": True}
 
     # ------------------------------------------------------------------
@@ -300,9 +322,15 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(400, "Username is required")
         if body.username.lower() in RESERVED_USERNAMES:
             raise HTTPException(403, "Username is reserved")
+        if body.username.strip().lower() in auth_manager.removed():
+            raise HTTPException(409, "That was the name of a deleted account whose data is still on this server. "
+                                     "Erase it or free the name under People and access first.")
         ok = auth_manager.create_user(body.username, body.password, body.is_admin)
         if not ok:
             raise HTTPException(409, "Username already taken")
+        from core import access as _access
+        _access.audit("account_created", user=body.username.strip().lower(), by=user,
+                      detail="administrator" if body.is_admin else "member")
         return {"ok": True}
 
     @router.put("/users/{username}/privileges")
@@ -314,6 +342,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         ok = auth_manager.set_privileges(username, body)
         if not ok:
             raise HTTPException(404, "User not found or is admin")
+        from core import access as _access
+        _access.audit("account_changed", user=(username or "").strip().lower(), by=user,
+                      detail="privileges " + ", ".join(sorted(body)) if isinstance(body, dict) else "privileges")
         return {"ok": True, "privileges": auth_manager.get_privileges(username)}
 
     @router.put("/users/{username}/rename")
@@ -518,6 +549,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         except Exception as e:
             logger.warning("Failed to rename skills owner references %s -> %s: %s", old_username, new_username, e)
 
+        # The profile, the deep memory (topics, digests, rules, history),
+        # board pictures, notification devices and the sign-in record are
+        # files and folders named after the account.
+        try:
+            from services import account_data
+            account_data.move_files(old_username, new_username,
+                                    memory_manager=getattr(request.app.state, "memory_manager", None))
+        except Exception as e:
+            logger.warning("Failed to move account files %s -> %s: %s", old_username, new_username, e)
+
         # The in-memory session cache (session_manager.sessions) stores each
         # session's owner at load time. Without this patch the renamed user's
         # sessions are invisible on the next /api/sessions call because
@@ -613,6 +654,19 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise
         if not ok:
             raise HTTPException(400, "Cannot delete user")
+        # What the account stored is still on the server under its name, which
+        # delete_user has reserved: People and access → Deleted accounts erases
+        # it or frees the name. Drop what belongs to the sign-in itself now,
+        # and free the name straight away when nothing was ever stored.
+        try:
+            from services import account_data
+            gone = (body.username or "").strip().lower()
+            account_data.forget_account_settings(gone)
+            memory_manager = getattr(request.app.state, "memory_manager", None)
+            if memory_manager is not None and account_data.leftover(gone, memory_manager=memory_manager)["total"] == 0:
+                auth_manager.release_removed(gone)
+        except Exception as e:
+            logger.warning("Post-delete account tidy-up failed for %s: %s", body.username, e)
         # delete_user removes the user's ApiToken rows, but the bearer-auth
         # middleware serves from an in-memory prefix->token cache that only
         # rebuilds when flagged dirty. Without this, a deleted user's already

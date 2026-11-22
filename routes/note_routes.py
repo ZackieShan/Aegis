@@ -525,6 +525,19 @@ async def dispatch_reminder(
         except Exception as _e:
             logger.debug(f"dispatch_reminder: in-app notif push failed: {_e}")
 
+    # …and to this person's own phones, when they turned notifications on
+    # there — whatever the main channel is, and with the app closed.
+    push_sent = 0
+    if owner:
+        try:
+            from services import push as _push
+            push_sent = await _push.send(
+                owner, title or "Reminder", (synthesis or note_body or "").strip()[:300],
+                url="/home#reminders", tag=f"reminder-{note_id}",
+            )
+        except Exception as _e:
+            logger.debug(f"dispatch_reminder: phone push failed: {_e}")
+
     # Dedupe across paths: write to the same cache file `action_ping_notes`
     # reads, so the background scanner's REPING_MIN window suppresses a
     # second send for the same note within 25 min. Without this, a note

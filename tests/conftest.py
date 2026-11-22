@@ -26,6 +26,13 @@ os.environ.setdefault("AEGIS_LIBRARY_DISABLED", "1")
 # Same idea for the workbench (services/workbench): its tools start services
 # and reach other machines. Its own tests re-enable it against a temp folder.
 os.environ.setdefault("AEGIS_WORKBENCH_DISABLED", "1")
+# Per-person system instructions come from the real accounts file; tests that
+# want them set up their own and clear this.
+os.environ.setdefault("AEGIS_PERSONA_DISABLED", "1")
+# Sign-ins made by tests must not land in the real account activity log.
+os.environ.setdefault("AEGIS_ACCOUNT_LOG_DISABLED", "1")
+# Nothing a test does may send a push notification to a real phone.
+os.environ.setdefault("AEGIS_PUSH_DISABLED", "1")
 
 # Pre-import real heavy modules BEFORE any test file's module-level stubs can
 # replace them with MagicMock. Some test files (e.g. test_llm_core_sanitize_*)

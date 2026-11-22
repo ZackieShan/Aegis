@@ -1,5 +1,5 @@
 # routes/memory_routes.py
-from fastapi import APIRouter, Form, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
 from typing import Dict, Any, Optional, List
 import json
 import os
@@ -37,7 +37,14 @@ logger = logging.getLogger(__name__)
 
 def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionManager, memory_vector=None):
     """Set up memory-related routes."""
-    router = APIRouter(prefix="/api/memory", tags=["memory"])
+    async def _changes_are_the_users():
+        # Everything done through these routes is the signed-in person acting
+        # on their own memory; the journal says so. (Async on purpose: it runs
+        # in the request's own context, which sync handlers then inherit.)
+        from services.memory import journal as _journal
+        _journal._cause.set({"by": "you"})
+
+    router = APIRouter(prefix="/api/memory", tags=["memory"], dependencies=[Depends(_changes_are_the_users)])
 
     def _owner(request: Request) -> Optional[str]:
         return get_current_user(request)
@@ -224,6 +231,11 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
                         except Exception:
                             logger.warning("memory vector remove failed for %s", memory_id, exc_info=True)
         _profile.delete_profile(user, memory_manager)
+        if memories:
+            # "Forget everything about me" means everything: topic dossiers,
+            # conversation digests, rules and the change journal as well.
+            from services.memory import mind as _mind
+            _mind.wipe(memory_manager, user)
         return {"ok": True, "memories_removed": removed}
 
     @router.post("/search")
@@ -603,6 +615,11 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
             if memory["id"] == memory_id:
                 _verify_memory_owner(memory, user)
                 all_mem[i]["pinned"] = pinned
+                # Pinned by hand: the background learner leaves it alone.
+                if pinned:
+                    all_mem[i]["pinned_by"] = "user"
+                else:
+                    all_mem[i].pop("pinned_by", None)
                 memory_manager.save(all_mem)
                 return {"ok": True, "pinned": pinned}
         raise HTTPException(404, f"Memory item {memory_id} not found")

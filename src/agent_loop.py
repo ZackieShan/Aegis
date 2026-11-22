@@ -315,6 +315,15 @@ _DOMAIN_RULES = {
 - Use `resolve_contact` to look up a contact's email or phone number by name. Searches the CardDAV address book and sent email history.
 - Use `manage_contact` to list, add, update, or delete contacts in the address book.
 - Do NOT use `manage_memory` for contact lookups — contact details live in the address book, not memory.""",
+    "home": """\
+## Lists, reminders, trackers and boards
+- When the user wants something kept — on a list, as a reminder, in a tracker, on a board — do it with the tool right away and then say in one short sentence what you did. Do not describe how they could do it themselves.
+- Refer to lists, trackers and boards by the name the user used; the tool finds the closest one and creates it when it does not exist.
+- "What do I have coming up / today / this week" is about reminders: `manage_reminders` list. It is not a list called "reminders".
+- A reminder needs a time. If none was given, ask for it in one short question instead of guessing. Pass the time as the user said it ("tomorrow at 3pm") or as ISO on their clock.
+- What is on a list, which reminders exist and what a tracker shows change outside this chat (the user ticks things off on their phone). Never answer those from memory or from an earlier conversation: read it with the tool (`show` / `list`) first, every time.
+- When a tool result contains a "Link:", include that link in your reply so the user can open the thing.
+- To collect ideas on a board, search the web first, then pin the few best pages; do not pin search-result pages themselves.""",
     "workbench": """\
 ## Building, hosting and other machines
 - A coding task starts with a project: `manage_projects` create / clone / open. Once a project is open in this chat, the file tools and the shell work inside it; use them (and `git`, `gh` in the shell) for the actual work. Commit when a unit of work is done.
@@ -322,6 +331,13 @@ _DOMAIN_RULES = {
 - Anything on the user's other computers goes through `manage_hosts` run (Windows = PowerShell). Do not try `ssh` from the shell yourself.
 - Before a destructive or irreversible action on any machine (deleting data, force-pushing, wiping, reinstalling, shutting down), say what you are about to do and get a yes first.
 - `delegate_agent` hands work to Claude Code / Kimi / Codex / OpenCode / Aider. It runs in the background; do not poll, you will be called with the result.""",
+    "library": """\
+## Adding to the library
+- "Add this to the library / the survival library" means `manage_library` add. PDFs the user attached go in `files`, by the path or id shown in the uploaded-files list; links to PDF files go in `urls`.
+- Asked to go and find material: search the web for it, prefer whoever issued the document (the agency, university, publisher or author), and add the link to the PDF file itself. Never invent a link (no adding `?format=pdf` to a page address): when you give a page, the tool answers with the PDF links found on it — use one of those. When the useful thing is the web page itself, add it with `"as_page": true` and its text is kept as a document.
+- Say a document was added only when the tool result says `Added` (or `Already in the library`). When it says `NOT added`, it is not in the library: say so and why.
+- Pick the section that fits; `manage_library` sections lists them. Afterwards say what was added, how many pages, and give its link. If a document is scanned, say its text becomes searchable when the background OCR finishes.
+- The tool says when a document is already there. Do not add it again.""",
     "integrations": """\
 ## Integration/API rules
 - To query or control a configured service integration (Home Assistant, Miniflux, Gitea, Linkding, Jellyfin, or any other registered service), use `api_call` with the integration name, HTTP method, path, and optional JSON body.
@@ -341,6 +357,8 @@ _DOMAIN_TOOL_MAP = {
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
     "workbench": {"manage_projects", "manage_apps", "manage_hosts", "delegate_agent"},
+    "home": {"manage_lists", "manage_reminders", "manage_trackers", "manage_boards"},
+    "library": {"manage_library"},
 }
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
@@ -391,6 +409,30 @@ Search the web for a SINGLE quick fact/lookup mid-task. For news / "today" / "la
 If this `web_search` tool section is visible, search is available. Do NOT tell the user web/search tools are unavailable.
 Use this instead of `bash`, `curl`, `python`, `requests`, or scraping code for web lookup/search/latest/current requests.""",
 
+    "manage_lists": """\
+```manage_lists
+{"action": "add", "list": "groceries", "items": ["milk", "eggs", "coffee"]}
+```
+The user's lists and plans. `add` puts items on the named list (created if it does not exist; `"kind": "plan"` for a step-by-step plan). `check` / `uncheck` tick items off by what they say, `remove` takes them off, `show` reads the list back, `list` names every list, `clear_done` drops the ticked ones.""",
+
+    "manage_reminders": """\
+```manage_reminders
+{"action": "add", "text": "pick up the dry cleaning", "when": "tomorrow at 3pm"}
+```
+Reminders delivered when due. `when` is on the user's clock: words ("tonight at 8", "in 2 hours") or ISO. Optional `"repeat"`: daily, weekly, monthly, yearly. Other actions: `list`, `done`, `snooze` (`"minutes"`), `update`, `delete` — find one by its `text`.""",
+
+    "manage_trackers": """\
+```manage_trackers
+{"action": "log", "tracker": "water", "value": 2}
+```
+Things followed day by day. `create` with `"kind"`: `check` (done / not done), `number` (adds up; optional `"unit"`, `"goal"`) or `scale` (rating 1-5). `log` records today (or `"day"`); omit `value` to tick a check. `show` gives the last two weeks and the streak; `list` summarises all.""",
+
+    "manage_boards": """\
+```manage_boards
+{"action": "pin", "board": "patio ideas", "urls": ["https://example.com/small-patio-makeover"]}
+```
+Boards of links, pictures and notes. `pin` saves `urls` (page title and picture are fetched) or a `text` note to the named board, creating it if needed. `show` lists a board's pins, `list` names the boards.""",
+
     "manage_projects": """\
 ```manage_projects
 {"action": "create", "name": "fitness-tracker", "description": "Workout log web app"}
@@ -408,6 +450,12 @@ Keeps an app running as a service (restarts after crashes and reboots) and gives
 {"action": "run", "host": "desktop", "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 Name, CPU"}
 ```
 Runs a command or a whole multi-line script on another machine over SSH and returns its output. Windows hosts take PowerShell, Linux/macOS hosts take bash. Other actions: `list` (registered hosts), `peers` (machines on the tailnet), `copy` (`"source"`, `"destination"`, `"direction"`: put|get), `test`, `add` (`"host"`, `"address"`, `"user"`), `remove`. `"timeout"` in seconds for long commands (default 120).""",
+
+    "manage_library": """\
+```manage_library
+{"action": "add", "urls": ["https://example.org/field-guide.pdf"], "section": "plants"}
+```
+Adds documents to the offline reference library so `library_search` finds them from then on. `urls` are direct links to PDF files (give a web page and you get back the PDF links on it; `"as_page": true` keeps the page's own text instead); `files` are PDFs the user uploaded in this chat, by the path or id from the uploaded-files list. Other actions: `list` (what was added), `remove` (`document`: its title), `sections`.""",
 
     "delegate_agent": """\
 ```delegate_agent
@@ -863,6 +911,53 @@ def _insert_before_latest_user(messages: List[Dict], context_msg: Dict) -> List[
             return out
     out.append(context_msg)
     return out
+
+
+# Tools whose failure matters to what the user is told happened: they change
+# files, the library, lists, other machines. A failed lookup is ordinary.
+_CHANGE_TOOLS = frozenset({
+    "bash", "python", "write_file", "edit_file", "manage_library", "manage_projects", "manage_apps", "manage_hosts",
+    "delegate_agent", "manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes",
+    "manage_calendar", "manage_tasks", "manage_memory", "create_document", "edit_document", "update_document",
+    "send_email", "reply_to_email",
+})
+_PROBLEM_WORDS_RE = re.compile(
+    r"\b(fail(ed|s|ure)?|couldn['’]?t|could not|unable|cannot|can['’]?t|didn['’]?t|did not|wasn['’]?t|was not|"
+    r"weren['’]?t|isn['’]?t|aren['’]?t|doesn['’]?t|does not|don['’]?t|"
+    r"not (been )?(added|saved|created|written|done|set|sent|deployed|installed|found|able|possible|available)|"
+    r"no \w+(?: \w+){0,3} (?:was|were|is|are|has been|have been) (?:found|available|set|added|created)|"
+    r"there (?:is|are|was|were) no|none|nothing|missing|"
+    r"error|refused|rejected|denied|blocked|problem|issue|unfortunately|sorry|instead|however|but )",
+    re.IGNORECASE,
+)
+# Calls that only look something up. Not finding it is an answer, not a
+# change that failed, whatever tool it was asked of.
+_LOOKUP_ACTIONS = frozenset({"show", "list", "get", "read", "status", "search", "find", "sections", "peers", "test",
+                             "agents", "logs", "output", "view", "open", "today", "upcoming"})
+
+
+def _is_lookup_call(tool: str, content: str) -> bool:
+    """True when a tool call only reads (``{"action": "show", …}``)."""
+    stripped = (content or "").strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        action = str((json.loads(stripped) or {}).get("action") or "").strip().lower()
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return action in _LOOKUP_ACTIONS
+
+
+def _unresolved_failures(last_outcome_by_tool: Dict[str, tuple]) -> List[tuple]:
+    """``[(tool, error)]`` for the change-making tools whose latest call in
+    this turn failed."""
+    return [(name, error) for name, (worked, error) in last_outcome_by_tool.items()
+            if not worked and name in _CHANGE_TOOLS]
+
+
+def _admits_a_problem(text: str) -> bool:
+    """True when a reply already tells the user something did not work."""
+    return bool(_PROBLEM_WORDS_RE.search(text or ""))
 
 
 def _uploaded_files_context_message(uploaded_files: Optional[List[Dict]]) -> Optional[Dict]:
@@ -2718,6 +2813,7 @@ async def stream_agent_loop(
     workload: str = "foreground",
     _is_teacher_run: bool = False,
     active_toolboxes: Optional[Set[str]] = None,
+    code_target: Optional[Dict] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -2791,6 +2887,7 @@ async def stream_agent_loop(
         and (_casual_low_signal_turn or not active_email)
         and (_casual_low_signal_turn or not workspace)
         and not forced_tools
+        and not code_target
         and not relevant_tools
         # A dedicated toolbox run explicitly summoned a toolbox — never take
         # the tool-less "low-signal" shortcut, or the tools are never offered.
@@ -3076,6 +3173,34 @@ async def stream_agent_loop(
             _relevant_tools = set(ALWAYS_AVAILABLE)
         _relevant_tools.update({"read_file", "grep", "ls", "manage_documents"})
 
+    # Code mode (the composer's third mode): the coding tools are always on
+    # offer, whatever the wording of the message.
+    if not guide_only and code_target:
+        if _relevant_tools is None:
+            from src.tool_index import ALWAYS_AVAILABLE
+            _relevant_tools = set(ALWAYS_AVAILABLE)
+        _code_tools = set(_DOMAIN_TOOL_MAP["files"]) | set(_DOMAIN_TOOL_MAP["workbench"])
+        if code_target.get("remote"):
+            _code_tools -= {"python", "manage_bg_jobs"}          # those run on this server only
+        _relevant_tools.update(t for t in _code_tools if t not in disabled_tools)
+
+    # The home tools are one small family (lists, reminders, trackers,
+    # boards). A message that brings in one of them often needs another
+    # ("what's on my list, and what do I have coming up?" matched lists only,
+    # and the model went looking for a list called "reminders"), and for a
+    # person whose app is the home screen they are what the assistant is for.
+    if not guide_only and _relevant_tools is not None:
+        _home_tools = _DOMAIN_TOOL_MAP["home"]
+        _wants_home = bool(_relevant_tools & _home_tools)
+        if not _wants_home:
+            try:
+                from src.tool_security import owner_uses_home_screen
+                _wants_home = owner_uses_home_screen(owner)
+            except Exception:
+                _wants_home = False
+        if _wants_home:
+            _relevant_tools.update(t for t in _home_tools if t not in disabled_tools)
+
     # Per-request forced tools are stronger than retrieval. Explicit search
     # settings make web tools visible even when tool RAG misses them;
     # route-level disabled_tools decides what remains allowed.
@@ -3323,6 +3448,21 @@ async def stream_agent_loop(
         else:
             messages.insert(0, {"role": "system", "content": _plan_note})
         logger.info("[plan] pinned approved plan (%d chars) for execution turn", len(approved_plan))
+    if code_target and not guide_only and not plan_mode:
+        # Which machine, which shell, and how to work. At the top of the
+        # system prompt so it is read before the general tool guidance and
+        # survives history trimming (the first system message is kept).
+        try:
+            from services.workbench import targets as _code_targets
+            _code_note = _code_targets.directive(code_target)
+        except Exception as _code_err:
+            logger.warning("code mode: no directive: %s", _code_err)
+            _code_note = ""
+        if _code_note:
+            if messages and messages[0].get("role") == "system":
+                messages[0]["content"] = _code_note + "\n\n" + (messages[0].get("content") or "")
+            else:
+                messages.insert(0, {"role": "system", "content": _code_note})
     if guide_only:
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = GUIDE_ONLY_DIRECTIVE + "\n\n" + (messages[0].get("content") or "")
@@ -3449,6 +3589,16 @@ async def stream_agent_loop(
     # of call reads as progress for the narrated-circling detector.
     _seen_work_sigs: set = set()
     _stuck_rounds = 0
+    # How the most recent tool calls ended, newest last: (tool, worked, error).
+    # When the loop-breaker stops a run of calls that all failed, the model is
+    # told so in as many words — otherwise "write your best final answer" has
+    # been answered with a made-up success.
+    _recent_outcomes: List[tuple] = []
+    # For each tool that changes something: how its LAST call in this turn
+    # ended. A turn that is about to end while one of these still reads
+    # "failed" gets one chance to retry or to say so (see _unresolved_failures).
+    _last_outcome_by_tool: Dict[str, tuple] = {}
+    _failure_check_done = False
     # Frequency of each exact call signature (tool + args), for the runaway
     # backstop. Counting identical repeats — not distinct same-tool calls —
     # lets a legit batch (e.g. 18 calendar events at once) through.
@@ -4095,6 +4245,33 @@ async def stream_agent_loop(
                     # never re-verify an unchanged state in a loop.
                     _effectful_used = False
                     continue
+            # ── Said done, but the last attempt failed ───────────────
+            # A tool that changes something failed, was never followed by a
+            # successful call, and the reply does not mention any problem:
+            # that reply is about to tell the user something happened that
+            # did not ("…has been added to the library", after two refusals).
+            # One round to retry properly or to say so. Deterministic — no
+            # second model judges it — and at most once per turn.
+            _unresolved = _unresolved_failures(_last_outcome_by_tool)
+            if (_unresolved and not _failure_check_done and not _force_answer and not plan_mode
+                    and not _admits_a_problem(_strip_think_blocks(cleaned_round))):
+                _failure_check_done = True
+                logger.info("[agent] finishing with unacknowledged failed calls: %s", [name for name, _ in _unresolved])
+                _note = "\n\n_Let me double-check that._\n\n"
+                yield f'data: {json.dumps({"delta": _note})}\n\n'
+                full_response += _note
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "Before this turn ends: these tool calls FAILED and were not followed by a "
+                        "successful one:\n"
+                        + "\n".join(f"- `{name}`: {' '.join(error.split())[:300] or 'failed'}" for name, error in _unresolved)
+                        + "\nYour reply above did not say so. Either retry now with a corrected call, or "
+                        "tell the user plainly that it did not happen and why. Do not say it succeeded."
+                    ),
+                })
+                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                continue
             # ── Intent-without-action supervisor ─────────────────────
             # Catch "Let me tail the output" / "I'll check the logs" /
             # "Let me investigate" patterns where the model announces an
@@ -4248,16 +4425,27 @@ async def stream_agent_loop(
             _off_note = (f" ({', '.join(_off)} is currently disabled — say so if "
                          f"you needed it.)" if _off else "")
             _force_answer = True
-            messages.append({
-                "role": "system",
-                "content": (
+            _tail = _recent_outcomes[-4:]
+            if len(_tail) >= 3 and not any(worked for _, worked, _ in _tail):
+                _last_error = " ".join(str(_tail[-1][2] or "").split())[:300]
+                _stop_note = (
+                    f"Your last {len(_tail)} tool calls all FAILED"
+                    + (f' (the latest error: "{_last_error}")' if _last_error else "")
+                    + ". Nothing they were meant to do has happened. STOP calling tools. "
+                    "Tell the user plainly what you tried, what the error was, and that it is "
+                    "NOT done. Do not describe or invent results you did not see in a tool "
+                    "output." + _off_note
+                )
+            else:
+                _stop_note = (
                     "You're repeating tool calls without converging. STOP calling "
                     "tools and end the turn one of two ways: (a) write your best "
                     "final answer NOW from the information already gathered, or "
                     "(b) if you're genuinely blocked, say plainly what's blocking "
-                    "you in a sentence or two." + _off_note
-                ),
-            })
+                    "you in a sentence or two. Report only what tool outputs actually "
+                    "showed." + _off_note
+                )
+            messages.append({"role": "system", "content": _stop_note})
             full_response += "\n\n"
             yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
             continue
@@ -4522,6 +4710,14 @@ async def stream_agent_loop(
                 )
             elif "error" in result:
                 output_text = _truncate(result["error"])
+
+            _worked = "error" not in result and result.get("exit_code") in (0, None)
+            _recent_outcomes.append((block.tool_type, _worked, "" if _worked else (result.get("error") or output_text or "")))
+            if _worked or not _is_lookup_call(block.tool_type, block.content):
+                # (A lookup that found nothing is not a change that failed.)
+                _last_outcome_by_tool[block.tool_type] = (_worked, "" if _worked else str(result.get("error") or output_text or ""))
+            if len(_recent_outcomes) > 12:
+                del _recent_outcomes[:-12]
 
             # Emit tool_output (include ui_event data if present)
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}

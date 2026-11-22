@@ -67,6 +67,13 @@ def _truthy(value: Any, default: bool) -> bool:
     return str(value).strip().lower() not in ("0", "false", "no", "off", "")
 
 
+# A run without a chat (a skill audit, a scheduled task) has nothing to keep a
+# project open in. Saying "the shell starts there" anyway sent a whole
+# scaffold-and-commit into the wrong folder.
+_NOT_OPENED = ("This run has no chat to keep it open in, so the shell does NOT start there: begin every shell "
+               "command with `cd {path} &&` and give the file tools full paths under it.")
+
+
 class ManageProjectsTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         args = _parse(content)
@@ -85,13 +92,15 @@ class ManageProjectsTool:
                 info = projects.create(name, str(args.get("description") or ""))
                 if session_id:
                     projects.open_project(session_id, info["path"])
-                return _ok(info, f"Created {info['path']} (git repository, first commit made). This chat now works in "
-                                 "that folder: file tools are confined to it and the shell starts there.")
+                    return _ok(info, f"Created {info['path']} (git repository, first commit made). This chat now works in "
+                                     "that folder: file tools are confined to it and the shell starts there.")
+                return _ok(info, f"Created {info['path']} (git repository, first commit made). " + _NOT_OPENED.format(path=info["path"]))
             if action == "clone":
                 info = projects.clone(str(args.get("url") or args.get("repo") or ""), name)
                 if session_id:
                     projects.open_project(session_id, info["path"])
-                return _ok(info, f"Cloned into {info['path']}. This chat now works in that folder.")
+                    return _ok(info, f"Cloned into {info['path']}. This chat now works in that folder.")
+                return _ok(info, f"Cloned into {info['path']}. " + _NOT_OPENED.format(path=info["path"]))
             if action == "open":
                 info = projects.open_project(session_id, name or str(args.get("path") or ""))
                 return _ok(info, f"This chat now works in {info['path']}: file tools are confined to it and the shell "
@@ -161,6 +170,7 @@ class ManageHostsTool:
     async def execute(self, content: str, ctx: dict) -> dict:
         args = _parse(content)
         progress_cb = (ctx or {}).get("progress_cb")
+        session_id = (ctx or {}).get("session_id") or ""
 
         action = str(args.get("action") or ("run" if args.get("command") else "list")).lower()
         host = str(args.get("host") or args.get("name") or "").strip()
@@ -176,6 +186,20 @@ class ManageHostsTool:
             if action == "peers":
                 return _ok({"tailnet": hosts.tailnet_peers()})
             if action == "run":
+                command = args.get("command") or args.get("script") or args.get("cmd") or args.get("commands") or ""
+                if isinstance(command, list):
+                    command = "\n".join(str(line) for line in command)
+                if not str(command).strip():
+                    # Said with an example: a bare "nothing to run" got the same
+                    # empty call sent seven times in a row.
+                    from services.workbench import targets
+                    here = targets.remote(session_id)
+                    hint = (f' In Code mode your shell tool (`bash`) already runs on {here["name"]} — use that instead.'
+                            if here and here["name"] == host.lower() else "")
+                    raise hosts.WorkbenchError(
+                        'run needs "command": the PowerShell or bash text to run on that machine, e.g. '
+                        f'{{"action": "run", "host": "{host or "desktop"}", "command": "Get-ChildItem"}}.' + hint)
+                args["command"] = str(command)
                 result = hosts.run(host, str(args.get("command") or ""), shell=str(args.get("shell") or ""),
                                    timeout=float(args.get("timeout") or hosts.DEFAULT_TIMEOUT),
                                    cwd=str(args.get("cwd") or ""))
@@ -196,7 +220,23 @@ class ManageHostsTool:
             if action == "copy":
                 return _ok(hosts.copy(host, str(args.get("source") or ""), str(args.get("destination") or ""),
                                       direction=str(args.get("direction") or "put")))
-            raise hosts.WorkbenchError("action is one of: list, peers, run, add, remove, test, copy")
+            if action == "workdir":
+                # Code mode on another machine: the folder its shell starts in
+                # and that relative paths are read against, for this chat.
+                from services.workbench import remote_tools, targets
+                target = targets.remote(session_id)
+                if target is None:
+                    raise hosts.WorkbenchError("This chat is not in Code mode on another machine. On this server, "
+                                               "open a project with manage_projects instead.")
+                wanted = str(args.get("path") or args.get("cwd") or "").strip()
+                if not wanted:
+                    return _ok(targets.describe(session_id))
+                try:
+                    folder = remote_tools.folder_exists(target, wanted)
+                except remote_tools.RemoteError as exc:
+                    raise hosts.WorkbenchError(f"{exc} on {target['name']}. Create the folder first with the shell tool.")
+                return _ok(targets.set_folder(session_id, folder), f"Working in {folder} on {target['name']} from now on.")
+            raise hosts.WorkbenchError("action is one of: list, peers, run, add, remove, test, copy, workdir")
 
         return await _guarded("manage_hosts", work)
 

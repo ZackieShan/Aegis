@@ -19,6 +19,26 @@ from pathlib import Path
 DEFAULT_KIWIX_URL = "http://127.0.0.1:8095"
 DEFAULT_LIBRARY_DIR = "~/library"
 
+# Documents added after the library was built (services/library/additions.py)
+# are not inside a ZIM: Aegis keeps the files and serves them itself, so their
+# links are paths on this app rather than on the Kiwix server.
+ADDED_BOOK = "aegis-added"
+ADDED_URL_PREFIX = "/api/reference/added/"
+
+
+def added_url(path: str, page: int = 0) -> str:
+    from urllib.parse import quote
+    url = ADDED_URL_PREFIX + quote(path, safe="/").replace("(", "%28").replace(")", "%29")
+    return f"{url}#page={page}" if page else url
+
+
+def is_added_url(url: str) -> bool:
+    from urllib.parse import urlsplit
+    try:
+        return urlsplit(str(url or "")).path.startswith(ADDED_URL_PREFIX)
+    except ValueError:
+        return False
+
 
 def _settings() -> dict:
     try:

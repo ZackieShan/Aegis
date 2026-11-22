@@ -25,7 +25,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
 _lock = threading.RLock()
 _cache: Optional[Tuple[float, dict]] = None
 
-_EMPTY = {"version": 1, "session_projects": {}, "apps": {}, "hosts": {}, "delegations": {}}
+_EMPTY = {"version": 1, "session_projects": {}, "session_targets": {}, "apps": {}, "hosts": {}, "delegations": {}}
 
 
 class WorkbenchError(Exception):

@@ -179,7 +179,8 @@ def library_search(query: str, count: int = 8, scope: str = "all") -> List[dict]
 
     book_names = kiwix.book_titles() if (articles or manual_hits or titles) else {}
     for hit in manual_hits:
-        hit["book_title"] = book_names.get(hit["book"], hit["book"])
+        hit["book_title"] = book_names.get(
+            hit["book"], "Added to the library" if hit["book"] == config.ADDED_BOOK else hit["book"])
 
     # Interleave the two sources, then reorder by how much of the question
     # each hit covers: terms in the title count most ("Hypothermia" beats a
@@ -228,11 +229,13 @@ def library_search(query: str, count: int = 8, scope: str = "all") -> List[dict]
 
 
 def owns_url(url: str) -> bool:
-    return kiwix.owns_url(url)
+    return kiwix.owns_url(url) or config.is_added_url(url)
 
 
 def fetch_content(url: str, query: str = "", budget: int = 4000) -> dict:
     """Quotable text for a library link (article passages or manual pages)."""
+    if config.is_added_url(url):
+        return manuals.passage(url, budget=budget)
     if not kiwix.owns_url(url):
         return {"url": url, "title": "", "content": "", "success": False,
                 "error": "not an offline-library link"}

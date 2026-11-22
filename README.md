@@ -10,7 +10,8 @@
   <a href="docs/setup.md">Setup</a> ·
   <a href="docs/engine-setup.md">Engine (Windows)</a> ·
   <a href="docs/engine-setup-linux.md">Engine (Linux)</a> ·
-  <a href="docs/memory-and-users.md">Memory &amp; users</a> ·
+  <a href="docs/memory-and-users.md">Memory &amp; people</a> ·
+  <a href="docs/home.md">Home screen</a> ·
   <a href="docs/offline-library.md">Offline library</a> ·
   <a href="docs/workbench.md">Workbench</a> ·
   <a href="ROADMAP.md">Roadmap</a>
@@ -29,14 +30,19 @@ agents, research, coding, image / video / music generation and voice. It runs on
 for one person, or on an always-on box at home that the whole household opens from their
 phones over a private network.
 
-Four things set it apart:
+Five things set it apart:
 
 - **It is yours.** Models, chats, memories and files stay on your machine. Nothing is
   metered, logged or trained on by a third party, and any OpenAI-compatible endpoint can be
   added when *you* decide local horsepower is not enough.
-- **It knows who it is talking to.** Each account has its own long-term memory and a
-  running profile — who you are, what you are into, how you like answers — used in every
-  chat, and switched off with one tap when you want to be nobody.
+- **It knows who it is talking to — and shows you everything it knows.** Each account has a
+  deep, living memory: facts with the words you said as evidence, a dossier per subject in
+  your life, a digest of every conversation, and a profile written from all of it. One
+  page lists every item, where it came from and every change ever made to it, with the
+  means to correct or delete any of it. One tap makes you nobody.
+- **It fits everyone in the house.** The same server gives one person a full AI workspace
+  and another a plain home screen — chat, lists, reminders, trackers, boards — with roles
+  that decide what each account may do.
 - **It still works when the internet does not.** Put an offline Wikipedia, medical
   references and thousands of field manuals on the same disk as the models: they are
   searched page by page, and a photo of a plant, mushroom, insect or label is identified
@@ -49,7 +55,9 @@ Four things set it apart:
 | Area | What you get | More |
 |---|---|---|
 | **Models** | llama.cpp + llama-swap serving any GGUF through one endpoint with native tool calls, a hardware-aware context tuner, per-model thinking / temperature settings, optional cloud endpoints | [Windows](docs/engine-setup.md) · [Linux](docs/engine-setup-linux.md) |
-| **Memory & users** | Per-account memories and a profile written from them, `/me`, Nobody mode, separate accounts with their own data and limits | [Guide](docs/memory-and-users.md) |
+| **Memory** | Facts with evidence, topic dossiers, conversation digests and a profile, kept current in the background; a page to inspect, trace, correct and delete all of it; Nobody mode | [Guide](docs/memory-and-users.md) |
+| **People & access** | Separate accounts, roles, per-person app and assistant manner, PINs, an administrator's console with an activity log | [Guide](docs/memory-and-users.md#people-roles-and-each-persons-app) |
+| **Home screen** | A simple phone screen for non-technical people: chat, lists, reminders (with phone notifications), trackers, boards | [Guide](docs/home.md) |
 | **Offline library** | Kiwix collections (Wikipedia, medicine, how-to, Stack Exchange) plus a page-level index of PDF manuals; used automatically when the internet is down | [Guide](docs/offline-library.md) |
 | **Photo identification** | `/identify`: species classifier + local vision model + the library's own notes on lookalikes | [Guide](docs/offline-library.md#photo-identification) |
 | **Workbench** | Projects in git, apps kept running as services with an address, commands on other machines over SSH, hand-offs to other coding agents | [Guide](docs/workbench.md) |
@@ -61,33 +69,84 @@ Four things set it apart:
 
 ## It knows who it is talking to
 
-Aegis keeps **memories** — single lasting facts picked out of your chats in the background,
-or added by you — and from them writes a **profile** of each user: who they are, the people
-in their life, preferences, projects, goals, and their interests with what is known about
-each. The profile rides along on every turn, so:
+Aegis keeps a memory of each person in four layers, and keeps it current in the background
+while you chat:
 
-- "hi" is answered by name;
-- a question about boiling eggs comes back short and in metric, if that is what you like —
-  and without your hobbies shoehorned in;
-- a question about a new prescription starts with the allergy you mentioned three weeks ago.
+- **Facts** — single lasting statements, each with the words you said that showed it and
+  the chat it came from. When something changes ("I'm up to four hives now") the fact is
+  updated in place, not duplicated.
+- **Topics** — a dossier per subject in your life (a hobby, a project, a person, your
+  home): dated notes from every chat that touched it, and a digest — where things stand,
+  a timeline, open questions — rewritten from those notes.
+- **Conversations** — a short digest of each chat, so the next one can pick up the thread.
+- **A profile** — the standing picture written from all of it, given to the model on every
+  turn.
+
+So "hi" is answered by name; a question about boiling eggs comes back short and in metric,
+if that is what you like, without your hobbies shoehorned in; a question about a new
+prescription starts with the allergy you mentioned three weeks ago; and "when should I
+treat the hives next?" is answered from what you told it about *your* hives.
+
+**You can see all of it.** `/mind` (or *Brain → See everything & history*) shows every
+fact, topic, digest and profile line; where each came from; a log of every change — what
+it was before and after, when, and whether you, the assistant or the background learner
+made it — with undo; the exact text the model would be given for any message; and the
+controls: kinds of information never to keep, export everything, forget everything.
 
 ```
-/me                  what Aegis knows about you
+/me                  what Aegis knows about you, with a link to the full view
 /me add <fact>       tell it something
-/me refresh          rewrite the profile now
 /me off | /me on     pause | resume using and learning (deletes nothing)
-/me forget           delete your profile and memories (asks first)
+/me forget           delete everything it knows about you (asks first)
 ```
 
-- **Per user.** Every account has its own chats, memories, profile, files, notes, calendar
-  and gallery. Add people under *Settings → Users*; regular accounts cannot reach the shell,
-  server files, the workbench or the settings.
+- **Yours to correct.** A profile line you write is kept word for word; one you remove
+  never comes back. A fact you wrote or pinned is never rewritten by the learner.
+- **It forgets when you say so.** Delete a fact and it is out of the profile at once — the
+  profile never outlives what it was written from.
 - **Nobody mode.** Tap the eye on the welcome screen and that chat uses no memory, learns
   nothing and is not saved.
-- **It forgets when you say so.** Delete a memory and it is out of the profile at once —
-  the profile never outlives the facts it was written from.
+- **Per person.** Nothing crosses between accounts, and an administrator cannot read
+  anyone else's memory.
 
-→ [Memory, profiles and more than one user](docs/memory-and-users.md)
+<p align="center">
+  <img src="docs/media/mind-overview.png" alt="Your memory: counts, the summary, and what the model is told about you" width="230">
+  <img src="docs/media/mind-topic.png" alt="A topic dossier: summary, where things stand, open questions" width="230">
+  <img src="docs/media/mind-history.png" alt="History: every change, who made it, and undo" width="230">
+</p>
+
+→ [Memory, and more than one person](docs/memory-and-users.md)
+
+## It fits everyone in the house
+
+**A home screen for people who do not want an AI workspace.** Give someone the *Household*
+role and signing in lands them on one plain screen: a chat box and four things.
+
+> *Add bread and butter to my groceries, and remind me to call the vet tomorrow at 3.*
+
+It does it, says so in a sentence, and offers a button to open the list. Lists and plans,
+reminders (once or repeating, with notifications on the phone), trackers (a habit, an
+amount toward a daily goal, a 1–5 rating) and boards (photos, links and notes around an
+idea). No models, modes or settings anywhere.
+
+**Roles and each person's app.** `/admin` is the administrator's console: add people,
+give each a role (Administrator, Member, Household, Guest, or your own), choose which app
+they get, what the assistant is called for them and how it should talk to them, allow a
+PIN instead of a password, switch an account off, and see who signed in and what was
+changed. No role can hand out access to the server itself.
+
+<p align="center">
+  <img src="docs/media/home-screen.png" alt="The home screen: what is coming up, and things to say" width="200">
+  <img src="docs/media/home-chat.png" alt="Asking about a list and upcoming reminders in one sentence" width="200">
+  <img src="docs/media/home-list.png" alt="A grocery list" width="200">
+  <img src="docs/media/home-trackers.png" alt="Trackers: a daily habit and an amount toward a goal" width="200">
+</p>
+<p align="center">
+  <img src="docs/media/admin-people.png" alt="The administrator's console: people, their roles and how much each has stored" width="200">
+  <img src="docs/media/admin-roles.png" alt="Roles and what each lets the assistant do" width="620">
+</p>
+
+→ [Home screen](docs/home.md) · [People, roles and each person's app](docs/memory-and-users.md#people-roles-and-each-persons-app)
 
 ## It works with the internet down
 
@@ -104,6 +163,9 @@ article or manual page:
 - **Automatic fallback** — web search uses the library when the internet is unreachable, and
   the agent has a `library_search` tool for settled knowledge either way.
 - **`/lib <words>`** for a quick lookup; the whole library is also browsable from a phone.
+- **It grows by asking** — *"take these PDFs and add them to the survival library"*, *"add
+  this link"*, or *"go out and find the official guide on … and add it"*. Each document is
+  read page by page (OCR for scans) and is searchable in the next answer.
 
 **Identify from a photo.** `/identify` (or *+ → Identify photo*) takes a picture of a
 plant, mushroom, insect, spider, snake, track or object. A species classifier and a local
@@ -120,6 +182,10 @@ Agent mode is a development and operations seat you can use from anywhere:
 > *"Build me a workout tracker and host it."* · *"Restart the tracker and show me its log."*
 > · *"How much disk is free on my Windows PC?"* · *"Have Claude Code add login to it."*
 
+- **Code mode** — the third position of the mode switch (Agent · Chat · Code): a coding
+  agent that reads, edits, runs and reports. It works on the server unless you pick another
+  of your machines in the composer; then its shell and file tools act on that computer
+  (PowerShell on Windows).
 - **Projects** (`/project`) — create or clone a git repository on the server; the project
   you open stays open in that chat, and the agent's file and shell tools work inside it.
 - **Hosted apps** (`/apps`) — deploy a project as a service that survives restarts, with
@@ -132,6 +198,10 @@ Agent mode is a development and operations seat you can use from anywhere:
   run) and **Repo → Wiki** (`/wiki`).
 
 All of it is limited to administrators and written to an audit log.
+
+<p align="center">
+  <img src="docs/media/code-mode.png" alt="Code mode: the assistant creates a project, writes a script and runs it; the machine picker is open" width="820">
+</p>
 
 → [Workbench](docs/workbench.md)
 
@@ -266,7 +336,7 @@ Account*). Native installs, GPU notes, HTTPS and configuration are in the
 | To add | Do |
 |---|---|
 | Local models | The engine guide for your OS, then *Cookbook* to pick models that fit |
-| Another person | *Settings → Users → Add User*, and share the model defaults — [guide](docs/memory-and-users.md#more-than-one-user) |
+| Another person | `/admin` → *Add person*: pick a role (Household for the simple home screen) — [guide](docs/memory-and-users.md#people-roles-and-each-persons-app) |
 | The offline library | Install Kiwix, choose collections, index — [guide](docs/offline-library.md#setting-it-up) |
 | Building and hosting apps | [Workbench guide](docs/workbench.md) |
 
@@ -452,7 +522,9 @@ Aegis gives a language model real tools on a real machine. Treat it accordingly:
 - **Do not put it on the open internet.** Publish it on a private network (a VPN or a
   tailnet) and never expose the raw model or service ports.
 - **Give other people regular accounts.** Shell, code execution, server files, email tools,
-  the workbench and all settings are administrator-only.
+  the workbench and all settings are administrator-only, and no role can grant them. A
+  short PIN is an administrator's per-account choice, meant for a phone on a private
+  network.
 - **Retrieved text is data, not instructions.** Web pages, documents, library articles and
   saved memories reach the model in guarded blocks marked untrusted. That reduces prompt
   injection; it does not make it impossible — review what an agent is about to do with
