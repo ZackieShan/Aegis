@@ -71,6 +71,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "python": "Execute Python code for computation, data processing, math, scripting, and parsing. Not for writing code for the user. Prefer a dedicated tool for reading, writing, or searching files; use python only for what no dedicated tool covers. Do not use for web lookup/search; use web_search or web_fetch when web tools are available.",
     "web_search": "Quick single web lookup for a fact, current event, latest/current information, or doc mid-task. Use this instead of bash/curl/python/requests for web searches. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
+    "library_search": "Search the OFFLINE reference library on this server (Kiwix): a full Wikipedia encyclopedia snapshot, WikiMed and other medical references, Army field manuals and survival / first aid / SERE / land navigation / marksmanship / field sanitation manuals (PDF pages), water purification, knots, food preservation and canning, hunting, trapping, edible and poisonous plants, mushrooms, insects, repair guides (iFixit), gardening, cooking, electronics and other Stack Exchange archives. Works with NO internet. Use for established knowledge, how-to and identification questions, and whenever web_search fails or the internet is down. Not for news.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs. Supports an optional line range (offset/limit) for large files.",
     "grep": "Search file CONTENTS for a regex across a directory tree (ripgrep-backed, honours .gitignore). Returns file:line:match. Use to find where code/symbols/strings live — prefer over bash grep.",
     "glob": "Find FILES by glob pattern (e.g. '**/*.py'), newest first. Use to locate files by name/extension — prefer over bash find/ls.",
@@ -135,6 +136,10 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "app_api": "Generic loopback to allowed Aegis internal endpoints. Use this when the user wants something the UI can do but there's no named tool for it. Covers calendar, gallery, library/documents, memory, notes, tasks, settings, research, compare, cookbook GPUs/state — allowed UI buttons hit /api/* endpoints and you can hit them too. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked; do NOT use app_api for shell commands, package installs, engine rebuilds, or PID signalling. Use named command tooling for shell commands. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). EMAIL ACCOUNTS: do NOT use /api/email/accounts via app_api; use list_email_accounts, list_emails, and read_email instead. To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
     "edit_image": "Edit an image in the gallery: upscale (increase resolution), remove background (rembg), inpaint (fill selected area), or harmonize (blend edits). Specify image ID and action.",
     "trigger_research": "Start a deep research job on any topic — appears in the Deep Research sidebar, streams progress, produces a detailed report. Use for 'research X', 'look into Y', 'do deep research on Z', 'investigate'. NOT a scheduled task — it runs now and surfaces in the sidebar.",
+    "manage_projects": "Code projects on this server: create a new app or project, clone a git or GitHub repository, open a project so this chat works in it (file tools and shell), list projects, show git status. Use when the user wants to build, start, continue, pull or open an app, project, repo or codebase.",
+    "manage_apps": "Host and deploy apps on this server: turn a project's start command into a service that keeps running, restarts after crashes and reboots, and gets an HTTPS address for the phone and other PCs over Tailscale. List running apps, status, logs, restart, stop, remove. Use for deploy, host, serve, run permanently, make it available, is my app up, app logs.",
+    "manage_hosts": "Remote control of the user's other computers over SSH: run PowerShell on the Windows PC, bash on Linux or macOS machines, copy files between machines, list machines on the network or tailnet. Use for anything on 'my Windows machine', 'my PC', 'the other computer', remote commands, installing or checking something on another machine, automating Windows.",
+    "delegate_agent": "Hand a coding task to another agent installed on this server: Claude Code (claude), Kimi Code (kimi), Codex, OpenCode or Aider. Runs in the background in a project folder and reports back. Use when the user names one of those agents ('ask kimi to…', 'have claude code do…', 'send this to codex') or wants a second coding agent on a task.",
     "manage_bg_jobs": "Inspect and control detached background `bash` jobs (the ones started with a `#!bg` marker). action='list' shows this chat's jobs (id/status/age/command); action='output' returns a job's captured output so far (check on a long-running job, or re-read a finished one); action='kill' stops a runaway job by id. Use for 'is the background job done', 'check on that job', 'show the build output', 'kill the background job', 'stop the bg task'. output/kill need a job_id from list.",
 }
 
@@ -410,6 +415,32 @@ class ToolIndex:
                    "on the internet", "google", "latest", "current", "news",
                    "weather", "forecast", "stock price", "price of"}):
             {"web_search", "web_fetch"},
+        # Workbench: projects, hosted apps, other machines, other agents.
+        frozenset({"project", "projects", "repo", "repository", "codebase", "clone", "git clone",
+                   "new app", "build an app", "build me", "start a new", "scaffold", "open the app",
+                   "work on the", "continue working on", "pull the repo", "github"}):
+            {"manage_projects"},
+        frozenset({"deploy", "redeploy", "host it", "host this", "hosted", "hosting", "serve it",
+                   "keep it running", "make it available", "is my app", "app logs", "restart the app",
+                   "my apps", "running apps", "what's running", "tailscale url", "app url"}):
+            {"manage_apps", "manage_projects"},
+        frozenset({"windows machine", "windows pc", "my pc", "my windows", "other computer",
+                   "other machine", "other pc", "remote machine", "remotely", "over ssh", "ssh into",
+                   "powershell", "my desktop", "gaming pc", "on my network", "my laptop",
+                   "remote control", "another machine"}):
+            {"manage_hosts"},
+        frozenset({"claude code", "ask claude", "have claude", "kimi", "codex", "opencode", "aider",
+                   "delegate", "hand off", "hand this to", "another agent", "other agent",
+                   "second agent", "send this to"}):
+            {"delegate_agent", "manage_projects"},
+        # Offline reference library (Kiwix + PDF manuals).
+        frozenset({"offline library", "reference library", "the library", "kiwix",
+                   "wikipedia", "encyclopedia", "field manual", "army manual",
+                   "manual say", "manuals", "survival", "first aid", "edible",
+                   "poisonous", "forage", "foraging", "trapping", "snare",
+                   "field dress", "purify water", "water purification",
+                   "internet is down", "no internet", "offline"}):
+            {"library_search"},
         frozenset({"research", "reserach", "reasearch", "look into", "investigate",
                    "deep dive", "deep research", "find out about", "study up on",
                    "report on", "do research", "look up everything"}):
@@ -537,6 +568,15 @@ class ToolIndex:
         # prompts do not drag web schemas into the agent context.
         if self._WEB_RE.search(query):
             base.update({"web_search", "web_fetch"})
+        # Wherever a web lookup is on offer, offer the offline library too
+        # (when one is installed): it is the better source for settled
+        # knowledge and the only one when the internet is down.
+        # The same goes for anything phrased as a question ("how do I treat a
+        # copperhead bite"): embedding retrieval over tool descriptions is
+        # poor at spotting plain knowledge questions, and those are exactly
+        # what the library answers — with or without internet.
+        if ("web_search" in base or _QUESTION_RE.search(query)) and _library_ready():
+            base.add("library_search")
         # Hard steering: when the query is a clear "save info about a specific
         # person" pattern (address paste + name, phone next to a name, etc.),
         # the model has been observed defaulting to manage_memory even with
@@ -585,6 +625,23 @@ class ToolIndex:
         if contact_only_signal and "manage_contact" in base:
             base.discard("manage_memory")
         return base
+
+
+_QUESTION_RE = re.compile(
+    r"^\s*(how|what|why|when|where|which|who|whom|whose|is|are|was|were|can|could|does|do|did|"
+    r"should|will|would)\b|\?\s*$|\bhow (to|do|does|can|should|long|much|many)\b",
+    re.I,
+)
+
+
+def _library_ready() -> bool:
+    """True when the offline library is switched on and its server answers
+    (cached inside services.library, so this is cheap per query)."""
+    try:
+        from services import library
+        return bool(library.available())
+    except Exception:
+        return False
 
 
 # ── Singleton ──

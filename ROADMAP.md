@@ -9,6 +9,22 @@ Feedback and contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTI
 
 The local-first foundation is in place:
 
+- **A profile of each user, and more than one user** — every account has its own memories
+  and a running profile written from them (who they are, what they are into, how they like
+  answers), used on every turn and switched off in Nobody mode; `/me` shows and manages it.
+  Separate accounts with separate data, shared model defaults, and a per-account sign-in
+  slowdown. See [docs/memory-and-users.md](docs/memory-and-users.md).
+- **Offline reference library** — Kiwix collections (Wikipedia, medicine, how-to, Stack
+  Exchange) plus a page-level index of every PDF manual inside them, used automatically
+  when the internet is down and available to the agent as `library_search`.
+  See [docs/offline-library.md](docs/offline-library.md).
+- **Photo identification** — `/identify`: a species classifier and a local vision model
+  name what is in a photo, with field checks, lookalikes and the library's own notes.
+- **Workbench** — projects in git, apps hosted as services with an address, commands on
+  other machines over SSH (Windows included), and hand-offs to other coding agents — all
+  from a chat. See [docs/workbench.md](docs/workbench.md).
+- **Linux engine setup** — `scripts/setup-engine.sh` and a guide for running the engine
+  and the app as services on an always-on machine.
 - **Local model engine** — llama.cpp + llama-swap hot-swapping GGUFs with reliable native
   tool calls, a zero-config `models/` drop folder, and a GPU-aware context auto-tuner.
 - **Agents** — Toolboxes (OSINT / market / troubleshoot / web), Deep Research, and
@@ -49,8 +65,8 @@ The local-first foundation is in place:
 ## Where it's going
 
 ### Make it reproducible everywhere
-- **Cross-platform engine setup** — the one-command engine installer and guide are
-  Windows-first today; bring the same to Linux and macOS (matching release binaries + layout).
+- **Cross-platform engine setup** — the one-command engine installer and guide exist for
+  Windows and Linux; bring the same to macOS (matching release binaries + layout).
 - **Fresh-install smoke tests** across Linux, macOS, and Windows — native, Docker, and WSL.
   The macOS installer especially needs a real first-run test by a Mac user.
 - **Tray supervisor** — a tiny signed tray app (Tauri) that starts/stops the services,
@@ -84,6 +100,12 @@ The local-first foundation is in place:
   bundled ffmpeg already has `xfade`, and TTS is already local.
 
 ### Deepen the loop
+- **The profile everywhere** — scheduled tasks and automations still run without the
+  user's profile; give them the same picture chat has. Let a user correct the profile line
+  by line instead of only through its memories.
+- **Workbench reach** — optional LAN publishing for hosted apps (today: the server itself
+  and a private network), and desktop (GUI) automation on remote machines, not only
+  commands.
 - **Code Canvas everywhere** — "open in canvas" on chat code blocks, and auto-open when the
   model writes a substantial file.
 - **Richer voice** — continuous / push-to-talk conversation mode.

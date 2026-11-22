@@ -315,6 +315,13 @@ _DOMAIN_RULES = {
 - Use `resolve_contact` to look up a contact's email or phone number by name. Searches the CardDAV address book and sent email history.
 - Use `manage_contact` to list, add, update, or delete contacts in the address book.
 - Do NOT use `manage_memory` for contact lookups — contact details live in the address book, not memory.""",
+    "workbench": """\
+## Building, hosting and other machines
+- A coding task starts with a project: `manage_projects` create / clone / open. Once a project is open in this chat, the file tools and the shell work inside it; use them (and `git`, `gh` in the shell) for the actual work. Commit when a unit of work is done.
+- To make an app stay up and reachable, use `manage_apps` deploy with a foreground start command that listens on `$PORT`; do not background it yourself with `&`, `nohup` or tmux. Report the URL the tool returns. After code changes to a deployed app, `manage_apps` restart.
+- Anything on the user's other computers goes through `manage_hosts` run (Windows = PowerShell). Do not try `ssh` from the shell yourself.
+- Before a destructive or irreversible action on any machine (deleting data, force-pushing, wiping, reinstalling, shutting down), say what you are about to do and get a yes first.
+- `delegate_agent` hands work to Claude Code / Kimi / Codex / OpenCode / Aider. It runs in the background; do not poll, you will be called with the result.""",
     "integrations": """\
 ## Integration/API rules
 - To query or control a configured service integration (Home Assistant, Miniflux, Gitea, Linkding, Jellyfin, or any other registered service), use `api_call` with the integration name, HTTP method, path, and optional JSON body.
@@ -333,6 +340,7 @@ _DOMAIN_TOOL_MAP = {
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
+    "workbench": {"manage_projects", "manage_apps", "manage_hosts", "delegate_agent"},
 }
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
@@ -382,6 +390,36 @@ Or with JSON for fresh news:
 Search the web for a SINGLE quick fact/lookup mid-task. For news / "today" / "latest" queries, pass `time_filter` ("day", "week", "month", or "year"). NOT for "research X" / "do research on X" / "look into X" requests — those mean a multi-source DEEP RESEARCH job: use `trigger_research` instead (it runs in the Deep Research sidebar and produces a full report). web_search = one quick query; trigger_research = a researched report.
 If this `web_search` tool section is visible, search is available. Do NOT tell the user web/search tools are unavailable.
 Use this instead of `bash`, `curl`, `python`, `requests`, or scraping code for web lookup/search/latest/current requests.""",
+
+    "manage_projects": """\
+```manage_projects
+{"action": "create", "name": "fitness-tracker", "description": "Workout log web app"}
+```
+Actions: `list`, `create` (new folder + git repo), `clone` (`"url"`: git URL or GitHub `owner/repo`), `open` (`"name"`: project name or absolute path), `status`, `close`. After create / clone / open this chat works INSIDE that project: file tools are confined to it, the shell starts there, and it stays that way on later messages.""",
+
+    "manage_apps": """\
+```manage_apps
+{"action": "deploy", "name": "fitness-tracker", "command": "uv run uvicorn app:app --host 127.0.0.1 --port $PORT"}
+```
+Keeps an app running as a service (restarts after crashes and reboots) and gives web apps an HTTPS address on the user's tailnet. `command` must run in the foreground and listen on `$PORT` on 127.0.0.1. Other actions: `list`, `status`, `logs` (`"lines"`), `start`, `stop`, `restart`, `expose`, `unexpose`, `remove` (never deletes code). Use `"web": false` for a worker with no port. Secrets go in the project's `.env` file, which the service loads.""",
+
+    "manage_hosts": """\
+```manage_hosts
+{"action": "run", "host": "desktop", "command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5 Name, CPU"}
+```
+Runs a command or a whole multi-line script on another machine over SSH and returns its output. Windows hosts take PowerShell, Linux/macOS hosts take bash. Other actions: `list` (registered hosts), `peers` (machines on the tailnet), `copy` (`"source"`, `"destination"`, `"direction"`: put|get), `test`, `add` (`"host"`, `"address"`, `"user"`), `remove`. `"timeout"` in seconds for long commands (default 120).""",
+
+    "delegate_agent": """\
+```delegate_agent
+{"action": "run", "agent": "claude", "task": "Add a login page with session cookies and tests. Run the tests and fix failures."}
+```
+Hands the task to another coding agent on this server: `claude`, `kimi`, `codex`, `opencode` or `aider`. It works in the project open in this chat (or `"project"`), in the background; you are called again with its output when it finishes. The other agent sees ONLY the task text and the folder, so make the task complete. `"autonomy": "full"` lets it run any command without asking — only when the user asked for that. Other actions: `agents`, `status` / `stop` (`"job"`), `list`.""",
+
+    "library_search": """\
+```library_search
+<key terms>
+```
+Search the OFFLINE reference library on this server: a full Wikipedia snapshot, medical references, Army field manuals and other survival / first-aid / repair manuals (PDFs, searched page by page), Stack Exchange archives and how-to collections. It needs no internet. Use it for established knowledge and how-to questions, and ALWAYS when `web_search` fails or the internet is down. It is a keyword search over articles and manual pages together: give two to five key terms or the exact name ("bleach drops gallon water", "Amanita phalloides", "figure-four deadfall"), not a whole sentence. If the results miss, search again with different or fewer words rather than longer ones. For doses, quantities and procedures prefer a manual or an official guideline among the results over a forum post, and say which source a number comes from. Not for news or anything that changes: the library is a snapshot. Cite what you use with the links it returns.""",
 
     "web_fetch": """\
 ```web_fetch
@@ -1179,6 +1217,7 @@ def _is_email_document_obj(active_document) -> bool:
 
 def _minimal_saved_memory_message(messages: List[Dict]) -> Optional[Dict]:
     facts: List[str] = []
+    profile_lines: List[str] = []       # the user's profile, kept apart from the 8 facts
     seen = set()
     for message in messages:
         if not isinstance(message, dict):
@@ -1187,6 +1226,7 @@ def _minimal_saved_memory_message(messages: List[Dict]) -> Optional[Dict]:
         source = str((metadata or {}).get("source") or "")
         if not source.startswith("saved memory:"):
             continue
+        is_profile = source == "saved memory: user profile"
         content = str(message.get("content") or "")
         content = re.sub(r"(?m)^\s*Source:\s*saved memory:[^\n]*\n?", "", content)
         content = content.replace("Core facts about the user:", "")
@@ -1202,12 +1242,18 @@ def _minimal_saved_memory_message(messages: List[Dict]) -> Optional[Dict]:
             fact = line[2:].strip()
             if not fact or fact in seen:
                 continue
+            if is_profile:
+                if len(profile_lines) < 6:
+                    seen.add(fact)
+                    profile_lines.append(fact)
+                continue
             seen.add(fact)
             facts.append(fact)
             if len(facts) >= 8:
                 break
         if len(facts) >= 8:
             break
+    facts = profile_lines + facts
     if not facts:
         return None
     logger.info("[agent-intent] aegis doc minimal memory facts=%s", len(facts))
@@ -4366,7 +4412,7 @@ async def stream_agent_loop(
             # first so the <!-- SOURCES:…--> marker is found and stripped even
             # when the result doesn't carry a "results" or "stdout" key.
             _src_text = result.get("output") or result.get("results") or result.get("stdout") or ""
-            if block.tool_type == "web_search" and _src_text:
+            if block.tool_type in ("web_search", "library_search") and _src_text:
                 _src_marker = "<!-- SOURCES:"
                 _src_idx = _src_text.find(_src_marker)
                 if _src_idx >= 0:

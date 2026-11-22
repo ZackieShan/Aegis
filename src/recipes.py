@@ -19,6 +19,7 @@ Storage: one JSON file per recipe under RECIPES_DIR.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -26,6 +27,8 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from src.constants import RECIPES_DIR
+
+logger = logging.getLogger(__name__)
 
 NODE_TYPES = {"input", "tool", "model", "output", "branch", "loop"}
 _REF_RE = re.compile(r"\{\{\s*([\w-]+)\s*\}\}")

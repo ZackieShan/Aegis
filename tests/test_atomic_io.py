@@ -165,3 +165,18 @@ def test_atomic_write_text_preserves_target_when_replace_fails(tmp_path, monkeyp
         atomic_write_text(str(target), "new content that never lands")
 
     assert target.read_text(encoding="utf-8") == before
+
+
+def test_atomic_write_json_can_restrict_permissions(tmp_path):
+    """Password hashes and session tokens are written owner-only."""
+    import stat
+    import sys
+
+    target = tmp_path / "secrets.json"
+    atomic_write_json(str(target), {"token": "abc"}, mode=0o600)
+    assert json.loads(target.read_text(encoding="utf-8")) == {"token": "abc"}
+    if sys.platform != "win32":
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+        # Rewriting keeps it that way; without ``mode`` the default applies.
+        atomic_write_json(str(target), {"token": "def"}, mode=0o600)
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600

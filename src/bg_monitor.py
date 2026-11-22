@@ -25,6 +25,16 @@ POLL_INTERVAL_S = 5
 _FOLLOWUP_MAX_ROUNDS = 12
 
 
+def _bound_project(session_id):
+    """The project this chat works in, so the follow-up turn has the same
+    file tools and working folder as the turn that started the job."""
+    try:
+        from services.workbench import projects
+        return projects.bound_workspace(session_id)
+    except Exception:
+        return None
+
+
 async def _drain_agent(sess, messages):
     """Run the agent loop headless against a session. Returns
     (final_prose, tool_events) — tool_events in the same shape the live chat
@@ -40,6 +50,7 @@ async def _drain_agent(sess, messages):
         session_id=sess.id,
         max_rounds=_FOLLOWUP_MAX_ROUNDS,
         owner=getattr(sess, "owner", None),
+        workspace=_bound_project(sess.id),
     ):
         if not chunk.startswith("data: "):
             continue

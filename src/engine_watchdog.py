@@ -105,6 +105,48 @@ def _venv_python(root: str) -> str:
     return os.path.join(root, "venv", "bin", "python")
 
 
+def _comfyui_extra_args() -> list:
+    """Extra ComfyUI launch flags from AEGIS_COMFYUI_ARGS (shell-style string).
+
+    The right memory flags are per-machine, not per-repo: an AMD Strix Halo
+    box wants "--disable-mmap --bf16-vae --cache-none", a 24GB NVIDIA card
+    wants none of them. Set it in .env; the launcher/systemd unit loads that
+    into this process, and the value is re-read every watchdog cycle."""
+    raw = (os.getenv("AEGIS_COMFYUI_ARGS") or "").strip()
+    if not raw:
+        return []
+    import shlex
+    try:
+        return shlex.split(raw, posix=not IS_WINDOWS)
+    except ValueError as e:
+        logger.warning("AEGIS_COMFYUI_ARGS is not parseable (%s) — ignoring it", e)
+        return []
+
+
+def _comfyui_extra_env() -> Dict[str, str]:
+    """Extra environment for the ComfyUI child only, from AEGIS_COMFYUI_ENV
+    ("KEY=VALUE KEY2=VALUE2"). Kept separate from the service environment so
+    a torch/ROCm tuning variable (e.g. HSA_USE_SVM=0) does not leak into
+    llama-swap and the TTS servers it launches."""
+    raw = (os.getenv("AEGIS_COMFYUI_ENV") or "").strip()
+    if not raw:
+        return {}
+    import shlex
+    try:
+        pairs = shlex.split(raw, posix=not IS_WINDOWS)
+    except ValueError as e:
+        logger.warning("AEGIS_COMFYUI_ENV is not parseable (%s) — ignoring it", e)
+        return {}
+    out: Dict[str, str] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if sep and key:
+            out[key] = value
+        else:
+            logger.warning("AEGIS_COMFYUI_ENV entry %r is not KEY=VALUE — skipped", pair)
+    return out
+
+
 def _engine_defs() -> Dict[str, dict]:
     """Health URL + spawn argv per engine, resolved fresh each cycle so an
     engine installed after startup is picked up without a restart. Mirrors
@@ -152,7 +194,8 @@ def _engine_defs() -> Dict[str, dict]:
         "comfyui": {
             "health_url": f"http://127.0.0.1:{comfy_port}/system_stats",
             "argv": [comfy_py, comfy_main, "--listen", "127.0.0.1",
-                     "--port", comfy_port, "--disable-auto-launch"],
+                     "--port", comfy_port, "--disable-auto-launch"] + _comfyui_extra_args(),
+            "env": _comfyui_extra_env(),
             "cwd": os.path.dirname(comfy_main),
             "installed": os.path.isfile(comfy_py) and os.path.isfile(comfy_main),
             "boot_grace_s": 180,
@@ -231,6 +274,9 @@ def _spawn(name: str, spec: dict) -> bool:
     kwargs = detached_popen_kwargs()
     if "creationflags" in kwargs:
         kwargs["creationflags"] |= getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    if spec.get("env"):
+        # Per-engine additions on top of the inherited environment.
+        kwargs["env"] = {**os.environ, **spec["env"]}
     try:
         with open(log_path, "ab") as log:
             proc = subprocess.Popen(

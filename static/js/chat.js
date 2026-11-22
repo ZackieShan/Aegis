@@ -1523,6 +1523,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       const _searchIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
       const _toolLabels = {
         'web_search': 'Searching',
+        'library_search': 'Searching the library',
+        'manage_projects': 'Project',
+        'manage_apps': 'Hosting',
+        'manage_hosts': 'Remote machine',
+        'delegate_agent': 'Handing off',
         'bash': 'Running',
         'python': 'Running',
         'read_document': 'Reading',
@@ -1546,6 +1551,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       };
       const _toolIcons = {
         'web_search': _searchIcon,
+        'library_search': _searchIcon,
       };
       function _thinkingLabel() {
         if (!_lastToolName) {
@@ -1980,7 +1986,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   if (_thinkLen < 20) {
                     const _afterClose = normalizedRoundText.replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:think(?:ing)?|thought)>/i, '').trim();
                     // Only keep waiting if there's trailing text that looks like thinking (not tool calls)
-                    const _hasToolCall = /```(?:bash|python|web_search|read_file|write_file|create_document|edit_document|manage_|generate_image)/i.test(_afterClose);
+                    const _hasToolCall = /```(?:bash|python|web_search|library_search|read_file|write_file|create_document|edit_document|manage_|generate_image)/i.test(_afterClose);
                     const _hasOrphanClose = /<\/(?:think(?:ing)?|thought)>/i.test(_afterClose);
                     if (!_hasToolCall && (_hasOrphanClose || (Date.now() - thinkingStartTime) < 500)) {
                       hasUnclosedThink = true; // keep waiting for real </think>

@@ -21,6 +21,7 @@ import documentModule from './document.js';
 import workspaceModule from './workspace.js';
 import settingsModule from './settings.js';
 import cookbookModule from './cookbook.js';
+import fileHandlerModule from './fileHandler.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
 
@@ -2861,6 +2862,476 @@ async function _cmdRagRemove(args, ctx) {
   });
   if (res.ok) await typewriterReply(`Removed "${ctx.esc(dir)}" from RAG`);
   else slashReply('Failed to remove directory');
+  return true;
+}
+
+// -----------------------------------------------------------------------
+// Offline reference library (/lib) and photo identification (/identify)
+// -----------------------------------------------------------------------
+
+/** An "Aegis" bubble that is NOT persisted — for live status that will be
+ *  replaced by a result (slashReply would save the placeholder too). */
+function _quietBubble(html) {
+  const chatBox = document.getElementById('chat-history');
+  if (_hideWelcomeScreen) _hideWelcomeScreen();
+  const div = document.createElement('div');
+  div.className = 'msg msg-ai';
+  const role = document.createElement('div');
+  role.className = 'role';
+  role.textContent = 'Aegis';
+  div.appendChild(role);
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.innerHTML = html;
+  div.appendChild(body);
+  div.appendChild(_slashFooter(div));
+  chatBox.appendChild(div);
+  uiModule.scrollHistory();
+  return { el: div, body };
+}
+
+function _renderMd(text) {
+  return markdownModule.processWithThinking(markdownModule.squashOutsideCode(String(text ?? '')));
+}
+
+async function _cmdLib(args) {
+  const q = args.join(' ').trim();
+  const esc = uiModule.esc;
+  if (!q || q.toLowerCase() === 'status') {
+    let d = null;
+    try {
+      const r = await fetch(`${API_BASE}/api/reference/status`, { credentials: 'same-origin' });
+      d = r.ok ? await r.json() : null;
+    } catch (_) { d = null; }
+    if (!d) { slashReplyMd('Could not reach the offline library service.'); return true; }
+    if (!d.enabled) { slashReplyMd('The offline library is switched off (setting `library_enabled`).'); return true; }
+    if (!d.kiwix_up) {
+      slashReplyMd(`The offline library is not running — nothing answered at \`${d.kiwix_url}\`.`);
+      return true;
+    }
+    const m = d.manuals || {};
+    const top = (d.books || []).slice().sort((a, b) => (b.articles || 0) - (a.articles || 0)).slice(0, 8).map(b => b.title);
+    const num = (n) => Number(n || 0).toLocaleString();
+    slashReplyMd([
+      `**Offline library** — ${num(d.collections)} collections, ${num(d.articles)} articles`
+        + (m.built ? `, ${num(m.documents)} PDF manuals (${num(m.pages)} pages searchable)` : '') + '.',
+      '',
+      top.length ? `Largest: ${top.join(', ')}.` : '',
+      '',
+      `Browse it: [${d.kiwix_public_url}](${d.kiwix_public_url})`,
+      '',
+      '`/lib <words>` searches it. In agent mode the assistant consults it by itself, and web search falls back to it when the internet is down.',
+    ].join('\n'));
+    return true;
+  }
+
+  const rep = _quietBubble(`Searching the offline library for <b>${esc(q)}</b>…`);
+  let d = null;
+  let err = '';
+  try {
+    const r = await fetch(`${API_BASE}/api/reference/search?count=10&q=${encodeURIComponent(q)}`, { credentials: 'same-origin' });
+    d = await r.json().catch(() => null);
+    if (!r.ok) err = (d && (d.detail || d.error)) || `search failed (${r.status})`;
+  } catch (e) { err = e.message; }
+  let md;
+  if (err || !d) {
+    md = `✗ Offline library search failed: ${err || 'no response'}`;
+  } else if (!d.results || !d.results.length) {
+    md = d.available
+      ? `No matches in the offline library for **${q}**. It is a keyword search — try fewer or different words.`
+      : 'The offline library is not running.';
+  } else {
+    const lines = d.results.map((r, i) => {
+      const title = String(r.title || 'untitled').replace(/[\[\]]/g, '');
+      const snip = String(r.snippet || '').replace(/\s+/g, ' ').replace(/[*_`<>]/g, '').slice(0, 170);
+      return `${i + 1}. [${title}](${r.url}) — *${String(r.source || '').replace(/[*_]/g, '')}*${snip ? ' — ' + snip : ''}`;
+    });
+    md = `**Offline library: ${q.replace(/[*_`]/g, '')}**\n\n${lines.join('\n')}`;
+  }
+  rep.body.innerHTML = _renderMd(md);
+  rep.el.dataset.raw = md;
+  uiModule.scrollHistory();
+  _persistMsg('assistant', md, { source: 'slash' });
+  return true;
+}
+
+/** Open the OS photo chooser (camera or gallery on a phone). Resolves with a
+ *  File, or null if dismissed. Must be called from a user gesture. */
+function _pickPhoto() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    let settled = false;
+    const finish = (file) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(file || null);
+    };
+    input.addEventListener('change', () => finish(input.files && input.files[0]));
+    input.addEventListener('cancel', () => finish(null));
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+/** Shrink a phone photo before upload (12 MP over a tailnet is slow and the
+ *  server downsizes anyway). Falls back to the original on any failure. */
+async function _shrinkPhoto(file, maxSide = 2048) {
+  try {
+    if (!file || !/^image\/(jpeg|png|webp)$/i.test(file.type || '') || file.size < 900 * 1024) return file;
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    if (scale >= 1) { bmp.close && bmp.close(); return file; }
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close && bmp.close();
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.9));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch (_) {
+    return file;
+  }
+}
+
+let _identifyBusy = false;
+
+/** Upload a photo, run it through /api/reference/identify, and put the
+ *  question and the answer in the chat as ordinary messages — so follow-up
+ *  questions ("how do I cook it?", "what about the stem?") have the
+ *  identification as context. */
+async function identifyPhoto(file, hint = '') {
+  const esc = uiModule.esc;
+  if (!file) return;
+  if (_identifyBusy) { slashReply('One identification is already running — give it a moment.'); return; }
+  _identifyBusy = true;
+  try {
+    try {
+      if (sessionModule.hasPendingChat && sessionModule.hasPendingChat()) await sessionModule.materializePendingSession();
+    } catch (_) { /* shown but not saved */ }
+    const sid = sessionModule.getCurrentSessionId();
+
+    const photo = await _shrinkPhoto(file);
+    const fd = new FormData();
+    fd.append('files', photo, photo.name || 'photo.jpg');
+    if (sid) fd.append('session_id', sid);
+    let meta = null;
+    try {
+      const r = await fetch(`${API_BASE}/api/upload`, { method: 'POST', credentials: 'same-origin', body: fd });
+      const j = await r.json().catch(() => ({}));
+      meta = j && j.files && j.files[0];
+      if (!r.ok || !meta || !meta.id) throw new Error((j && (j.detail || j.error)) || `upload failed (${r.status})`);
+    } catch (e) {
+      slashReply('✗ Could not upload the photo: ' + esc(e.message));
+      return;
+    }
+
+    const userText = hint ? `Identify this photo. ${hint}` : 'Identify this photo.';
+    const attachments = [{ id: meta.id, name: meta.name, mime: meta.mime, size: meta.size }];
+    _addMessage('user', userText, null, { attachments });
+    _persistMsg('user', userText, { attachments, source: 'identify' });
+
+    const rep = _quietBubble('');
+    const status = document.createElement('div');
+    status.className = 'generated-image-caption';
+    rep.body.appendChild(status);
+    const t0 = Date.now();
+    const stage = (s) => (s < 4 ? 'Checking the species classifier' : s < 20 ? 'Looking at the photo' : s < 45 ? 'Reading the library and writing it up' : 'Still working — the vision model had to load first');
+    const tick = () => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      status.textContent = `${stage(s)}… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    };
+    tick();
+    const timer = setInterval(() => { if (!document.contains(rep.el)) { clearInterval(timer); return; } tick(); }, 1000);
+
+    let d = null;
+    let err = '';
+    try {
+      const r = await fetch(`${API_BASE}/api/reference/identify`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: meta.id, hint, session_id: sid || '' }),
+      });
+      d = await r.json().catch(() => null);
+      if (!r.ok) err = (d && (d.detail || d.error)) || `identification failed (${r.status})`;
+    } catch (e) { err = e.message; }
+    clearInterval(timer);
+
+    if (err || !d || !d.markdown) {
+      status.textContent = '✗ ' + (err || 'identification failed');
+      return;
+    }
+    const sources = Array.isArray(d.sources) ? d.sources : [];
+    rep.body.innerHTML = _renderMd(d.markdown) + (sources.length ? chatRenderer.buildSourcesBox(sources, 'web') : '');
+    rep.el.dataset.raw = d.markdown;
+    uiModule.scrollHistory();
+    const metadata = { source: 'identify' };
+    if (sources.length) metadata.web_sources = sources;
+    if (d.vision_model) metadata.model = d.vision_model;
+    _persistMsg('assistant', d.markdown, metadata);
+  } finally {
+    _identifyBusy = false;
+  }
+}
+
+/** Camera / gallery chooser → identifyPhoto. Call from a click or key handler. */
+async function pickAndIdentify(hint = '') {
+  const file = await _pickPhoto();
+  if (file) await identifyPhoto(file, hint);
+}
+
+function _cmdIdentify(args) {
+  const first = (args[0] || '').toLowerCase();
+  if (first === 'help') {
+    slashReplyMd([
+      '**Identify a photo** — plant, mushroom, insect, spider, snake, animal sign, a label or page of text, an object.',
+      '',
+      '`/identify` — choose or take a photo',
+      '`/identify found under oaks in October, Ohio` — add what you know; it helps',
+      '',
+      'Attach a photo first and `/identify` uses that one. The answer names the most likely match, what to check in hand, lookalikes (dangerous ones flagged) and what the offline library says about edibility or hazards. Text in a photo is transcribed.',
+    ].join('\n'));
+    return true;
+  }
+  const hint = args.join(' ').trim();
+  // A photo already attached to the composer wins over opening the chooser.
+  let attached = null;
+  try {
+    const pending = fileHandlerModule.getPendingRaw ? fileHandlerModule.getPendingRaw() : [];
+    const index = pending.findIndex((f) => /^image\//i.test((f && f.type) || ''));
+    if (index >= 0) {
+      attached = pending[index];
+      if (fileHandlerModule.removePending) fileHandlerModule.removePending(index);
+    }
+  } catch (_) { attached = null; }
+  // Not awaited: the chooser waits on the user, and the composer must not
+  // stay locked while it does.
+  if (attached) identifyPhoto(attached, hint);
+  else pickAndIdentify(hint);
+  return true;
+}
+
+// -----------------------------------------------------------------------
+// Workbench: /project, /apps, /hosts, /remote
+// (the agent does the same things through its manage_* tools)
+// -----------------------------------------------------------------------
+
+async function _wbFetch(path, options) {
+  const r = await fetch(`${API_BASE}${path}`, Object.assign({ credentials: 'same-origin' }, options || {}));
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || d.error || `request failed (${r.status})`);
+  return d;
+}
+
+function _wbPost(path, body) {
+  return _wbFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+async function _wbSessionId() {
+  try {
+    if (sessionModule.hasPendingChat && sessionModule.hasPendingChat()) await sessionModule.materializePendingSession();
+  } catch (_) { /* fall through: handled by the caller */ }
+  return sessionModule.getCurrentSessionId() || '';
+}
+
+const _wbCode = (s) => '`' + String(s == null ? '' : s).replace(/`/g, "'") + '`';
+
+function _wbAppLine(a) {
+  const state = a.state === 'running' ? 'running' : `**${a.state || 'unknown'}**`;
+  const where = a.url ? `[${a.url}](${a.url})` : (a.local_url ? `${a.local_url} (this server only)` : 'no port');
+  const mem = a.memory_mb ? ` · ${a.memory_mb} MB` : '';
+  return `- **${a.name}** — ${state}${mem} — ${where}`;
+}
+
+async function _cmdApps(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const name = args[1] || '';
+  try {
+    if (['start', 'stop', 'restart', 'remove', 'expose', 'unexpose'].includes(sub)) {
+      if (!name) { slashReplyMd(`Usage: \`/apps ${sub} <name>\``); return true; }
+      const d = await _wbPost('/api/workbench/app', { action: sub, name });
+      slashReplyMd(sub === 'remove'
+        ? `Removed **${name}**. Its folder ${_wbCode(d.kept_folder)} was not touched.`
+        : _wbAppLine(d));
+      return true;
+    }
+    if (sub === 'logs' || sub === 'log') {
+      if (!name) { slashReplyMd('Usage: `/apps logs <name>`'); return true; }
+      const d = await _wbFetch(`/api/workbench/app/${encodeURIComponent(name)}/logs?lines=60`);
+      slashReplyMd(`**${name}** — last log lines\n\n\`\`\`\n${d.log || '(nothing yet)'}\n\`\`\``);
+      return true;
+    }
+    const d = await _wbFetch('/api/workbench/overview');
+    const lines = ['**Hosted apps**', ''];
+    if (d.apps && d.apps.length) d.apps.forEach((a) => lines.push(_wbAppLine(a)));
+    else lines.push('None yet. In agent mode: "build me a … and deploy it".');
+    lines.push('', '`/apps restart|stop|start|logs|remove <name>`');
+    slashReplyMd(lines.join('\n'));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+async function _cmdProject(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const rest = args.slice(1).join(' ').trim();
+  try {
+    if (['open', 'use', 'cd', 'new', 'create', 'clone', 'close', 'status'].includes(sub)) {
+      const sid = await _wbSessionId();
+      if (!sid && sub !== 'status') { slashReplyMd('Start a chat first, then open the project in it.'); return true; }
+      const action = { use: 'open', cd: 'open', new: 'create' }[sub] || sub;
+      const body = { action, session_id: sid };
+      if (action === 'clone') { body.url = args[1] || ''; body.name = args[2] || ''; }
+      else body.name = rest;
+      if ((action === 'open' || action === 'create') && !rest) { slashReplyMd(`Usage: \`/project ${sub} <name>\``); return true; }
+      if (action === 'clone' && !body.url) { slashReplyMd('Usage: `/project clone <git url | owner/repo> [name]`'); return true; }
+      const d = await _wbPost('/api/workbench/project', body);
+      if (action === 'close') { slashReplyMd(d.closed ? 'This chat is no longer tied to a project.' : 'No project was open in this chat.'); return true; }
+      const bits = [d.branch ? `branch ${_wbCode(d.branch)}` : '', d.uncommitted ? `${d.uncommitted} uncommitted change(s)` : '',
+        d.last_commit ? `last commit ${d.last_commit}` : ''].filter(Boolean).join(' · ');
+      const verb = { open: 'Opened', create: 'Created', clone: 'Cloned', status: 'Project' }[action];
+      slashReplyMd(`${verb} **${d.name}** — ${_wbCode(d.path)}${bits ? '\n\n' + bits : ''}`
+        + (action === 'status' ? (d.changes ? `\n\n\`\`\`\n${d.changes}\n\`\`\`` : '') : '\n\nThis chat now works in that folder (agent mode: files and shell).'));
+      return true;
+    }
+    const sid = sessionModule.getCurrentSessionId() || '';
+    const d = await _wbFetch(`/api/workbench/overview?session_id=${encodeURIComponent(sid)}`);
+    const lines = [`**Projects** in ${_wbCode(d.projects_folder)}`, ''];
+    (d.projects || []).forEach((p) => {
+      const open = d.open_project && d.open_project === p.path ? ' ← open in this chat' : '';
+      const git = p.git ? `${p.branch || 'git'}${p.uncommitted ? `, ${p.uncommitted} uncommitted` : ''}` : 'no git';
+      lines.push(`- **${p.name}**${p.protected ? ' (Aegis itself)' : ''} — ${git}${open}`);
+    });
+    if (!(d.projects || []).length) lines.push('None yet.');
+    lines.push('', '`/project open <name>` · `new <name>` · `clone <url>` · `status` · `close`');
+    slashReplyMd(lines.join('\n'));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+// ── /me: what Aegis knows about whoever is signed in ──
+
+function _meView(d) {
+  const p = d.profile || {};
+  const state = [];
+  if (!p.empty && p.updated) {
+    state.push(`from ${d.memories} memories, updated ${new Date(p.updated * 1000).toLocaleString()}`);
+  }
+  state.push(d.using ? 'used in every chat except Nobody mode' : 'not in use — `/me on` turns it back on');
+  if (d.using && !d.learning) state.push('not learning new things (auto-memory is off)');
+  return [
+    '**What I know about you**', '', d.markdown || '', '', `_${state.join(' · ')}_`, '',
+    '`/me add …` tells me something · `/me refresh` rewrites this now · `/me off` pauses · `/me forget` deletes · single memories are in **Brain**',
+  ].join('\n');
+}
+
+async function _cmdMe(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const rest = args.slice(1).join(' ').trim();
+  try {
+    if (sub === 'add' || sub === 'remember') {
+      if (!rest) { slashReplyMd('Usage: `/me add <something about you>` — e.g. `/me add I keep bees and want a third hive`.'); return true; }
+      const d = await _wbPost('/api/memory/add', { text: rest, category: 'fact', source: 'user' });
+      slashReplyMd(d.duplicate ? 'I already had that.' : 'Noted. It joins your profile at the next rewrite (`/me refresh` does it now).');
+      return true;
+    }
+    if (sub === 'refresh' || sub === 'rebuild' || sub === 'update') {
+      const rep = _quietBubble('Rewriting your profile from your memories…');
+      let md;
+      try {
+        const fd = new FormData();
+        const sid = sessionModule.getCurrentSessionId ? sessionModule.getCurrentSessionId() : '';
+        if (sid) fd.append('session', sid);
+        const d = await _wbFetch('/api/memory/profile/rebuild', { method: 'POST', body: fd });
+        md = _meView(d) + (d.written_by_model || d.profile.empty ? ''
+          : '\n\n_No model answered, so this is a plain list of your memories for now._');
+      } catch (e) {
+        md = '✗ ' + e.message;
+      }
+      rep.body.innerHTML = _renderMd(md);
+      uiModule.scrollHistory();
+      return true;
+    }
+    if (sub === 'on' || sub === 'off') {
+      const value = sub === 'on';
+      for (const key of ['memory_enabled', 'auto_memory']) {
+        await _wbFetch(`/api/prefs/${key}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+        });
+      }
+      slashReplyMd(value
+        ? 'Memory is **on**: I use what I know about you and keep learning — never in Nobody mode.'
+        : 'Memory is **off**: I will not use or add to what I know about you until `/me on`. Nothing was deleted.');
+      return true;
+    }
+    if (sub === 'forget') {
+      if ((args[1] || '').toLowerCase() !== 'everything') {
+        const d = await _wbFetch('/api/memory/profile');
+        slashReplyMd(`This deletes your profile **and all ${d.memories} of your saved memories**, and cannot be undone. `
+          + 'To go ahead: `/me forget everything`.\n\nTo stop without deleting anything use `/me off`; '
+          + 'for a single chat, start it in **Nobody** mode.');
+        return true;
+      }
+      const d = await _wbFetch('/api/memory/profile?memories=true', { method: 'DELETE' });
+      slashReplyMd(`Forgotten: your profile and ${d.memories_removed} memories are deleted.`);
+      return true;
+    }
+    if (sub && sub !== 'show') {
+      slashReplyMd('Usage: `/me` · `/me add <fact>` · `/me refresh` · `/me off` · `/me on` · `/me forget`');
+      return true;
+    }
+    slashReplyMd(_meView(await _wbFetch('/api/memory/profile')));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+async function _cmdHosts() {
+  try {
+    const d = await _wbFetch('/api/workbench/overview');
+    const lines = ['**Machines I can run commands on**', ''];
+    (d.hosts || []).forEach((h) => {
+      lines.push(h.builtin ? '- **local** — this server (bash)'
+        : `- **${h.name}** — ${h.user}@${h.address} · ${h.os} · ${h.shell}${h.description ? ' · ' + h.description : ''}`);
+    });
+    const others = (d.peers || []).filter((p) => !p.registered_as);
+    if (others.length) {
+      lines.push('', '**Also on the tailnet** (not set up for commands)', '');
+      others.forEach((p) => lines.push(`- ${p.name || p.dns} — ${p.os}${p.online ? '' : ' · offline'}`));
+    }
+    lines.push('', '`/remote <host> <command>` runs one command. In agent mode just ask ("on my Windows PC, …").');
+    slashReplyMd(lines.join('\n'));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+async function _cmdRemote(args) {
+  const host = args[0] || '';
+  const command = args.slice(1).join(' ').trim();
+  if (!host || !command) { slashReplyMd('Usage: `/remote <host> <command>` — e.g. `/remote desktop Get-Date`. Hosts: `/hosts`.'); return true; }
+  const rep = _quietBubble(`Running on <b>${uiModule.esc(host)}</b>…`);
+  let md;
+  try {
+    const d = await _wbPost('/api/workbench/run', { host, command });
+    const out = [d.output, d.stderr].filter((s) => s && String(s).trim()).join('\n') || '(no output)';
+    md = `**${d.host}** · exit ${d.exit_code}\n\n\`\`\`\n${out}\n\`\`\``;
+  } catch (e) {
+    md = '✗ ' + e.message;
+  }
+  rep.body.innerHTML = _renderMd(md);
+  rep.el.dataset.raw = md;
+  uiModule.scrollHistory();
+  _persistMsg('assistant', md, { source: 'slash' });
   return true;
 }
 
@@ -6838,6 +7309,13 @@ const COMMANDS = {
       'search': { handler: _cmdMemorySearch, alias: ['grep'],        help: 'Search memories',     usage: '/memory search q' }
     }
   },
+  me: {
+    alias: ['whoami', 'profile', 'aboutme'],
+    category: 'Memory',
+    help: 'What Aegis knows about you — who you are and what you are into: /me, /me add <fact>, /me refresh, /me off|on, /me forget',
+    handler: (args) => _cmdMe(args),
+    usage: '/me [add <fact> | refresh | off | on | forget]'
+  },
   skills: {
     alias: ['skill'],
     category: 'Memory',
@@ -7132,6 +7610,49 @@ const COMMANDS = {
     help: 'Generate an image locally: /image <prompt> (model=/style=/seed=/steps= opts), /image models',
     handler: (args) => _cmdImage(args),
     usage: '/image <prompt>'
+  },
+  identify: {
+    alias: ['id', 'whatis', 'ocr'],
+    category: 'Tools',
+    help: 'Identify a photo: plant, mushroom, insect, animal sign, object, or read its text. /identify [what you know about it]',
+    handler: (args) => _cmdIdentify(args),
+    noUserBubble: true,
+    usage: '/identify [where/when you found it]'
+  },
+  project: {
+    alias: ['projects', 'proj'],
+    category: 'Tools',
+    help: 'Code projects: list, or /project open|new|clone|status|close — the open project is where agent mode works',
+    handler: (args) => _cmdProject(args),
+    usage: '/project [open <name> | new <name> | clone <url> | status | close]'
+  },
+  apps: {
+    alias: ['app', 'hosted', 'deployed'],
+    category: 'Tools',
+    help: 'Apps hosted on this server, with their addresses: /apps, /apps restart|stop|start|logs|remove <name>',
+    handler: (args) => _cmdApps(args),
+    usage: '/apps [restart|stop|start|logs|remove <name>]'
+  },
+  hosts: {
+    alias: ['machines', 'pcs'],
+    category: 'Tools',
+    help: 'Other machines this server can run commands on',
+    handler: () => _cmdHosts(),
+    usage: '/hosts'
+  },
+  remote: {
+    alias: ['rc', 'onhost'],
+    category: 'Tools',
+    help: 'Run one command on another machine: /remote <host> <command>',
+    handler: (args) => _cmdRemote(args),
+    usage: '/remote <host> <command>'
+  },
+  lib: {
+    alias: ['kiwix', 'lookup', 'ref', 'offline'],
+    category: 'Tools',
+    help: 'Search the offline library (Wikipedia, medical, manuals): /lib <words>. No words = what is installed',
+    handler: (args) => _cmdLib(args),
+    usage: '/lib <words>'
   },
   style: {
     alias: ['styles', 'preset'],
@@ -7620,6 +8141,19 @@ export function initSlashCommands(deps) {
     _helpBtn.addEventListener('click', () => { try { _cmdHelp([], {}); } catch (_e) {} });
   }
 
+  // Composer menu → "Identify photo". Wired to the click itself so the photo
+  // chooser opens inside the user gesture (iOS refuses it otherwise).
+  const _identifyBtn = document.getElementById('overflow-identify-btn');
+  if (_identifyBtn && !_identifyBtn._wired) {
+    _identifyBtn._wired = true;
+    _identifyBtn.addEventListener('click', () => {
+      const box = document.getElementById('message');
+      const hint = box && !box.value.trim().startsWith('/') ? box.value.trim() : '';
+      if (hint && box) { box.value = ''; if (uiModule.autoResize) uiModule.autoResize(box); }
+      pickAndIdentify(hint).catch(() => {});
+    });
+  }
+
   // Global delegation for onboarding and setup clicks
   document.addEventListener('click', (e) => {
     // 1. Check for clicking the "/setup" trigger link on the welcome screen
@@ -7730,7 +8264,8 @@ export function clearSetupMode(preservePendingState = false) {
   }
 }
 
-export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS };
+export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS,
+         identifyPhoto, pickAndIdentify };
 
 const slashCommands = {
   initSlashCommands,
@@ -7743,6 +8278,8 @@ const slashCommands = {
   slashReply,
   typewriterReply,
   typewriterInto,
+  identifyPhoto,
+  pickAndIdentify,
 };
 
 export default slashCommands;

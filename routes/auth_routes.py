@@ -14,7 +14,7 @@ from pathlib import Path
 from core.atomic_io import atomic_write_json, atomic_write_text
 from core.auth import AuthManager, RESERVED_USERNAMES, SetAdminResult, TOKEN_TTL
 from src.constants import DEEP_RESEARCH_DIR, MEMORY_FILE, PASSWORD_MIN_LENGTH, SKILLS_DIR
-from src.rate_limiter import RateLimiter
+from src.rate_limiter import FailureBackoff, RateLimiter
 from src.settings_scrub import scrub_settings
 from src.settings import (
     load_settings as _load_settings,
@@ -88,6 +88,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     router = APIRouter(prefix="/api/auth", tags=["auth"])
 
     _login_limiter = RateLimiter(max_requests=15, window_seconds=60)
+    # Per account, wherever the attempts come from: five free misses, then a
+    # growing wait (30 s doubling to 15 min). Keeps short passwords and PINs
+    # from being walked through, also when a proxy hides the client address.
+    _login_backoff = FailureBackoff(free=5, base_s=30, max_s=900)
     _signup_limiter = RateLimiter(max_requests=3, window_seconds=300)
     _setup_limiter = RateLimiter(max_requests=3, window_seconds=300)
 
@@ -139,7 +143,14 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(429, "Too many requests — try again later")
         # Verify password first
         username = body.username.strip().lower()
+        _wait = _login_backoff.retry_after(username)
+        if _wait:
+            raise HTTPException(
+                429, f"Too many failed sign-ins for this account — try again in {_wait} seconds",
+                headers={"Retry-After": str(_wait)},
+            )
         if not await asyncio.to_thread(auth_manager.verify_password, username, body.password):
+            _login_backoff.failure(username)
             raise HTTPException(401, "Invalid credentials")
         # Check 2FA if enabled
         if auth_manager.totp_enabled(username):
@@ -147,11 +158,13 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 # Password OK but need TOTP — tell client to show code input
                 return {"ok": False, "requires_totp": True, "username": username}
             if not auth_manager.totp_verify(username, body.totp_code):
+                _login_backoff.failure(username)
                 raise HTTPException(401, "Invalid 2FA code")
         # All checks passed — create session (password already verified above)
         token = await asyncio.to_thread(auth_manager.create_session_trusted, username)
         if not token:
             raise HTTPException(401, "Invalid credentials")
+        _login_backoff.success(username)
         cookie_kwargs = dict(
             key=SESSION_COOKIE,
             value=token,

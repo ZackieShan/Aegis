@@ -33,6 +33,22 @@ def set_think_override(value: Optional[bool]) -> None:
     _THINK_OVERRIDE.set(value)
 
 
+# Model families whose reasoning is steered by an effort LEVEL rather than
+# an enable_thinking boolean (OpenAI's open-weight gpt-oss / Harmony format).
+_REASONING_EFFORT_MODELS = ("gpt-oss",)
+
+
+def _reasoning_effort_for(model: str, want: bool) -> Optional[str]:
+    """The reasoning_effort to send for the chat UI's Thinking On/Off toggle,
+    or None when the model is not effort-steered. Off maps to "low", not
+    "none": gpt-oss is trained to plan in its analysis channel, and a short
+    plan costs a second while keeping tool calls and long answers on track."""
+    m = (model or "").lower()
+    if not any(p in m for p in _REASONING_EFFORT_MODELS):
+        return None
+    return "high" if want else "low"
+
+
 def _apply_think_override(payload: Dict, url: str, model: str) -> None:
     """If the chat UI forced thinking on/off, encode it in the payload for local
     engines. llama.cpp reads chat_template_kwargs.enable_thinking; Ollama's
@@ -44,7 +60,16 @@ def _apply_think_override(payload: Dict, url: str, model: str) -> None:
         want = None
     if want is None:
         return
-    if not is_local_endpoint(url) or not _supports_thinking(model):
+    if not is_local_endpoint(url):
+        return
+    effort = _reasoning_effort_for(model, want)
+    if effort:
+        # Harmony-format models have no thinking on/off switch, only an effort
+        # dial; llama.cpp hands `reasoning_effort` to the chat template. An
+        # effort the caller already chose (e.g. an agent step) is left alone.
+        payload.setdefault("reasoning_effort", effort)
+        return
+    if not _supports_thinking(model):
         return
     # llama.cpp and Ollama use DIFFERENT knobs, and a localhost /v1 URL can't be
     # told apart (llama-swap vs a custom-port Ollama). So set BOTH: llama.cpp

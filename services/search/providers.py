@@ -1,4 +1,5 @@
-"""Search provider implementations: SearXNG, Brave, DuckDuckGo, Google PSE, Tavily, Serper."""
+"""Search provider implementations: SearXNG, Brave, DuckDuckGo, Google PSE, Tavily, Serper,
+and the offline library (Kiwix)."""
 
 import json
 import logging
@@ -24,6 +25,9 @@ PROVIDER_INFO = {
     "google_pse": ("Google PSE",      True,  False),
     "tavily":   ("Tavily",            True,  False),
     "serper":   ("Serper",            True,  False),
+    # Local reference library (services/library). Its address is the
+    # `kiwix_url` setting, not `search_url`, hence needs_url False.
+    "kiwix":    ("Offline library (Kiwix)", False, False),
     "disabled": ("Disabled",          False, False),
 }
 
@@ -680,4 +684,36 @@ def serper_search(query: str, count: Optional[int] = None, time_filter: Optional
         })
 
     logger.info(f"Serper returned {len(results)} results")
+    return results
+
+
+# ── Offline library (Kiwix + PDF manuals) ──
+
+def kiwix_search(query: str, count: Optional[int] = None, time_filter: Optional[str] = None) -> List[dict]:
+    """Search the local reference library. Needs no internet and no key.
+
+    ``time_filter`` is accepted for signature parity and ignored: a library
+    snapshot cannot answer "this week". Result URLs point at the library's
+    public address; ``comprehensive_web_search`` fetches them through
+    ``services.library`` rather than the SSRF-guarded web fetcher.
+    """
+    count = count if count is not None else _get_result_count()
+    try:
+        from services import library
+        hits = library.library_search(query, count=count)
+    except Exception as e:
+        logger.warning(f"Offline library search failed: {e}")
+        return []
+    results = []
+    for hit in hits:
+        source = hit.get("book_title") or hit.get("book") or "offline library"
+        snippet = hit.get("snippet") or ""
+        results.append({
+            "title": hit.get("title", ""),
+            "url": hit.get("url", ""),
+            "snippet": f"[{source}] {snippet}".strip(),
+            "source": "library",
+            "kind": hit.get("kind", "article"),
+        })
+    logger.info(f"Offline library search returned {len(results)} results")
     return results

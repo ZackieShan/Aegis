@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _REQUIRED_NATIVE_TOOL_ARGS = {
     "web_search": ("query", "queries"),
     "web_fetch": ("url",),
+    "library_search": ("query",),
     "read_file": ("path",),
     "write_file": ("path",),
     "edit_file": ("path",),
@@ -70,6 +71,21 @@ FUNCTION_TOOL_SCHEMAS = [
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
                     "time_filter": {"type": "string", "enum": ["day", "week", "month", "year"], "description": "Optional freshness filter for news/latest/today queries"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "library_search",
+            "description": "Search the OFFLINE reference library stored on this server: a full Wikipedia snapshot, medical references, Army field manuals and other survival / first-aid / repair manuals (PDFs, searched page by page), Stack Exchange archives and how-to collections. Needs no internet. Use for established knowledge and how-to questions, and whenever web_search fails or the internet is down. Keyword search: pass key terms or an exact name, not a full sentence. NOT for news or anything recent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Two to five key terms or an exact name, e.g. 'tourniquet application', 'bleach drops gallon water' or 'Amanita phalloides'"},
+                    "max_results": {"type": "integer", "description": "How many matches to return (default 8, max 20)"}
                 },
                 "required": ["query"]
             }
@@ -401,8 +417,11 @@ FUNCTION_TOOL_SCHEMAS = [
                                "description": "The action to perform"},
                     "text": {"type": "string", "description": "Memory text (for add/edit) or search query (for search)"},
                     "memory_id": {"type": "string", "description": "Memory ID (for edit/delete)"},
-                    "category": {"type": "string", "enum": ["fact", "event", "contact", "preference"],
-                                 "description": "Memory category (for add/list filter)"}
+                    "category": {"type": "string",
+                                 "enum": ["fact", "event", "contact", "preference", "identity", "interest",
+                                          "project", "goal"],
+                                 "description": "Memory category (for add/list filter). 'interest' is "
+                                                "something the user is into; 'identity' who they are."}
                 },
                 "required": ["action"]
             }
@@ -1236,6 +1255,89 @@ FUNCTION_TOOL_SCHEMAS = [
                     "account": {"type": "string", "description": "Account name/email/id from list_email_accounts"},
                 },
                 "required": ["uid"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_projects",
+            "description": "Code projects on this server (git repositories under the projects folder). create makes a new one, clone fetches one from a git URL or GitHub owner/repo, open ties an existing one to THIS chat — after create/clone/open the file tools and the shell work inside that project on every later message. list shows them all, status shows git state and what is deployed, close unties the chat.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "create", "clone", "open", "close", "status"]},
+                    "name": {"type": "string", "description": "Project name (lower-case, dashes) or, for open/status, an absolute folder path"},
+                    "url": {"type": "string", "description": "clone: https/ssh git URL, or owner/repo for GitHub"},
+                    "description": {"type": "string", "description": "create: one line for the README"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_apps",
+            "description": "Host an app from a project so it keeps running: deploy turns a start command into a service that restarts after crashes and reboots and (for web apps) gets an HTTPS address reachable from the user's phone and PCs over Tailscale. Also list, status, logs, start, stop, restart, expose/unexpose, remove. The command must run the app in the foreground and listen on $PORT (127.0.0.1).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "deploy", "status", "logs", "start", "stop", "restart", "expose", "unexpose", "remove"]},
+                    "name": {"type": "string", "description": "App name (defaults to the project's name on deploy)"},
+                    "command": {"type": "string", "description": "deploy: foreground start command, e.g. 'uv run uvicorn app:app --host 127.0.0.1 --port $PORT' or 'npm run start -- --port $PORT'"},
+                    "project": {"type": "string", "description": "deploy: project name or folder (default: the project open in this chat)"},
+                    "port": {"type": "integer", "description": "deploy: fixed port (default: next free one from 8300-8899)"},
+                    "env": {"type": "object", "description": "deploy: extra environment variables (secrets belong in the project's .env file instead)"},
+                    "web": {"type": "boolean", "description": "deploy: false for a worker/bot with no port (default true)"},
+                    "lines": {"type": "integer", "description": "logs: how many lines (default 60)"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_hosts",
+            "description": "Other machines on the user's network, over SSH: run a command or a whole script on one (action run), copy files to or from it (copy), list registered hosts, list tailnet machines (peers), add/remove/test a host. Windows hosts run PowerShell — write normal multi-line PowerShell in command; Linux/macOS hosts run bash. Use this for anything on the user's other computers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "peers", "run", "copy", "add", "remove", "test"]},
+                    "host": {"type": "string", "description": "Host name from list ('local' is this server)"},
+                    "command": {"type": "string", "description": "run: the command or multi-line script"},
+                    "shell": {"type": "string", "enum": ["bash", "powershell", "cmd"], "description": "run: override the host's default shell"},
+                    "cwd": {"type": "string", "description": "run: folder on the host to run in"},
+                    "timeout": {"type": "integer", "description": "run: seconds (default 120, max 3600)"},
+                    "source": {"type": "string", "description": "copy: source path"},
+                    "destination": {"type": "string", "description": "copy: destination path"},
+                    "direction": {"type": "string", "enum": ["put", "get"], "description": "copy: put = this server to the host, get = host to this server"},
+                    "address": {"type": "string", "description": "add: host name or IP"},
+                    "user": {"type": "string", "description": "add: account to log in as"},
+                    "os": {"type": "string", "enum": ["linux", "windows", "macos"], "description": "add: detected when omitted"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delegate_agent",
+            "description": "Hand a coding task to another agent installed on this server — claude (Claude Code), kimi (Kimi Code), codex, opencode, or aider (local model) — working in a project folder. It runs in the background; you are called again with its output when it finishes. Use when the user asks for one of those agents by name, or for a large change better done by a dedicated coding agent. action agents lists what is installed; status/stop/list manage running hand-offs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["agents", "run", "status", "stop", "list"]},
+                    "agent": {"type": "string", "enum": ["claude", "kimi", "codex", "opencode", "aider"]},
+                    "task": {"type": "string", "description": "run: the complete instruction for the other agent — it sees only this text and the project folder"},
+                    "project": {"type": "string", "description": "run: project name or folder (default: the project open in this chat)"},
+                    "autonomy": {"type": "string", "enum": ["edits", "full"], "description": "run: edits = may change files (default); full = may also run any command without asking. Use full only when the user asked for it."},
+                    "continue": {"type": "boolean", "description": "run: continue that agent's previous session in the folder"},
+                    "job": {"type": "string", "description": "status/stop: the job id"}
+                },
+                "required": ["action"]
             }
         }
     },

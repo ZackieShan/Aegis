@@ -858,6 +858,16 @@ from routes.image_gen_routes import setup_image_gen_routes
 app.include_router(setup_image_gen_routes())
 logger.info("Image generation routes initialized")
 
+# Offline reference library (Kiwix + PDF manuals) and photo identification
+from routes.reference_routes import setup_reference_routes
+app.include_router(setup_reference_routes(upload_handler))
+logger.info("Reference library routes initialized")
+
+# Workbench: projects, hosted apps, remote hosts (admin only)
+from routes.workbench_routes import setup_workbench_routes
+app.include_router(setup_workbench_routes())
+logger.info("Workbench routes initialized")
+
 # Model registry — tagged inventory of served aliases + the models/ folder
 from routes.model_registry_routes import setup_model_registry_routes
 app.include_router(setup_model_registry_routes())

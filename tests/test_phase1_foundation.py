@@ -58,10 +58,14 @@ def test_browser_args_last_rung_still_returns_args(monkeypatch):
 
 def test_engine_node_env_prepends_node_dir(monkeypatch):
     import src.builtin_mcp as bm
-    monkeypatch.setattr(bm, "_find_npx", lambda: os.path.join("X:", "engine", "node", "npx.cmd"))
+    # A drive letter only on Windows: on POSIX ":" is os.pathsep, so "X:/…"
+    # can never survive a PATH split there.
+    root = "X:" if os.name == "nt" else os.path.join(os.sep, "opt")
+    node_dir = os.path.join(root, "engine", "node")
+    monkeypatch.setattr(bm, "_find_npx", lambda: os.path.join(node_dir, "npx.cmd"))
     env = bm._engine_node_env()
     assert "PATH" in env
-    assert env["PATH"].split(os.pathsep)[0] == os.path.join("X:", "engine", "node")
+    assert env["PATH"].split(os.pathsep)[0] == node_dir
 
 
 def test_npx_servers_use_args_factory():

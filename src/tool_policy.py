@@ -118,6 +118,11 @@ _COMMON_TOOL_NAMES = {
     "vault_unlock",
     "web_fetch",
     "web_search",
+    "library_search",
+    "manage_projects",
+    "manage_apps",
+    "manage_hosts",
+    "delegate_agent",
     "write_file",
 }
 

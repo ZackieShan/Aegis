@@ -36,6 +36,19 @@ _CASUAL_BLOCKLIST_RE = re.compile(
 )
 
 
+# "remember that I…", "don't forget my…", "for future reference…" — the user is
+# asking for something to be kept; do not make them wait for the usual cadence.
+_REMEMBER_REQUEST_RE = re.compile(
+    r"\b(?:remember|don'?t\s+forget|do\s+not\s+forget|keep\s+in\s+mind|make\s+a\s+note|note\s+that|"
+    r"for\s+future\s+reference|from\s+now\s+on)\b",
+    re.IGNORECASE,
+)
+
+
+def _asks_to_remember(text: str) -> bool:
+    return bool(_REMEMBER_REQUEST_RE.search(str(text or "")[:2000]))
+
+
 def _is_casual_low_signal(text: str) -> bool:
     """Short greetings/slang should not pull memory, skills, RAG, or docs."""
     s = str(text or "").strip()
@@ -690,6 +703,11 @@ async def build_chat_context(
     if not allow_tool_preprocessing:
         mem_enabled = False
         skills_enabled = False
+    # The user's profile ("who am I talking to") obeys the same switches as
+    # memory, but unlike recall it also rides along on a bare greeting: it is
+    # standing context, not a lookup, and keeping it there keeps the prompt
+    # prefix identical from the first turn on.
+    profile_enabled = mem_enabled
     if casual_low_signal:
         mem_enabled = False
         skills_enabled = False
@@ -705,6 +723,7 @@ async def build_chat_context(
     is_research_spinoff = _session_is_research_spinoff(sess)
     if is_research_spinoff:
         mem_enabled = False
+        profile_enabled = False
 
     # Use RAG?
     use_rag_val = (str(use_rag).lower() != "false") if use_rag is not None else True
@@ -730,6 +749,7 @@ async def build_chat_context(
         agent_mode=agent_mode,
         incognito=incognito,
         use_skills=skills_enabled,
+        use_profile=profile_enabled,
     )
     if use_rag is not None or is_research_spinoff or casual_low_signal:
         _preface_kwargs["use_rag"] = use_rag_val
@@ -1184,9 +1204,10 @@ def run_post_response_tasks(
 
     _extraction_jobs: list = []
 
-    # Memory extraction — only every 4th message pair to avoid excess LLM calls
+    # Memory extraction — only every 4th message pair to avoid excess LLM calls,
+    # or straight away when the user asks for something to be remembered.
     _msg_count = len(sess.history) if hasattr(sess, 'history') else 0
-    _should_extract = (_msg_count >= 4) and (_msg_count % 4 == 0)
+    _should_extract = ((_msg_count >= 4) and (_msg_count % 4 == 0)) or _asks_to_remember(message)
     if allow_background_extraction and not incognito and not compare_mode and _should_extract and uprefs.get("auto_memory", True):
         from services.memory.memory_extractor import extract_and_store
         from src.task_endpoint import resolve_task_endpoint
@@ -1196,6 +1217,14 @@ def run_post_response_tasks(
         _extraction_jobs.append(("memory", extract_and_store(
             sess, memory_manager, memory_vector,
             t_url, t_model, t_headers,
+        )))
+        # Then bring the user's profile up to date with whatever was just
+        # learned. It decides for itself, when its turn in the queue comes,
+        # whether a rewrite is due (most of the time it is not).
+        from services.memory.profile import maybe_rebuild
+        _extraction_jobs.append(("profile", maybe_rebuild(
+            owner if owner is not None else getattr(sess, "owner", None),
+            memory_manager, t_url, t_model, t_headers,
         )))
 
     # Skill extraction from complex agent runs. Only when the user actually

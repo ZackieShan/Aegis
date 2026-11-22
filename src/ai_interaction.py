@@ -302,7 +302,8 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
 
     Actions:
       list                    — list all memories (optional line 2: category filter)
-      add                     — line 2: text, optional line 3: category (fact|event|contact|preference)
+      add                     — line 2: text, optional line 3: category
+                                (fact|event|contact|preference|identity|interest|project|goal)
       edit                    — line 2: memory_id, line 3: new text
       delete                  — line 2: memory_id
       search                  — line 2: query

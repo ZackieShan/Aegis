@@ -18,11 +18,16 @@ import os
 from typing import Any, Optional
 
 
-def atomic_write_json(path: str, data: Any, *, indent: Optional[int] = None) -> None:
+def atomic_write_json(path: str, data: Any, *, indent: Optional[int] = None,
+                      mode: Optional[int] = None) -> None:
     """Atomically persist `data` as JSON at `path`.
 
     The temp file uses the live PID as a suffix so two processes saving the
     same file (e.g. unit tests) don't collide on the rename target.
+
+    ``mode`` sets the file's permission bits (e.g. ``0o600`` for password
+    hashes and session tokens, which other local accounts have no business
+    reading). Left alone when omitted.
     """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = f"{path}.tmp.{os.getpid()}"
@@ -30,6 +35,11 @@ def atomic_write_json(path: str, data: Any, *, indent: Optional[int] = None) -> 
         json.dump(data, f, indent=indent)
         f.flush()
         os.fsync(f.fileno())
+    if mode is not None:
+        try:
+            os.chmod(tmp, mode)
+        except OSError:
+            pass
     os.replace(tmp, path)
 
 

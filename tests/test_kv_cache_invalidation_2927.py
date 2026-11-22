@@ -336,7 +336,9 @@ async def test_run_post_response_tasks_does_not_fire_extraction_concurrently(mon
     # Both extractors were queued through the sequential gate — not fired
     # directly via asyncio.create_task — and both ultimately ran exactly once.
     assert captured_jobs.get("session_id") == "sess-Y"
-    assert captured_jobs.get("names") == ["memory", "skill"]
+    # (The "profile" job between them brings the user's profile up to date
+    # with what extraction just learned; it queues through the same gate.)
+    assert captured_jobs.get("names") == ["memory", "profile", "skill"]
     assert calls == {"memory": 1, "skill": 1}
 
 

@@ -115,9 +115,24 @@ def _chunk_text(text: str):
     return chunks or [""]
 
 
+def _write_wav(buf, wav, sr: int) -> None:
+    """Write a (1, N) float tensor as 16-bit PCM WAV.
+
+    soundfile first: torchaudio >= 2.9 routes save() through torchcodec,
+    which this venv does not ship — synthesis succeeded and the request still
+    died with "TorchCodec is required". torchaudio stays as the fallback for
+    installs without soundfile."""
+    try:
+        import soundfile as sf
+    except ImportError:
+        import torchaudio
+        torchaudio.save(buf, wav, sr, format="wav")
+        return
+    sf.write(buf, wav.squeeze(0).numpy(), sr, format="WAV", subtype="PCM_16")
+
+
 def synthesize(text: str, voice: str) -> bytes:
     import torch
-    import torchaudio
 
     voices = list_voices()
     if voice not in voices:
@@ -135,7 +150,7 @@ def synthesize(text: str, voice: str) -> bytes:
             raise ValueError("No text to synthesize")
         full = torch.cat(waves, dim=1)
         buf = io.BytesIO()
-        torchaudio.save(buf, full.cpu(), model.sr, format="wav")
+        _write_wav(buf, full.cpu(), model.sr)
         return buf.getvalue()
 
 

@@ -70,13 +70,14 @@ def apply_wan_lightning(model_id: str, prompt: str, negative_prompt: str) -> tup
     mid = str(model_id or "").lower()
     if "wan" not in mid or "t2v" not in mid:
         return prompt, negative_prompt
-    if not comfyui_workflows.wan_lightning_available():
+    # The newest Lightning pair on disk — the same one the ComfyUI graph wires.
+    pair = comfyui_workflows.wan_lightning_pair()
+    if not pair:
         return prompt, negative_prompt
     negative_prompt = negative_prompt or comfyui_workflows.WAN_DEFAULT_NEGATIVE
     if "lightx2v" in (prompt or "").lower():
         return prompt, negative_prompt
-    low = comfyui_workflows.WAN_LIGHTNING_LOW_LORA.removesuffix(".safetensors")
-    high = comfyui_workflows.WAN_LIGHTNING_HIGH_LORA.removesuffix(".safetensors")
+    high, low = (name.removesuffix(".safetensors") for name in pair)
     return f"{prompt}<lora:{low}:1><lora:|high_noise|{high}:1>", negative_prompt
 
 

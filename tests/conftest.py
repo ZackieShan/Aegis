@@ -17,6 +17,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # file-backed DB across processes - tests needing that must set DATABASE_URL.
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
+# The offline library (services/library) talks to a local kiwix-serve when one
+# is running. On a machine that has it installed, search and tool-selection
+# tests would otherwise pick up real library results. Off for the whole
+# session; tests of the library itself stub its HTTP layer and re-enable it.
+os.environ.setdefault("AEGIS_LIBRARY_DISABLED", "1")
+
+# Same idea for the workbench (services/workbench): its tools start services
+# and reach other machines. Its own tests re-enable it against a temp folder.
+os.environ.setdefault("AEGIS_WORKBENCH_DISABLED", "1")
+
 # Pre-import real heavy modules BEFORE any test file's module-level stubs can
 # replace them with MagicMock. Some test files (e.g. test_llm_core_sanitize_*)
 # stub sqlalchemy/core.database at module scope with `if mod not in sys.modules`,

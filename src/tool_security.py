@@ -41,6 +41,12 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "bash",
     "python",
     "manage_bg_jobs",
+    # Workbench: start services, run commands on other machines, let other
+    # agents edit code. Administrators only.
+    "manage_projects",
+    "manage_apps",
+    "manage_hosts",
+    "delegate_agent",
     "read_file",
     "write_file",
     "edit_file",
@@ -93,6 +99,7 @@ PLAN_MODE_READONLY_TOOLS = {
     "get_workspace",
     "web_search",
     "web_fetch",
+    "library_search",
     "search_chats",
     "list_models",
     "list_sessions",
@@ -137,6 +144,7 @@ PLAN_MODE_READONLY_TOOLS = {
 # new mutating tools.
 _PLAN_MODE_KNOWN_MUTATORS = {
     "write_file", "create_document", "edit_document", "update_document",
+    "manage_projects", "manage_apps", "manage_hosts", "delegate_agent",
     "suggest_document", "manage_documents", "create_session", "manage_session",
     "send_to_session", "pipeline", "manage_memory", "manage_skills",
     "manage_tasks", "manage_notes", "manage_endpoints", "manage_mcp",

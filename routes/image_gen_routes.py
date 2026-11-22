@@ -72,6 +72,7 @@ async def _comfy_generate(body, user, model, prompt, style, _num):
     result = await comfyui_client.render_image(
         model, prompt=styled, negative_prompt=negative,
         width=w, height=h, seed=seed, steps=steps,
+        owner=user, session_id=body.get("session_id"),
     )
     if result.get("error"):
         return {"error": result["error"]}

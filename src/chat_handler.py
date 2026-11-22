@@ -331,9 +331,18 @@ class ChatHandler:
             message
         )
         if is_memory_cmd and memory_text:
+            # The entry belongs to the account whose chat this is. Without an
+            # owner it was saved for nobody, matched against everyone's
+            # memories, and handed to the administrator at the next start-up.
+            owner = getattr(session, "owner", None)
+            owner = owner if isinstance(owner, str) and owner else None
             mem = self.memory_manager.load()
-            if not self.memory_manager.find_duplicates(memory_text, mem):
-                new_entry = self.memory_manager.add_entry(memory_text)
+            mine = [m for m in mem if m.get("owner") == owner] if owner else mem
+            if not self.memory_manager.find_duplicates(memory_text, mine):
+                if owner:
+                    new_entry = self.memory_manager.add_entry(memory_text, owner=owner)
+                else:
+                    new_entry = self.memory_manager.add_entry(memory_text)
                 mem.append(new_entry)
                 self.memory_manager.save(mem)
 

@@ -4,6 +4,9 @@
 # scripts/setup-engine.sh, which installs the result to
 # $ENGINE_DIR/llama-swap.yaml. Ported 2026-11-14 from the Windows engine
 # config (engine/llama-swap.yaml on the 4090 box).
+# 2026-11-22 model refresh: aliases whose files are gone were removed and the
+# five 60-85GB MoE chat models added. Keep it that way -- every alias must
+# name files that exist, or llama-swap answers a request with a load failure.
 #
 # One stable OpenAI endpoint, hot-swaps GGUFs on demand. Each model loads on
 # first request and unloads after `ttl` idle seconds, so only one big model
@@ -25,21 +28,18 @@
 # >64GB mmap bug); the default Vulkan build needs no change.
 healthCheckTimeout: 300
 logLevel: info
+# Variant ids created by a model's filters.setParamsByID (gpt-oss-120b-fast)
+# appear in /v1/models, so Aegis can pick them like any other model.
+includeAliasesInList: true
+
+# The main chat model is loaded as soon as llama-swap starts, so the first
+# message after a boot or an Aegis restart does not wait for 63GB to load.
+hooks:
+  on_startup:
+    preload:
+      - "gpt-oss-120b"
 
 models:
-  # 32K context: agentic coding + tool schemas easily exceed 8K (that's the
-  # "request exceeds available context size" 400). At Q4 the 17GB weights + a
-  # 32K KV cache (~3GB with flash attn) are a light load for unified memory.
-  # Native ceiling is 256K -- raise -c further (add --cache-type-k/v q8_0 to
-  # halve KV memory) if you need it, watching GTT headroom.
-  "qwen3-coder-30b":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/Qwen3-Coder-30B-A3B-Instruct-Q4_0.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 45056 -fa on --jinja --no-webui
-    ttl: 600
-
   # Uncensored Gemma finetune (16GB Q4). Full GPU offload; gemma KV is huge
   # (~469MB/1k tokens) so the proven 8K context is kept -- raise -c if you
   # need more, unified memory has the room.
@@ -61,32 +61,6 @@ models:
       -ngl 99 -c 32768 -fa on --jinja --no-webui
     ttl: 600
 
-  # Big generalist (22.9GB Q6). The Windows box ran this partially offloaded
-  # to dodge the 24GB 4090 spill; on unified memory it offloads fully.
-  "qwen3.6-27b":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/Qwen3.6-27B-Q6_K.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 8192 -fa on
-      --cache-type-k q8_0 --cache-type-v q8_0
-      --chat-template-kwargs "{\"enable_thinking\":false}"
-      --jinja --no-webui
-    ttl: 600
-
-  # DavidAU NEO-CODE variant of the 27B (22.4GB Q6) -- same recipe as
-  # qwen3.6-27b above.
-  "qwen3.6-27b-neo":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/Qwen3.6-27B-NEO-CODE-HERE-2T-OT-Q6_K.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 8192 -fa on
-      --cache-type-k q8_0 --cache-type-v q8_0
-      --chat-template-kwargs "{\"enable_thinking\":false}"
-      --jinja --no-webui
-    ttl: 600
-
   # 35B MoE, A3B (only ~3B params active per token). The 36.9GB Q8 sits fully
   # GPU-resident in unified memory.
   # enable_thinking:false is REQUIRED on every Qwen3.6 (the template hard-starts
@@ -106,28 +80,9 @@ models:
       --jinja --no-webui
     ttl: 600
 
-  # GLM-4.7-Flash (deepseek2 arch: 64x2.6B MoE, 4 active + 1 shared expert,
-  # MLA attention) finetuned on Claude 4.5 Opus high-reasoning traces -- the
-  # strongest generalist in models/. bf16 55.8GB: needs the GTT kernel tuning
-  # from the docs before it can load fully GPU-resident. MLA keeps the KV
-  # cache tiny, so 65536 ctx is cheap (native ceiling 202K -- raise -c freely).
-  # It is a reasoning distill: it emits <think> blocks, which --jinja parses
-  # into reasoning_content (kept out of the visible reply). If it ever leaks
-  # thinking into content, add --reasoning-format deepseek.
-  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
-  "glm-4.7-flash":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/glm-4.7-flash-claude-4.5-opus.bf16.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 65536 -fa on
-      --jinja --no-webui
-    ttl: 600
-
-  # Same Claude-Opus-distilled GLM-4.7-Flash as above at Q4_K_M (18.1GB,
-  # TeichAI official quant) -- the fast daily driver of the pair. Keep the
-  # bf16 entry for max quality; this one for speed. MLA keeps KV tiny at
-  # 65K ctx.
+  # Claude-4.5-Opus-distilled GLM-4.7-Flash (deepseek2 arch) at Q4_K_M (18.1GB,
+  # TeichAI official quant). The bf16 sibling was removed in the 2026-11
+  # model refresh. MLA keeps KV tiny at 65K ctx.
   "glm-4.7-flash-q4":
     cmd: |
       "__ENGINE_DIR__/llamacpp/llama-server"
@@ -146,20 +101,6 @@ models:
       -m "__MODELS_DIR__/GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf"
       --host 127.0.0.1 --port ${PORT}
       -ngl 99 -c 65536 -fa on
-      --jinja --no-webui
-    ttl: 600
-
-  # Qwen-AgentWorld-35B-A3B (unsloth UD-Q4_K_XL 22.3GB) -- agentic/tool-use
-  # specialist in the same 35B-A3B family as the daily drivers.
-  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
-  "qwen-agentworld-35b":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/Qwen-AgentWorld-35B-A3B-UD-Q4_K_XL.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 65536 -fa on
-      --cache-type-k q8_0 --cache-type-v q8_0
-      --chat-template-kwargs "{\"enable_thinking\":false}"
       --jinja --no-webui
     ttl: 600
 
@@ -257,26 +198,6 @@ models:
       --jinja --no-webui
     ttl: 600
 
-  # Phi-4-14B distilled from gpt-oss-120b (14.5GB Q8). Dense, fully
-  # GPU-resident with a 16K window.
-  "gpt-oss-distill-14b":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/gpt-oss-120b-Distill-Phi-4-14B.Q8_0.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 16384 -fa on --jinja --no-webui
-    ttl: 600
-
-  # Qwen2.5-14B CIC-ACLARC finetune (14.6GB Q8) -- citation/classification
-  # specialist the user dropped in models/.
-  "qwen2.5-14b-aclarc":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/Qwen2.5-14B-CIC-ACLARC-Q8_0.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 16384 -fa on --jinja --no-webui
-    ttl: 600
-
   # DavidAU Fable-Fus 27B merge at Q5_K_M (19.3GB) -- full offload with a q8
   # KV cache at 8K. (The Windows note about dropping to partial offload on
   # VRAM spill does not apply on unified memory.)
@@ -288,21 +209,6 @@ models:
       -ngl 99 -c 8192 -fa on
       --cache-type-k q8_0 --cache-type-v q8_0
       --chat-template-kwargs "{\"enable_thinking\":false}"
-      --jinja --no-webui
-    ttl: 600
-
-  # Uncensored 35B MoE at Q4_K_P (21.8GB). Fastest variant; the Q8_K_P entry
-  # below trades ~40% speed for max quality.
-  # --cpu-moe removed: unified memory, fully GPU-resident on Strix Halo
-  "qwen3.6-35b-a3b-uncensored":
-    cmd: |
-      "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf"
-      --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 65536 -fa on
-      --cache-type-k q8_0 --cache-type-v q8_0
-      --chat-template-kwargs "{\"enable_thinking\":false}"
-      --dry-multiplier 0.8
       --jinja --no-webui
     ttl: 600
 
@@ -321,24 +227,83 @@ models:
       --jinja --no-webui
     ttl: 600
 
-  # sulphur_dev finetune (13.3GB Q4_K_M) -- generic serving flags; adjust if
-  # its template misbehaves.
-  "sulphur-dev":
+  # ---- 2026-11 model refresh: the five big MoE chat models ----------------
+  # All five are 60-85GB of weights and only load because of the 120GiB GTT
+  # tuning (ttm pages_limit). Context starts at 32K: MoE generation speed
+  # drops with context depth, so raise -c per model only after testing.
+
+  # gpt-oss-120b Heretic (117B-A5B, MXFP4 63GB) -- OpenAI's open-weight
+  # reasoning model, decensored. THE MAIN CHAT MODEL since 2026-11-22: the
+  # fastest of the big models here (51 tok/s; 47 at 8K, 40 at 30K of context)
+  # and it answered all 19 commonly-refused test questions directly.
+  # Harmony-format reasoning is parsed by --jinja into reasoning_content.
+  # 64K context: agent mode sends thousands of tokens of tool schemas before
+  # the first user word (KV is ~70MB per 1K tokens, so ~4.6GB when full).
+  # ttl 3600, not 600: reloading 63GB costs 15-25s, and nothing is lost by
+  # staying warm -- another GPU model or a media job still evicts it at once.
+  #
+  # "gpt-oss-120b-fast" is the SAME loaded process with reasoning effort
+  # "low": Aegis's utility role (titles, summaries, memory extraction) uses
+  # it, so background calls neither swap models nor spend their small token
+  # budgets on analysis. Reasoning effort for normal chat stays at the
+  # model's default (medium); Aegis's per-model Thinking On/Off toggle sends
+  # high/low per request.
+  "gpt-oss-120b":
     cmd: |
       "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/sulphur_dev-Q4_K_M.gguf"
+      -m "__MODELS_DIR__/gpt-oss-120b-heretic/kldzj_gpt-oss-120b-heretic-MXFP4_MOE/kldzj_gpt-oss-120b-heretic-MXFP4_MOE-00001-of-00002.gguf"
       --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 16384 -fa on --jinja --no-webui
+      -ngl 99 -c 65536 -fa on
+      --jinja --no-webui
+    filters:
+      setParamsByID:
+        "gpt-oss-120b-fast":
+          reasoning_effort: low
+    ttl: 3600
+
+  # Huihui Qwen3.8-Flash-Next abliterated (177B-A6B, Swift IQ3_XXS 76GB).
+  # Loaded WITH its vision projector (0.9GB): the same alias answers text and
+  # image requests, so photo identification (/identify) can use the fastest
+  # vision-capable model here without a second copy of the weights.
+  "qwen3.8-flash-next":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/qwen3.8-flash-next-abliterated/swift-IQ3_XXS/Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf"
+      --mmproj "__MODELS_DIR__/qwen3.8-flash-next-abliterated/mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 32768 -fa on
+      --jinja --no-webui
     ttl: 600
 
-  # TableLLM-13b (CodeLlama-13B base, 7.3GB Q4) -- table/spreadsheet QA
-  # specialist.
-  "tablellm-13b":
+  # Mistral Small 4 119B (A6B, Q4_K_M 73GB) -- natively permissive generalist.
+  "mistral-small-4":
     cmd: |
       "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/TableLLM-13b.Q4_K_M.gguf"
+      -m "__MODELS_DIR__/mistral-small-4-119b/mistralai_Mistral-Small-4-119B-2603-Q4_K_M/mistralai_Mistral-Small-4-119B-2603-Q4_K_M-00001-of-00002.gguf"
       --host 127.0.0.1 --port ${PORT}
-      -ngl 99 -c 8192 -fa on --jinja --no-webui
+      -ngl 99 -c 32768 -fa on
+      --jinja --no-webui
+    ttl: 600
+
+  # MiniMax-M2.1 REAP 139B-A10B (Q4_K_M 84GB) -- agentic-coding model.
+  "minimax-m2.1-reap":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/minimax-m2.1-reap-139b/MiniMax-M2.1-REAP-139B-A10B.Q4_K_M.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 32768 -fa on
+      --jinja --no-webui
+    ttl: 600
+
+  # TheDrummer GLM-Steam 106B-A12B (GLM-4.5-Air finetune, Q4_K_M 73GB) --
+  # the creative-writing / roleplay slot.
+  "glm-steam-106b":
+    cmd: |
+      "__ENGINE_DIR__/llamacpp/llama-server"
+      -m "__MODELS_DIR__/glm-steam-106b/GLM-Steam-106B-A12B-v1b-Q4_K_M-00001-of-00002.gguf"
+      --host 127.0.0.1 --port ${PORT}
+      -ngl 99 -c 32768 -fa on
+      --jinja --no-webui
     ttl: 600
 
   # LOCAL IMAGE GENERATION -- Qwen-Image (diffusion) under stable-diffusion.cpp's
@@ -403,8 +368,8 @@ models:
   # Video is served on sd-server's native async API only: Aegis submits to
   # /upstream/wan2.2-t2v/sdcpp/v1/vid_gen and polls the returned job (the
   # /video slash command drives this). Flags per sd.cpp docs/wan.md. The umt5
-  # text encoder runs on CPU; both diffusion experts (7.2GB each) sit on the
-  # GPU.
+  # text encoder runs on CPU; both diffusion experts (Q8_0, 15.4GB each --
+  # the Q3_K_M pair was the measured cause of mangled hands) sit on the GPU.
   #
   # 4+4 steps assume the lightx2v Lightning LoRAs: Aegis splices
   # <lora:...low_noise:1><lora:|high_noise|...high_noise:1> into every native
@@ -416,8 +381,8 @@ models:
   "wan2.2-t2v":
     cmd: |
       "__ENGINE_DIR__/sdcpp/sd-server"
-      --diffusion-model "__MODELS_DIR__/Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf"
-      --high-noise-diffusion-model "__MODELS_DIR__/Wan2.2-T2V-A14B-HighNoise-Q3_K_M.gguf"
+      --diffusion-model "__MODELS_DIR__/Wan2.2-T2V-A14B-LowNoise-Q8_0.gguf"
+      --high-noise-diffusion-model "__MODELS_DIR__/Wan2.2-T2V-A14B-HighNoise-Q8_0.gguf"
       --t5xxl "__MODELS_DIR__/video/umt5-xxl-encoder-Q8_0.gguf"
       --vae "__MODELS_DIR__/video/wan_2.1_vae.safetensors"
       --backend clip=cpu
@@ -430,40 +395,17 @@ models:
     checkEndpoint: /v1/models
     ttl: 600
 
-  # LTX-2.3 22B dev -- joint VIDEO+AUDIO generation, same async vid_gen API as
-  # wan2.2-t2v. Gemma-3-12B text encoder on CPU; flags per sd.cpp docs/ltx2.md
-  # (euler, cfg 6.0). ~18GB resident on the GPU: keep test renders modest
-  # (e.g. 512x288); very large sizes (1280x720) may need --offload-to-cpu.
-  #
-  # NOTE: the LTX-2 19B phr00t merges (ltx2-phr00tmerge-*.gguf in models/) are
-  # NOT servable by sd.cpp -- its LTX loader only parses the LTX-2.3
-  # companion tensor layout (vocoder fused into the audio VAE, connectors keyed
-  # text_embedding_projection.*); verified "model metadata validation failed".
-  # Those merges run in ComfyUI instead.
-  "ltx2.3-video":
-    cmd: |
-      "__ENGINE_DIR__/sdcpp/sd-server"
-      --diffusion-model "__MODELS_DIR__/ltx-2.3-22b-dev-UD-Q4_K_M.gguf"
-      --llm "__MODELS_DIR__/video/gemma-3-12b-it-UD-Q4_K_XL.gguf"
-      --vae "__MODELS_DIR__/video/ltx-2.3-22b-dev_video_vae.safetensors"
-      --audio-vae "__MODELS_DIR__/video/ltx-2.3-22b-dev_audio_vae.safetensors"
-      --embeddings-connectors "__MODELS_DIR__/video/ltx-2.3-22b-dev_embeddings_connectors.safetensors"
-      --backend clip=cpu
-      --sampling-method euler --cfg-scale 6.0
-      --diffusion-fa --vae-tiling
-      --lora-model-dir "__MODELS_DIR__/loras"
-      --listen-port ${PORT}
-    checkEndpoint: /v1/models
-    ttl: 600
-
   # VOICE CLONING -- Chatterbox (Resemble AI, MIT) behind the same OpenAI
   # surface: llama-swap body-routes /v1/audio/speech on model "chatterbox-tts".
   # Voices are the user's cloned samples in data/voices (Settings -> TTS ->
   # My Voices); __MODELS_DIR__ is <repo>/models, so ../data/voices resolves
   # to the repo's data/voices. The server starts instantly (health passes)
-  # and lazy-loads the 3.2GB model on the first request; ~5GB of GPU memory
-  # while resident, ttl returns it. Kokoro (CPU) stays the instant default
-  # voice path.
+  # and lazy-loads the 3.2GB model on the first request (weights come from the
+  # Hugging Face cache, ~/.cache/huggingface/hub/models--ResembleAI--chatterbox;
+  # they were fetched once on 2026-11-22 so this works with no internet).
+  # setup-engine.sh gives the TTS venvs CPU torch by default, so on this box
+  # it uses RAM, not GPU memory -- it lives in the `cpu` group below and never
+  # evicts the chat model. (Built with --tts-rocm? Move it back to `gpu`.)
   "chatterbox-tts":
     cmd: |
       "__ENGINE_DIR__/chatterbox/venv/bin/python"
@@ -478,16 +420,35 @@ models:
   # "qwen3-tts". Reads the SAME cloned samples in data/voices as Chatterbox;
   # an optional <name>.txt sidecar transcript upgrades a clone from
   # x-vector-only to full ICL quality. Starts instantly (health passes) and
-  # lazy-loads the 1.7B on first request; ~5GB of GPU memory while resident,
-  # warm synthesis ~2x realtime (Chatterbox is ~4x), ttl returns the memory.
+  # lazy-loads the 1.7B on first request from --model-dir (the server's own
+  # default is a Windows path and fails on Linux). CPU torch here as well, so
+  # it sits in the `cpu` group with Chatterbox.
   "qwen3-tts":
     cmd: |
       "__ENGINE_DIR__/qwen3tts/venv/bin/python"
       "__ENGINE_DIR__/qwen3tts/server.py"
       --host 127.0.0.1 --port ${PORT}
       --voices-dir "__MODELS_DIR__/../data/voices"
+      --model-dir "__MODELS_DIR__/audio/qwen3-tts-1.7b-base"
     checkEndpoint: /health
     ttl: 300
+
+  # SPECIES ID -- BioCLIP 2 (Imageomics, MIT) scores a photo against ~867,000
+  # taxa of the Tree of Life and returns the best species / genera / families.
+  # Aegis's photo identification (/identify in chat, POST /api/reference/identify)
+  # calls it through /upstream/species-id/classify and hands the candidates to
+  # the vision model. CPU torch: ~10 s to load, ~0.4 s per photo, ~5GB of RAM
+  # while resident (cpu group below, so it never evicts the chat model).
+  # Model + text embeddings live in the Hugging Face cache
+  # (models--imageomics--bioclip-2, datasets--imageomics--TreeOfLife-200M),
+  # fetched once with `server.py --prefetch`; the server then loads offline.
+  "species-id":
+    cmd: |
+      "__ENGINE_DIR__/speciesid/venv/bin/python"
+      "__ENGINE_DIR__/speciesid/server.py"
+      --host 127.0.0.1 --port ${PORT}
+    checkEndpoint: /health
+    ttl: 900
 
   # Vision-capable model for screenshot-grounded browser/computer control (Phase 4).
   # Qwen2.5-VL-3B (ggml-org GGUF + matching mmproj) -- a light (~3.3GB) multimodal
@@ -535,18 +496,19 @@ models:
     # user waits.
     ttl: 1800
 
-  # CPU-ONLY CHAT FALLBACK, BIG EDITION -- the same uncensored 35B MoE the
-  # user chats on normally, run entirely on CPU threads (--device none: zero
-  # GPU allocation). A3B active params on the 16-core Zen 5 with LPDDR5X
+  # CPU-ONLY CHAT FALLBACK, BIG EDITION -- the same abliterated 35B MoE the
+  # user chats on normally (the Huihui Q5_K behind huihui-35b-opus-abliterated;
+  # repointed 2026-11-22 because the HauhauCS Q4_K_P was never migrated), run
+  # entirely on CPU threads (--device none: zero GPU allocation). A3B active params on the 16-core Zen 5 with LPDDR5X
   # decode at usable chat speed; replies during renders come from the same
-  # brain as always instead of a 3B stand-in. ~22GB resident while warm --
+  # brain as always instead of a 3B stand-in. ~25GB resident while warm --
   # affordable in 128GB. chat-lite-cpu above stays wired as the lightweight
   # option. Context matches gpu_guard.FALLBACK_CONTEXT (32K) like
   # chat-lite-cpu does.
   "chat-moe-cpu":
     cmd: |
       "__ENGINE_DIR__/llamacpp/llama-server"
-      -m "__MODELS_DIR__/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf"
+      -m "__MODELS_DIR__/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-Q5_K.gguf"
       --host 127.0.0.1 --port ${PORT}
       --device none -ngl 0 -c 32768 -fa on
       --chat-template-kwargs "{\"enable_thinking\":false}"
@@ -569,41 +531,37 @@ groups:
     swap: true
     exclusive: true
     members:
-      - qwen3-coder-30b
       - supergemma4-26b
       - qwen3.5-4b-uncensored
-      - qwen3.6-27b
-      - qwen3.6-27b-neo
       - qwen3.6-35b-a3b
-      - qwen3.6-35b-a3b-uncensored
       - qwen3.6-35b-a3b-uncensored-q8
-      - glm-4.7-flash
       - glm-4.7-flash-q4
       - glm-4.7-flash-uncensored
-      - qwen-agentworld-35b
       - kimi-linear-48b
       - qwen3-coder-next-80b
       - qwopus-122b-uncensored
+      - gpt-oss-120b
+      - qwen3.8-flash-next
+      - mistral-small-4
+      - minimax-m2.1-reap
+      - glm-steam-106b
       - qwen3.6-40b-deckard
       - qwen3.6-40b-deckard-vision
       - huihui-35b-opus-abliterated
       - qwen3.6-27b-fable-fus
-      - gpt-oss-distill-14b
-      - qwen2.5-14b-aclarc
-      - sulphur-dev
-      - tablellm-13b
       - qwen-vl
       - qwen-image
       - qwen-image-edit
       - qwen-image-rapid-nsfw
       - wan2.2-t2v
-      - ltx2.3-video
-      - chatterbox-tts
-      - qwen3-tts
-  # The CPU fallback.
-  #   exclusive: false -> loading it never evicts a live render.
-  #   persistent: true -> a render loading never evicts it.
+  # Everything that runs on CPU only: the chat fallbacks and the two TTS
+  # servers (CPU torch on this box).
+  #   exclusive: false -> loading one never evicts a GPU model or a render.
+  #   persistent: true -> a GPU model loading never evicts it.
   # Both halves are required; either alone still breaks in one direction.
+  # With TTS in the exclusive gpu group, every spoken reply unloaded the chat
+  # model and the next message reloaded it -- seconds with a 25GB model,
+  # 15-25s with the 63GB main model.
   cpu:
     swap: false
     exclusive: false
@@ -611,3 +569,6 @@ groups:
     members:
       - chat-lite-cpu
       - chat-moe-cpu
+      - chatterbox-tts
+      - qwen3-tts
+      - species-id

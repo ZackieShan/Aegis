@@ -50,3 +50,20 @@ def test_email_recent_clamps_days():
     # non-numeric days falls back to 7; the call still returns a string
     out = asyncio.run(bt.email_recent({"days": "banana"}, owner="nobody@example.com"))
     assert isinstance(out, str)
+
+
+# ── a failing built-in tool reports ITS error (2026-11) ──────────────────────
+
+async def test_failing_builtin_tool_reports_the_real_error(monkeypatch):
+    """src/recipes.py logged the failure through a `logger` it never defined,
+    so every built-in tool failure surfaced as a NameError about 'logger'
+    instead of the tool's own message."""
+    from src import recipes, recipe_builtin_tools
+
+    async def _boom(args, owner):
+        raise RuntimeError("IMAP login failed")
+
+    monkeypatch.setitem(recipe_builtin_tools.BUILTIN_RECIPE_TOOLS, "email_recent", _boom)
+    out = await recipes._run_tool_node(None, {"tool": "email_recent", "args": {}}, {}, "", owner="alice")
+    assert out == "[tool node: email_recent failed: IMAP login failed]"
+    assert "logger" not in out and "NameError" not in out

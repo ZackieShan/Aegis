@@ -1,0 +1,45 @@
+# systemd unit for the offline reference library (kiwix-serve).
+#
+# Install: replace __USER__ and __LIBRARY_DIR__ (absolute path), then
+#   sudo install -m 644 kiwix.service /etc/systemd/system/kiwix.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kiwix
+#
+# It listens on loopback only. To open it from a phone, put it behind the same
+# thing that fronts Aegis — on a different ORIGIN (port or host), never under
+# Aegis's own: archive pages carry their own scripts. With Tailscale:
+#   tailscale serve --bg --https=8443 http://127.0.0.1:8095
+# and set `kiwix_public_url` to that address in Aegis's settings.
+[Unit]
+Description=Kiwix offline reference library (kiwix-serve on 127.0.0.1:8095)
+Documentation=https://kiwix-tools.readthedocs.io/en/latest/kiwix-serve.html
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+# library.xml is rebuilt by scripts/library/rebuild-library.sh; --monitorLibrary
+# reloads it without a restart. --nodatealiases gives every collection a
+# date-less URL (/content/wikipedia_en_all_maxi/...) that survives updates.
+ExecStart=/usr/bin/kiwix-serve --address=127.0.0.1 --port=8095 --threads=8 --nodatealiases --monitorLibrary --library __LIBRARY_DIR__/library.xml
+# kiwix-serve 3.8 can segfault when several full-text searches overlap (Aegis
+# sends its own one at a time for that reason). Always come straight back.
+Restart=always
+RestartSec=2
+LimitCORE=0
+# It only ever needs to read the library and listen on localhost.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# AF_NETLINK: kiwix-serve enumerates interfaces at startup and exits without it.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

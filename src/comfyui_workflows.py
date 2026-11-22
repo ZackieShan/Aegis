@@ -28,17 +28,66 @@ def _comfy_device() -> str:
     return os.environ.get("AEGIS_COMFY_DEVICE", "cuda:0")
 
 
+# The separator this host's ComfyUI uses in its model lists (see _mp).
+_SEP = os.sep
+
+
+def _mp(rel: str) -> str:
+    """A models/-relative path ("video/wan_2.1_vae.safetensors") in the form
+    THIS host's ComfyUI lists it. ComfyUI builds its file lists with os.sep
+    and validates loader inputs by exact string match, so a subfolder name
+    must be "video\\x" on Windows and "video/x" everywhere else — the
+    backslash form these graphs were first written with is rejected outright
+    on Linux ("value_not_in_list"). Always write the forward-slash form in
+    code and route it through here."""
+    return rel.replace("/", _SEP)
+
+
+def _big_memory_gpu() -> bool:
+    """True when the GPU has the headroom to run 16-bit checkpoints as stored
+    (>= 32GB: a Strix Halo APU's GTT pool, a 48GB card). Smaller cards keep
+    the load-time fp8 casts the 24GB 4090 needed. Override with
+    AEGIS_COMFY_BIG_GPU=1/0."""
+    env = os.environ.get("AEGIS_COMFY_BIG_GPU", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    try:
+        from src.engine_tuner import gpu_vram_mb
+        return (gpu_vram_mb() or 0) >= 32 * 1024
+    except Exception:
+        return False
+
+
 # lightx2v 4-step distillation LoRAs for Wan2.2 T2V — shared between this
 # module's ComfyUI graph and the native sd-server path (video_generation
-# splices them into the prompt via sd.cpp's <lora:...> syntax).
-WAN_LIGHTNING_HIGH_LORA = "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors"
-WAN_LIGHTNING_LOW_LORA = "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors"
+# splices them into the prompt via sd.cpp's <lora:...> syntax). Newest
+# release first: wan_lightning_pair() returns the first pair fully on disk.
+# The WAN_LIGHTNING_*_LORA names stay the v1.1 pair older installs have.
+WAN_LIGHTNING_PAIRS = [
+    ("wan2.2_t2v_lightx2v_4steps_lora_v2.0_high_noise.safetensors",
+     "wan2.2_t2v_lightx2v_4steps_lora_v2.0_low_noise.safetensors"),
+    ("wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+     "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors"),
+]
+WAN_LIGHTNING_HIGH_LORA, WAN_LIGHTNING_LOW_LORA = WAN_LIGHTNING_PAIRS[-1]
 
-# fp8_scaled Wan2.2 experts (Comfy-Org repackage) — the quality upgrade over
-# the Q3_K_M GGUFs, whose aggressive quantization is what mangles hands and
-# anatomy. When present they take over the T2V graph automatically.
+# Wan2.2 T2V expert pairs (high-noise, low-noise), best quality first. Q8_0
+# is within noise of fp16; Q3_K_M is the one quant tier with a measured
+# quality drop (it is what mangled hands and anatomy), so it is only the
+# last resort. The fp8_scaled Comfy-Org repack sits in between.
+WAN_T2V_GGUF_HIGH = "Wan2.2-T2V-A14B-HighNoise-Q8_0.gguf"
+WAN_T2V_GGUF_LOW = "Wan2.2-T2V-A14B-LowNoise-Q8_0.gguf"
 WAN_T2V_FP8_HIGH = "video/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors"
 WAN_T2V_FP8_LOW = "video/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors"
+WAN_T2V_GGUF_Q3_HIGH = "Wan2.2-T2V-A14B-HighNoise-Q3_K_M.gguf"
+WAN_T2V_GGUF_Q3_LOW = "Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf"
+WAN_T2V_EXPERT_PAIRS = [
+    (WAN_T2V_GGUF_HIGH, WAN_T2V_GGUF_LOW),
+    (WAN_T2V_FP8_HIGH, WAN_T2V_FP8_LOW),
+    (WAN_T2V_GGUF_Q3_HIGH, WAN_T2V_GGUF_Q3_LOW),
+]
 WAN_I2V_FP8_HIGH = "video/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
 WAN_I2V_FP8_LOW = "video/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
 # I2V Lightning pair is the Seko-V1 release — filenames differ from both the
@@ -46,13 +95,38 @@ WAN_I2V_FP8_LOW = "video/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
 WAN_I2V_LIGHTNING_HIGH_LORA = "wan2.2_i2v_lightx2v_4steps_seko_v1_high_noise.safetensors"
 WAN_I2V_LIGHTNING_LOW_LORA = "wan2.2_i2v_lightx2v_4steps_seko_v1_low_noise.safetensors"
 
+# HunyuanVideo 1.5 text encoder (Qwen2.5-VL 7B): the full-precision file when
+# present, else the fp8_scaled repack.
+HV15_TEXT_ENCODERS = [
+    "video/qwen_2.5_vl_7b.safetensors",
+    "video/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+]
+
 
 def _model_exists(rel: str) -> bool:
     return os.path.exists(os.path.join(_models_dir(), rel))
 
 
-def wan_t2v_fp8_available() -> bool:
-    return _model_exists(WAN_T2V_FP8_HIGH) and _model_exists(WAN_T2V_FP8_LOW)
+def _first_on_disk(candidates: List[str]) -> Optional[str]:
+    return next((c for c in candidates if _model_exists(c)), None)
+
+
+def _first_pair_on_disk(pairs, subdir: str = "") -> Optional[tuple]:
+    for high, low in pairs:
+        if _model_exists(os.path.join(subdir, high)) and _model_exists(os.path.join(subdir, low)):
+            return high, low
+    return None
+
+
+def wan_t2v_expert_pair() -> tuple:
+    """(high, low) Wan2.2 T2V expert files to load: the best pair fully on
+    disk, else the Q8_0 GGUF names (the catalog gate hides the workflow in
+    that case, so the names only matter to a direct builder call)."""
+    return _first_pair_on_disk(WAN_T2V_EXPERT_PAIRS) or WAN_T2V_EXPERT_PAIRS[0]
+
+
+def hv15_text_encoder() -> str:
+    return _first_on_disk(HV15_TEXT_ENCODERS) or HV15_TEXT_ENCODERS[-1]
 
 
 def wan_i2v_lightning_available() -> bool:
@@ -67,11 +141,26 @@ WAN_DEFAULT_NEGATIVE = (
 )
 
 
+def wan_lightning_pair() -> Optional[tuple]:
+    """(high_lora, low_lora) filenames of the newest Wan2.2 T2V Lightning
+    pair fully present in models/loras, or None. The ComfyUI graph and the
+    native sd-server prompt splice both read this, so the two engines always
+    load the same release."""
+    return _first_pair_on_disk(WAN_LIGHTNING_PAIRS, "loras")
+
+
 def wan_lightning_available() -> bool:
-    """Both Wan2.2 Lightning expert LoRAs present in models/loras."""
-    loras_dir = os.path.join(_models_dir(), "loras")
-    return (os.path.exists(os.path.join(loras_dir, WAN_LIGHTNING_HIGH_LORA))
-            and os.path.exists(os.path.join(loras_dir, WAN_LIGHTNING_LOW_LORA)))
+    """A complete Wan2.2 Lightning expert LoRA pair is in models/loras."""
+    return wan_lightning_pair() is not None
+
+
+def _expert_loader(rel: str) -> Dict[str, Any]:
+    """Loader node for a diffusion expert: the ComfyUI-GGUF loader for .gguf
+    quants, the core UNETLoader for safetensors."""
+    if rel.lower().endswith(".gguf"):
+        return {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": _mp(rel)}}
+    return {"class_type": "UNETLoader",
+            "inputs": {"unet_name": _mp(rel), "weight_dtype": "default"}}
 
 
 def wan22_t2v_graph(
@@ -85,42 +174,32 @@ def wan22_t2v_graph(
     steps: int = 20,
     cfg: float = 3.5,
 ) -> Dict[str, Any]:
-    """Wan2.2 T2V A14B (dual high/low-noise GGUF experts), per the bundled
+    """Wan2.2 T2V A14B (dual high/low-noise experts), per the bundled
     video_wan2_2_14B_t2v template: the high-noise expert denoises the first
     half of the schedule, the low-noise expert finishes.
 
-    When the lightx2v 4-step distillation LoRAs are present in models/loras
-    they're wired in automatically (steps 4, cfg 1 per the template's LoRA
-    branch) — same quality class, ~5x faster."""
-    lightning = wan_lightning_available()
+    The experts are the best pair on disk (Q8_0 GGUF > fp8_scaled > Q3_K_M
+    GGUF, see WAN_T2V_EXPERT_PAIRS). When a lightx2v 4-step distillation LoRA
+    pair is present in models/loras it is wired in automatically (steps 4,
+    cfg 1 per the template's LoRA branch) — same quality class, ~5x faster."""
+    lightning = wan_lightning_pair()
     if lightning:
         steps, cfg = 4, 1.0
     half = max(1, steps // 2)
     negative = negative_prompt or WAN_DEFAULT_NEGATIVE
-    if wan_t2v_fp8_available():
-        # fp8_scaled experts (safetensors, core UNETLoader) — markedly cleaner
-        # hands/anatomy than the Q3 GGUFs; same dual-expert wiring.
-        high_loader = {"class_type": "UNETLoader",
-                       "inputs": {"unet_name": "video\\wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
-                                  "weight_dtype": "default"}}
-        low_loader = {"class_type": "UNETLoader",
-                      "inputs": {"unet_name": "video\\wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
-                                 "weight_dtype": "default"}}
-    else:
-        high_loader = {"class_type": "UnetLoaderGGUF",
-                       "inputs": {"unet_name": "Wan2.2-T2V-A14B-HighNoise-Q3_K_M.gguf"}}
-        low_loader = {"class_type": "UnetLoaderGGUF",
-                      "inputs": {"unet_name": "Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf"}}
+    high_expert, low_expert = wan_t2v_expert_pair()
+    high_loader = _expert_loader(high_expert)
+    low_loader = _expert_loader(low_expert)
     graph = {
         "1": {"class_type": "CLIPLoaderGGUF",
-              "inputs": {"clip_name": "video\\umt5-xxl-encoder-Q8_0.gguf", "type": "wan"}},
+              "inputs": {"clip_name": _mp("video/umt5-xxl-encoder-Q8_0.gguf"), "type": "wan"}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": prompt}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": negative}},
         "4": high_loader,
         "5": low_loader,
         "6": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["4", 0], "shift": 5.0}},
         "7": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["5", 0], "shift": 5.0}},
-        "8": {"class_type": "VAELoader", "inputs": {"vae_name": "video\\wan_2.1_vae.safetensors"}},
+        "8": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("video/wan_2.1_vae.safetensors")}},
         "9": {"class_type": "EmptyHunyuanLatentVideo",
               "inputs": {"width": width, "height": height, "length": video_frames, "batch_size": 1}},
         "10": {"class_type": "KSamplerAdvanced", "inputs": {
@@ -144,10 +223,11 @@ def wan22_t2v_graph(
         }},
     }
     if lightning:
+        high_lora, low_lora = lightning
         graph["21"] = {"class_type": "LoraLoaderModelOnly",
-                       "inputs": {"model": ["4", 0], "lora_name": WAN_LIGHTNING_HIGH_LORA, "strength_model": 1.0}}
+                       "inputs": {"model": ["4", 0], "lora_name": high_lora, "strength_model": 1.0}}
         graph["22"] = {"class_type": "LoraLoaderModelOnly",
-                       "inputs": {"model": ["5", 0], "lora_name": WAN_LIGHTNING_LOW_LORA, "strength_model": 1.0}}
+                       "inputs": {"model": ["5", 0], "lora_name": low_lora, "strength_model": 1.0}}
         graph["6"]["inputs"]["model"] = ["21", 0]
         graph["7"]["inputs"]["model"] = ["22", 0]
     return graph
@@ -180,18 +260,18 @@ def wan22_i2v_graph(
     negative = negative_prompt or WAN_DEFAULT_NEGATIVE
     graph = {
         "1": {"class_type": "CLIPLoaderGGUF",
-              "inputs": {"clip_name": "video\\umt5-xxl-encoder-Q8_0.gguf", "type": "wan"}},
+              "inputs": {"clip_name": _mp("video/umt5-xxl-encoder-Q8_0.gguf"), "type": "wan"}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": prompt}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": negative}},
         "4": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": "video\\wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+              "inputs": {"unet_name": _mp("video/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"),
                          "weight_dtype": "default"}},
         "5": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": "video\\wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+              "inputs": {"unet_name": _mp("video/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"),
                          "weight_dtype": "default"}},
         "6": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["4", 0], "shift": 5.0}},
         "7": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["5", 0], "shift": 5.0}},
-        "8": {"class_type": "VAELoader", "inputs": {"vae_name": "video\\wan_2.1_vae.safetensors"}},
+        "8": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("video/wan_2.1_vae.safetensors")}},
         "9": {"class_type": "LoadImage", "inputs": {"image": init_image}},
         "10": {"class_type": "WanImageToVideo", "inputs": {
             "positive": ["2", 0], "negative": ["3", 0], "vae": ["8", 0],
@@ -249,16 +329,16 @@ def hunyuanvideo15_i2v_graph(
     height = max(256, int(height) // 16 * 16)
     return {
         "1": {"class_type": "DualCLIPLoader", "inputs": {
-            "clip_name1": "video\\qwen_2.5_vl_7b_fp8_scaled.safetensors",
-            "clip_name2": "video\\byt5_small_glyphxl_fp16.safetensors",
+            "clip_name1": _mp(hv15_text_encoder()),
+            "clip_name2": _mp("video/byt5_small_glyphxl_fp16.safetensors"),
             "type": "hunyuan_video_15",
         }},
         "2": {"class_type": "UNETLoader", "inputs": {
-            "unet_name": "video\\hunyuanvideo1.5_720p_i2v_cfg_distilled_fp8_scaled.safetensors",
+            "unet_name": _mp("video/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp8_scaled.safetensors"),
             "weight_dtype": "default",
         }},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "video\\hunyuanvideo15_vae_fp16.safetensors"}},
-        "4": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "video\\sigclip_vision_patch14_384.safetensors"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("video/hunyuanvideo15_vae_fp16.safetensors")}},
+        "4": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": _mp("video/sigclip_vision_patch14_384.safetensors")}},
         "5": {"class_type": "LoadImage", "inputs": {"image": init_image}},
         "6": {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["4", 0], "image": ["5", 0], "crop": "center"}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": prompt}},
@@ -320,12 +400,12 @@ def ltx2_fast_t2v_graph(
     return {
         "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": unet}},
         "2": {"class_type": "LTXAVTextEncoderLoader", "inputs": {
-            "text_encoder": "video\\gemma_3_12B_it_fp4_mixed.safetensors",
-            "ckpt_name": "video\\ltx-2-19b-embeddings_connector_distill_bf16.safetensors",
+            "text_encoder": _mp("video/gemma_3_12B_it_fp4_mixed.safetensors"),
+            "ckpt_name": _mp("video/ltx-2-19b-embeddings_connector_distill_bf16.safetensors"),
             "device": "default",
         }},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "video\\LTX2_video_vae_bf16.safetensors"}},
-        "4": {"class_type": "LTXVAudioVAELoader", "inputs": {"ckpt_name": "video\\LTX2_audio_vae_bf16.safetensors"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("video/LTX2_video_vae_bf16.safetensors")}},
+        "4": {"class_type": "LTXVAudioVAELoader", "inputs": {"ckpt_name": _mp("video/LTX2_audio_vae_bf16.safetensors")}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": negative_prompt or ""}},
         "7": {"class_type": "LTXVConditioning",
@@ -395,6 +475,71 @@ def flux2_klein_t2i_graph(
     }
 
 
+# FLUX.2-dev 32B companions. Text encoder: the bf16 Mistral-Small-3 repack
+# when present, else the fp8 one. The Turbo LoRA (Comfy-Org/flux2-dev,
+# split_files/loras) is the 8-step distillation the bundled template's
+# "turbo" switch loads.
+FLUX2_DEV_UNET = "flux2-dev-Q8_0.gguf"
+FLUX2_DEV_TEXT_ENCODERS = [
+    "image/mistral_3_small_flux2_bf16.safetensors",
+    "image/mistral_3_small_flux2_fp8.safetensors",
+]
+FLUX2_TURBO_LORA = "Flux_2-Turbo-LoRA_comfyui.safetensors"
+
+
+def flux2_dev_t2i_graph(
+    prompt: str,
+    negative_prompt: str = "",
+    width: int = 1024,
+    height: int = 1024,
+    seed: int = 0,
+    steps: Optional[int] = None,
+    guidance: float = 4.0,
+    turbo: bool = False,
+) -> Dict[str, Any]:
+    """FLUX.2-dev 32B (GGUF diffusion + Mistral-Small-3 text encoder), per the
+    text-to-image path of the bundled image_flux2 template: FluxGuidance 4 on
+    the prompt conditioning into a BasicGuider (dev is guidance-distilled —
+    there is no negative pass, so negative_prompt is accepted but unused),
+    Flux2Scheduler + euler. The template's reference-image branch is dropped.
+
+    turbo=True is the template's turbo switch: the Turbo LoRA is applied and
+    the schedule drops from 20 steps to 8 (an explicit `steps` still wins).
+    It is its own catalog entry rather than automatic — full-schedule dev is
+    the quality tier people pick this model for."""
+    width = max(256, int(width) // 16 * 16)
+    height = max(256, int(height) // 16 * 16)
+    if not steps:
+        steps = 8 if turbo else 20
+    te = _first_on_disk(FLUX2_DEV_TEXT_ENCODERS) or FLUX2_DEV_TEXT_ENCODERS[0]
+    graph = {
+        "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": _mp(FLUX2_DEV_UNET)}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": _mp(te), "type": "flux2", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
+        "4": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
+        "5": {"class_type": "FluxGuidance",
+              "inputs": {"conditioning": ["4", 0], "guidance": float(guidance)}},
+        "6": {"class_type": "EmptyFlux2LatentImage",
+              "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "7": {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}},
+        "8": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "9": {"class_type": "Flux2Scheduler", "inputs": {"steps": int(steps), "width": width, "height": height}},
+        "10": {"class_type": "BasicGuider", "inputs": {"model": ["1", 0], "conditioning": ["5", 0]}},
+        "11": {"class_type": "SamplerCustomAdvanced", "inputs": {
+            "noise": ["7", 0], "guider": ["10", 0], "sampler": ["8", 0],
+            "sigmas": ["9", 0], "latent_image": ["6", 0],
+        }},
+        "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}},
+        "13": {"class_type": "SaveImage", "inputs": {"images": ["12", 0], "filename_prefix": "aegis/flux2dev"}},
+    }
+    if turbo:
+        graph["20"] = {"class_type": "LoraLoaderModelOnly",
+                       "inputs": {"model": ["1", 0], "lora_name": FLUX2_TURBO_LORA, "strength_model": 1.0}}
+        graph["10"]["inputs"]["model"] = ["20", 0]
+    return graph
+
+
 def zimage_turbo_t2i_graph(
     prompt: str,
     negative_prompt: str = "",
@@ -411,10 +556,10 @@ def zimage_turbo_t2i_graph(
     height = max(256, int(height) // 16 * 16)
     return {
         "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": "image\\z_image_turbo_bf16.safetensors", "weight_dtype": "default"}},
+              "inputs": {"unet_name": _mp("image/z_image_turbo_bf16.safetensors"), "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": "image\\qwen_3_4b.safetensors", "type": "lumina2", "device": "default"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "image\\ae.safetensors"}},
+              "inputs": {"clip_name": _mp("image/qwen_3_4b.safetensors"), "type": "lumina2", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("image/ae.safetensors")}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
         "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
         "6": {"class_type": "EmptySD3LatentImage",
@@ -459,10 +604,10 @@ def chroma_hd_t2i_graph(
     height = max(256, int(height) // 16 * 16)
     return {
         "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": "image\\Chroma1-HD.safetensors", "weight_dtype": "default"}},
+              "inputs": {"unet_name": _mp("image/Chroma1-HD.safetensors"), "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": "image\\t5xxl_fp8_e4m3fn_scaled.safetensors", "type": "chroma"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "image\\ae.safetensors"}},
+              "inputs": {"clip_name": _mp("image/t5xxl_fp8_e4m3fn_scaled.safetensors"), "type": "chroma"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("image/ae.safetensors")}},
         "4": {"class_type": "T5TokenizerOptions",
               "inputs": {"clip": ["2", 0], "min_padding": 0, "min_length": 0}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 0], "text": prompt}},
@@ -509,7 +654,7 @@ def noobai_vpred_t2i_graph(
     height = max(512, int(height) // 64 * 64)
     return {
         "1": {"class_type": "CheckpointLoaderSimple",
-              "inputs": {"ckpt_name": "image\\NoobAI-XL-Vpred-v1.0.safetensors"}},
+              "inputs": {"ckpt_name": _mp("image/NoobAI-XL-Vpred-v1.0.safetensors")}},
         "2": {"class_type": "ModelSamplingDiscrete",
               "inputs": {"model": ["1", 0], "sampling": "v_prediction", "zsnr": True}},
         "3": {"class_type": "RescaleCFG", "inputs": {"model": ["2", 0], "multiplier": 0.7}},
@@ -546,10 +691,10 @@ def krea2_turbo_t2i_graph(
     height = max(256, int(height) // 16 * 16)
     return {
         "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": "image\\krea2_turbo_mxfp8.safetensors", "weight_dtype": "default"}},
+              "inputs": {"unet_name": _mp("image/krea2_turbo_mxfp8.safetensors"), "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": "image\\qwen3vl_4b_fp8_scaled.safetensors", "type": "krea2", "device": "default"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen-image\\qwen_image_vae.safetensors"}},
+              "inputs": {"clip_name": _mp("image/qwen3vl_4b_fp8_scaled.safetensors"), "type": "krea2", "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("qwen-image/qwen_image_vae.safetensors")}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": prompt}},
         "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
         "6": {"class_type": "EmptyLatentImage",
@@ -583,11 +728,11 @@ def ideogram4_t2i_graph(
     height = max(256, (int(height) + 15) // 16 * 16)
     return {
         "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": "image\\ideogram4_fp8_scaled.safetensors", "weight_dtype": "default"}},
+              "inputs": {"unet_name": _mp("image/ideogram4_fp8_scaled.safetensors"), "weight_dtype": "default"}},
         "2": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": "image\\ideogram4_unconditional_fp8_scaled.safetensors", "weight_dtype": "default"}},
+              "inputs": {"unet_name": _mp("image/ideogram4_unconditional_fp8_scaled.safetensors"), "weight_dtype": "default"}},
         "3": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": "image\\qwen3vl_8b_fp8_scaled.safetensors", "type": "ideogram4", "device": "default"}},
+              "inputs": {"clip_name": _mp("image/qwen3vl_8b_fp8_scaled.safetensors"), "type": "ideogram4", "device": "default"}},
         "4": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}},
         "6": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}},
@@ -628,24 +773,25 @@ def hunyuanvideo15_t2v_graph(
     1080p latent-super-resolution second stage is skipped, same as the Wan
     and LTX builders render at target size directly.
 
-    weight_dtype fp8_e4m3fn casts the fp16 checkpoint at load (the
-    template's own guidance for sub-32GB cards): 8.3GB resident instead of
-    16.6GB, leaving 720p×121-frame activations comfortable on the 24GB 4090.
+    On sub-32GB cards weight_dtype fp8_e4m3fn casts the fp16 checkpoint at
+    load (the template's own guidance): 8.3GB resident instead of 16.6GB,
+    leaving 720p×121-frame activations comfortable on a 24GB 4090. A
+    big-memory GPU (_big_memory_gpu) runs the checkpoint as stored.
     The template ships 20 steps as its speed/quality default (50 = original
     quality); shift 7 / cfg 6 / euler+simple per its sampling chain."""
     width = max(256, int(width) // 16 * 16)
     height = max(256, int(height) // 16 * 16)
     return {
         "1": {"class_type": "DualCLIPLoader", "inputs": {
-            "clip_name1": "video\\qwen_2.5_vl_7b_fp8_scaled.safetensors",
-            "clip_name2": "video\\byt5_small_glyphxl_fp16.safetensors",
+            "clip_name1": _mp(hv15_text_encoder()),
+            "clip_name2": _mp("video/byt5_small_glyphxl_fp16.safetensors"),
             "type": "hunyuan_video_15",
         }},
         "2": {"class_type": "UNETLoader", "inputs": {
-            "unet_name": "video\\hunyuanvideo1.5_720p_t2v_fp16.safetensors",
-            "weight_dtype": "fp8_e4m3fn",
+            "unet_name": _mp("video/hunyuanvideo1.5_720p_t2v_fp16.safetensors"),
+            "weight_dtype": "default" if _big_memory_gpu() else "fp8_e4m3fn",
         }},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "video\\hunyuanvideo15_vae_fp16.safetensors"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("video/hunyuanvideo15_vae_fp16.safetensors")}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": prompt}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": negative_prompt or ""}},
         "6": {"class_type": "EmptyHunyuanVideo15Latent",
@@ -701,13 +847,13 @@ def acestep15_song_graph(
     seconds = max(5.0, min(600.0, float(seconds)))
     graph = {
         "1": {"class_type": "UNETLoader", "inputs": {
-            "unet_name": "audio\\acestep_v1.5_xl_turbo_bf16.safetensors",
+            "unet_name": _mp("audio/acestep_v1.5_xl_turbo_bf16.safetensors"),
             "weight_dtype": "default",
         }},
-        "2": {"class_type": "VAELoader", "inputs": {"vae_name": "audio\\ace_1.5_vae.safetensors"}},
+        "2": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("audio/ace_1.5_vae.safetensors")}},
         "3": {"class_type": "DualCLIPLoader", "inputs": {
-            "clip_name1": "audio\\qwen_0.6b_ace15.safetensors",
-            "clip_name2": "audio\\qwen_4b_ace15.safetensors",
+            "clip_name1": _mp("audio/qwen_0.6b_ace15.safetensors"),
+            "clip_name2": _mp("audio/qwen_4b_ace15.safetensors"),
             "type": "ace",
         }},
         "4": {"class_type": "TextEncodeAceStepAudio1.5", "inputs": {
@@ -991,8 +1137,8 @@ def supir_restore_graph(
         # v1 loader reads the SDXL checkpoint itself — the v2 fused path fails
         # to extract CLIP-L from RealVisXL ("Failed to load first clip model").
         "4": {"class_type": "SUPIR_model_loader", "inputs": {
-            "supir_model": "image\\SUPIR-v0Q_fp16.safetensors",
-            "sdxl_model": "image\\RealVisXL_V4.0.safetensors",
+            "supir_model": _mp("image/SUPIR-v0Q_fp16.safetensors"),
+            "sdxl_model": _mp("image/RealVisXL_V4.0.safetensors"),
             "fp8_unet": False, "diffusion_dtype": "auto",
         }},
         "5": {"class_type": "SUPIR_first_stage", "inputs": {
@@ -1041,17 +1187,17 @@ def qwen_controlnet_redraw_graph(
     negative prompt is moot at cfg 1 (distilled)."""
     return {
         "1": {"class_type": "CLIPLoaderGGUF",
-              "inputs": {"clip_name": "qwen-image\\Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf", "type": "qwen_image"}},
+              "inputs": {"clip_name": _mp("qwen-image/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"), "type": "qwen_image"}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": prompt or "a high quality detailed photograph"}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 0], "text": ""}},
         "4": {"class_type": "UnetLoaderGGUF",
-              "inputs": {"unet_name": "qwen-image\\qwen-image-2512-Q8_0.gguf"}},
+              "inputs": {"unet_name": _mp("qwen-image/qwen-image-2512-Q8_0.gguf")}},
         "5": {"class_type": "LoraLoaderModelOnly", "inputs": {
             "model": ["4", 0], "lora_name": "Qwen-Image-Lightning-8steps-V2.0-bf16.safetensors",
             "strength_model": 1.0,
         }},
         "6": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["5", 0], "shift": 3.1}},
-        "7": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen-image\\qwen_image_vae.safetensors"}},
+        "7": {"class_type": "VAELoader", "inputs": {"vae_name": _mp("qwen-image/qwen_image_vae.safetensors")}},
         "8": {"class_type": "LoadImage", "inputs": {"image": image_file}},
         "9": {"class_type": "FluxKontextImageScale", "inputs": {"image": ["8", 0]}},
         "16": {"class_type": "Canny",
@@ -1229,17 +1375,19 @@ _LTX2_COMPANIONS = [
 
 # Aegis-facing ComfyUI model catalog. required_files are relative to models/ —
 # an entry is only offered when every file exists, so a missing companion
-# shows up as an absent option instead of a mid-render crash.
+# shows up as an absent option instead of a mid-render crash. An optional
+# "any_of" lists interchangeable alternatives (e.g. weight tiers of the same
+# model): one complete group must exist on top of required_files.
 COMFY_VIDEO_MODELS: Dict[str, Dict[str, Any]] = {
     "comfy-wan2.2-t2v": {
         "builder": wan22_t2v_graph,
         "label": "Wan2.2 T2V 14B (ComfyUI)",
         "required_files": [
-            "Wan2.2-T2V-A14B-HighNoise-Q3_K_M.gguf",
-            "Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf",
             "video/umt5-xxl-encoder-Q8_0.gguf",
             "video/wan_2.1_vae.safetensors",
         ],
+        # plus one complete high/low expert pair, whichever tier is on disk
+        "any_of": [list(p) for p in WAN_T2V_EXPERT_PAIRS],
     },
     "comfy-wan2.2-i2v": {
         "builder": wan22_i2v_graph,
@@ -1256,21 +1404,21 @@ COMFY_VIDEO_MODELS: Dict[str, Dict[str, Any]] = {
         "label": "HunyuanVideo 1.5 720p T2V (ComfyUI)",
         "required_files": [
             "video/hunyuanvideo1.5_720p_t2v_fp16.safetensors",
-            "video/qwen_2.5_vl_7b_fp8_scaled.safetensors",
             "video/byt5_small_glyphxl_fp16.safetensors",
             "video/hunyuanvideo15_vae_fp16.safetensors",
         ],
+        "any_of": [[te] for te in HV15_TEXT_ENCODERS],
     },
     "comfy-hunyuanvideo1.5-i2v": {
         "builder": hunyuanvideo15_i2v_graph,
         "label": "HunyuanVideo 1.5 720p I2V — animate a still (ComfyUI)",
         "required_files": [
             "video/hunyuanvideo1.5_720p_i2v_cfg_distilled_fp8_scaled.safetensors",
-            "video/qwen_2.5_vl_7b_fp8_scaled.safetensors",
             "video/byt5_small_glyphxl_fp16.safetensors",
             "video/hunyuanvideo15_vae_fp16.safetensors",
             "video/sigclip_vision_patch14_384.safetensors",
         ],
+        "any_of": [[te] for te in HV15_TEXT_ENCODERS],
     },
     "comfy-ltx2-19b-fast": {
         "builder": lambda **kw: ltx2_fast_t2v_graph(unet="ltx2-phr00tmerge-sfw-v5-Q5_0.gguf", **kw),
@@ -1293,6 +1441,23 @@ COMFY_IMAGE_MODELS: Dict[str, Dict[str, Any]] = {
             "qwen_3_8b_fp8mixed.safetensors",
             "flux2-vae.safetensors",
         ],
+    },
+    "comfy-flux2-dev": {
+        "builder": flux2_dev_t2i_graph,
+        "label": "FLUX.2-dev 32B — top quality, slow (ComfyUI)",
+        "required_files": [FLUX2_DEV_UNET, "flux2-vae.safetensors"],
+        "any_of": [[te] for te in FLUX2_DEV_TEXT_ENCODERS],
+        # 32B diffusion + a 24B text encoder: a cold 20-step render can run
+        # well past the default 10-minute inline budget on an iGPU.
+        "budget_s": 1800,
+    },
+    "comfy-flux2-dev-turbo": {
+        "builder": lambda **kw: flux2_dev_t2i_graph(turbo=True, **kw),
+        "label": "FLUX.2-dev 32B Turbo — 8-step (ComfyUI)",
+        "required_files": [FLUX2_DEV_UNET, "flux2-vae.safetensors",
+                           "loras/" + FLUX2_TURBO_LORA],
+        "any_of": [[te] for te in FLUX2_DEV_TEXT_ENCODERS],
+        "budget_s": 1200,
     },
     "comfy-z-image-turbo": {
         "builder": zimage_turbo_t2i_graph,
@@ -1339,11 +1504,33 @@ COMFY_IMAGE_MODELS: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _any_of_group(spec: Dict[str, Any], root: str) -> Optional[List[str]]:
+    """The first "any_of" alternative whose files are all on disk ([] when the
+    spec has no alternatives, None when it has some and none is complete)."""
+    groups = spec.get("any_of") or []
+    if not groups:
+        return []
+    for group in groups:
+        if all(os.path.exists(os.path.join(root, f)) for f in group):
+            return list(group)
+    return None
+
+
+def spec_files(spec: Dict[str, Any]) -> List[str]:
+    """Every models/-relative file a catalog entry will actually load:
+    required_files plus the "any_of" alternative that is on disk."""
+    return list(spec["required_files"]) + (_any_of_group(spec, _models_dir()) or [])
+
+
 def _available(catalog: Dict[str, Dict[str, Any]]) -> List[str]:
+    """Catalog ids that can run: every required file exists, and when the
+    entry lists "any_of" alternatives (interchangeable weight tiers) at least
+    one alternative is complete."""
     root = _models_dir()
     return [
         mid for mid, spec in catalog.items()
         if all(os.path.exists(os.path.join(root, f)) for f in spec["required_files"])
+        and _any_of_group(spec, root) is not None
     ]
 
 

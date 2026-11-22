@@ -142,7 +142,18 @@ class ChatProcessor:
         vector_scores = {}
 
         if has_vector:
-            results = self.memory_vector.search(message, k=min(k * 3, 20))
+            fetch = min(k * 3, 20)
+            # The vector index is one collection shared by every account and
+            # is searched before the owner filter below. When it holds more
+            # than this user's memories, widen the net in proportion so
+            # someone else's entries cannot crowd this user's out.
+            try:
+                total = int(self.memory_vector.count())
+                if total > N > 0:
+                    fetch = min(fetch * -(-total // N), 200)
+            except Exception:
+                pass
+            results = self.memory_vector.search(message, k=fetch)
             mem_by_id = {m["id"]: m for m in mem_entries}
             for r in results:
                 if r["memory_id"] in mem_by_id:
@@ -209,6 +220,7 @@ class ChatProcessor:
         agent_mode: bool = False,
         incognito: bool = False,
         use_skills: bool = True,
+        use_profile: Optional[bool] = None,
     ) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]], List[Dict[str, str]]]:
         """Build the context preface for LLM calls.
 
@@ -242,10 +254,34 @@ class ChatProcessor:
             "content": UNTRUSTED_CONTEXT_POLICY,
         })
 
-        # Memory: pinned (always included) + extended (RAG-retrieved when relevant)
+        # Memory: the user's profile (who they are — every turn), then pinned
+        # (always included) + extended (RAG-retrieved when relevant)
         self._last_used_memories = []  # track what was injected
+        mem_entries = None
+        if use_profile is None:
+            use_profile = use_memory
+        if use_profile and not incognito:
+            # Ahead of the per-turn recall on purpose: this block is the same
+            # bytes from one turn to the next, so it extends the prefix a
+            # local backend can keep cached.
+            try:
+                from services.memory import profile as _profile
+                mem_entries = self.memory_manager.load(owner=owner)
+                _profile_text = _profile.render_for_prompt(
+                    _profile.get_profile(owner, self.memory_manager, memories=mem_entries)
+                )
+                if _profile_text:
+                    preface.append(untrusted_context_message(_profile.SOURCE_LABEL, _profile_text))
+                    self._last_used_memories.append({
+                        "text": "Your profile: who you are and what you are into (/me shows it)",
+                        "category": "profile", "type": "profile",
+                    })
+            except Exception as _e:
+                logger.debug("User profile not added to the context: %s", _e)
+                mem_entries = None
         if use_memory:
-            mem_entries = self.memory_manager.load(owner=owner)
+            if mem_entries is None:
+                mem_entries = self.memory_manager.load(owner=owner)
 
             pinned = [m for m in mem_entries if m.get("pinned")]
             extended = [m for m in mem_entries if not m.get("pinned")]

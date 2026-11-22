@@ -326,6 +326,10 @@ _ADMIN_TOOLS = {
     "serve_preset",
     "stop_served_model",
     "cancel_download",
+    "manage_projects",
+    "manage_apps",
+    "manage_hosts",
+    "delegate_agent",
 }
 
 
@@ -539,6 +543,13 @@ async def _direct_fallback(
         "LINES": "40",
         "HOME": _AGENT_WORKDIR,
     }
+    try:
+        # git identity, GitHub login and the user's tool managers, which the
+        # relocated HOME above would otherwise hide from the agent's shell.
+        from services.workbench.common import agent_shell_env
+        _subproc_env.update(agent_shell_env())
+    except Exception:
+        pass
 
     try:
         ctx = {
@@ -576,6 +587,16 @@ async def _document_tool_dispatch(
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+def _session_project(session_id: Optional[str]) -> Optional[str]:
+    if not session_id:
+        return None
+    try:
+        from services.workbench import projects
+        return projects.bound_workspace(session_id)
+    except Exception:
+        return None
+
+
 async def execute_tool_block(
     block: Any,
     session_id: Optional[str] = None,
@@ -591,7 +612,11 @@ async def execute_tool_block(
     cwd confine to it) for the duration of this call, then delegate. Reset on the
     way out so the binding never leaks to the next tool call.
     """
-    token = _active_workspace.set(workspace or None)
+    # A project opened in this chat (manage_projects) outranks the browser's
+    # workspace setting: the binding is per chat and survives restarts, and it
+    # is looked up per call so a project opened mid-run applies to the very
+    # next tool. Only an administrator can create a binding.
+    token = _active_workspace.set(_session_project(session_id) or workspace or None)
     try:
         output = await _execute_tool_block_impl(
             block,
@@ -772,6 +797,13 @@ async def _execute_tool_block_impl(
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb) \
+            or {"error": f"{tool}: execution failed", "exit_code": 1}
+    elif tool in ("manage_projects", "manage_apps", "manage_hosts", "delegate_agent"):
+        # Workbench tools need the chat (project binding, background jobs) and
+        # the owner (model choice for aider).
+        desc = f"{tool}: {' '.join(content.split())[:80]}"
+        result = await _direct_fallback(tool, content, progress_cb=progress_cb,
+                                        session_id=session_id, owner=owner) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "manage_bg_jobs":
         # Inspect/kill detached `bash` jobs; needs session_id to scope to chat.

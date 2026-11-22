@@ -17,7 +17,7 @@ let selectMode = false;
 let selectedIds = new Set();
 
 
-const MEMORY_CATEGORIES = ['fact', 'identity', 'preference', 'contact', 'project', 'goal', 'task'];
+const MEMORY_CATEGORIES = ['fact', 'identity', 'preference', 'interest', 'contact', 'project', 'goal', 'task'];
 
 // Sort-option icons for the custom Memory sort picker (and Skills picker
 // once it reuses the same markup). Each value maps to a 13px Feather-style

@@ -11950,6 +11950,10 @@ textarea.memory-add-input {
   background: color-mix(in srgb, #98c379 15%, transparent);
   color: #98c379;
 }
+.memory-cat-interest {
+  background: color-mix(in srgb, #56b6c2 15%, transparent);
+  color: #56b6c2;
+}
 .memory-cat-project {
   background: color-mix(in srgb, var(--hl-string) 15%, transparent);
   color: var(--hl-string);

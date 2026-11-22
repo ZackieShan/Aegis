@@ -608,6 +608,15 @@ def setup_chat_routes(
         workspace, workspace_rejected = _resolve_request_workspace(
             request, form_data.get("workspace")
         )
+        # A project opened in this chat (manage_projects / /project) wins over
+        # the browser-wide workspace setting.
+        try:
+            from services.workbench import projects as _wb_projects
+            _bound = _wb_projects.bound_workspace(str(session or ""))
+            if _bound:
+                workspace, workspace_rejected = _bound, ""
+        except Exception:
+            pass
         # Plan mode is a modifier on agent mode — it only makes sense with tools.
         if plan_mode:
             chat_mode = "agent"

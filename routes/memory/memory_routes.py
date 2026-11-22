@@ -150,6 +150,82 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         user = _owner(request)
         return {"memory": memory_manager.load(owner=user)}
 
+    # ── Profile: who the caller is, written from their own memories ─────
+    # (Registered ahead of the /{memory_id} wildcards at the end.)
+
+    def _profile_payload(user, current, count):
+        from services.memory import profile as _profile
+        from routes.prefs_routes import _load_for_user
+        prefs = _load_for_user(user) or {}
+        return {
+            "profile": _profile.public_view(current),
+            "markdown": _profile.to_markdown(current),
+            "memories": count,
+            "using": bool(prefs.get("memory_enabled", True)),
+            "learning": bool(prefs.get("auto_memory", True)),
+        }
+
+    @router.get("/profile")
+    def api_get_profile(request: Request):
+        """The caller's profile: who they are and what they are into."""
+        from services.memory import profile as _profile
+        user = _owner(request)
+        memories = memory_manager.load(owner=user)
+        current = _profile.get_profile(user, memory_manager, memories=memories)
+        return _profile_payload(user, current, len(memories))
+
+    @router.post("/profile/rebuild")
+    async def api_rebuild_profile(request: Request, session: str = Form(None)):
+        """Rewrite the caller's profile from their memories now.
+
+        Uses the task/utility model through the shared resolver, with the
+        given session's model as the fallback (same as /audit). Without a
+        model the profile is assembled from the memories directly.
+        """
+        from services.memory import profile as _profile
+        user = _owner(request)
+        fallback_url = fallback_model = None
+        fallback_headers = None
+        if session:
+            try:
+                sess = session_manager.get_session(session)
+                _assert_session_owner(sess, user)
+                fallback_url = sess.endpoint_url
+                fallback_model = sess.model
+                fallback_headers = sess.headers
+            except KeyError:
+                pass
+        endpoint_url, model, headers = resolve_task_endpoint(
+            fallback_url, fallback_model, fallback_headers, owner=user
+        )
+        current = await _profile.rebuild_profile(user, memory_manager, endpoint_url or "", model or "", headers)
+        payload = _profile_payload(user, current, len(memory_manager.load(owner=user)))
+        payload["ok"] = True
+        payload["written_by_model"] = current.get("source") == "model"
+        return payload
+
+    @router.delete("/profile")
+    def api_forget_profile(request: Request, memories: bool = False):
+        """Drop the caller's profile. With ``?memories=true`` also delete every
+        memory of theirs — "forget everything about me". Other accounts are
+        never touched."""
+        from services.memory import profile as _profile
+        user = _owner(request)
+        removed = 0
+        if memories:
+            mine = {m["id"] for m in memory_manager.load(owner=user)}
+            if mine:
+                memory_manager.save([m for m in memory_manager.load_all() if m["id"] not in mine])
+                removed = len(mine)
+                if memory_vector and memory_vector.healthy:
+                    for memory_id in mine:
+                        try:
+                            memory_vector.remove(memory_id)
+                        except Exception:
+                            logger.warning("memory vector remove failed for %s", memory_id, exc_info=True)
+        _profile.delete_profile(user, memory_manager)
+        return {"ok": True, "memories_removed": removed}
+
     @router.post("/search")
     def search_memories(request: Request, query: str = Form(...), session_id: str = Form(None), category: str = Form(None)):
         """Search across all memories with optional filters."""

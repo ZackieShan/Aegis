@@ -33,6 +33,7 @@ SKIP_LLAMA=0
 SKIP_SD=0
 SKIP_COMFY=0
 SKIP_TTS=0
+SKIP_SPECIESID=0
 SKIP_AIDER=0
 SKIP_NODE=0
 SKIP_BROWSER=0
@@ -40,7 +41,10 @@ NO_PACMAN=0
 APPLY_GTT=0
 FORCE=0
 
-TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/rocm7.0}"
+# rocm7.2, not rocm7.0: the HSA runtime bundled in the rocm7.0 wheels segfaults
+# at the first GPU op on current kernels (ComfyUI then crash-loops under the
+# Aegis watchdog). Override with TORCH_INDEX_URL=... if a newer index exists.
+TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/rocm7.2}"
 CPU_TORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
 LLAMACPP_REF="${LLAMACPP_REF:-master}"
 SDCPP_REF="${SDCPP_REF:-master}"
@@ -61,6 +65,7 @@ Options:
   --skip-sd          Skip stable-diffusion.cpp
   --skip-comfy       Skip ComfyUI + custom nodes
   --skip-tts         Skip chatterbox + qwen3tts venvs
+  --skip-speciesid   Skip the species-ID engine (BioCLIP, used by photo identification)
   --skip-aider       Skip the aider venv
   --skip-node        Skip portable Node.js
   --skip-browser     Skip the Playwright Chromium download
@@ -74,7 +79,7 @@ Options:
 Env overrides:
   AEGIS_ENGINE_DIR   Same as --engine-dir
   TORCH_INDEX_URL    pip index for GPU torch (default
-                     https://download.pytorch.org/whl/rocm7.0)
+                     https://download.pytorch.org/whl/rocm7.2)
   LLAMACPP_REF       git ref for ggml-org/llama.cpp (default master)
   SDCPP_REF          git ref for leejet/stable-diffusion.cpp (default master)
 EOF
@@ -90,6 +95,7 @@ while [ $# -gt 0 ]; do
     --skip-sd)      SKIP_SD=1; shift ;;
     --skip-comfy)   SKIP_COMFY=1; shift ;;
     --skip-tts)     SKIP_TTS=1; shift ;;
+    --skip-speciesid) SKIP_SPECIESID=1; shift ;;
     --skip-aider)   SKIP_AIDER=1; shift ;;
     --skip-node)    SKIP_NODE=1; shift ;;
     --skip-browser) SKIP_BROWSER=1; shift ;;
@@ -122,7 +128,9 @@ echo "Backend:    $BACKEND"
 # ---------------------------------------------------------------------------
 # 1. System packages (Arch / pacman)
 # ---------------------------------------------------------------------------
-PACMAN_PKGS="base-devel cmake git curl python python-pip vulkan-icd-loader vulkan-headers vulkan-tools glslang shaderc espeak-ng ffmpeg"
+# spirv-headers: the llama.cpp / sd.cpp Vulkan backends fail at cmake time without it.
+# kiwix-tools / zim-tools / aria2: the offline reference library (docs/offline-library.md).
+PACMAN_PKGS="base-devel cmake git curl python python-pip vulkan-icd-loader vulkan-headers vulkan-tools glslang shaderc spirv-headers espeak-ng ffmpeg kiwix-tools zim-tools aria2"
 if [ "$BACKEND" = "rocm" ]; then
   PACMAN_PKGS="$PACMAN_PKGS rocm-hip-sdk rocminfo"
 fi
@@ -187,8 +195,11 @@ else
     else
       LLAMA_GPU_FLAGS="-DGGML_VULKAN=ON"
     fi
+    # BUILD_SHARED_LIBS=OFF: the installed binaries must not depend on
+    # libllama/libggml .so files left behind in $BUILD_DIR (a default shared
+    # build installs 16KB launchers that break the moment .build is cleaned).
     cmake -S "$LLAMA_SRC" -B "$LLAMA_SRC/build" \
-      $LLAMA_GPU_FLAGS -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF
+      $LLAMA_GPU_FLAGS -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=OFF
     cmake --build "$LLAMA_SRC/build" --config Release -j "$NPROC" \
       --target llama-server llama-cli llama-quantize llama-bench
     mkdir -p "$LLAMA_BIN_DIR"
@@ -386,6 +397,45 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 6b. Species-ID engine (BioCLIP via pybioclip; photo identification).
+#     CPU torch: one photo takes ~0.4 s, and it must never compete with the
+#     chat model for GPU memory. The model + text embeddings (~5 GB) go to the
+#     Hugging Face cache on --prefetch; after that the server loads offline.
+# ---------------------------------------------------------------------------
+if [ "$SKIP_SPECIESID" -eq 1 ]; then
+  banner "Species-ID (BioCLIP) - skipped (--skip-speciesid)"
+else
+  banner "Species-ID: BioCLIP (torch index: $CPU_TORCH_INDEX_URL)"
+  SID_DIR="$ENGINE_DIR/speciesid"
+  SID_PY="$SID_DIR/venv/bin/python"
+  mkdir -p "$SID_DIR"
+  if [ ! -f "$SID_DIR/server.py" ] || [ "$FORCE" -eq 1 ]; then
+    cp "$REPO_DIR/scripts/engine-templates/speciesid-server.py" "$SID_DIR/server.py"
+    echo "  - installed $SID_DIR/server.py (vendored template)"
+  else
+    skip "speciesid/server.py"
+  fi
+  if [ -x "$SID_PY" ] && [ "$FORCE" -eq 0 ]; then
+    skip "speciesid venv"
+  else
+    python3 -m venv "$SID_DIR/venv"
+    "$SID_PY" -m pip install --quiet --upgrade pip
+    "$SID_PY" -m pip install torch torchvision --index-url "$CPU_TORCH_INDEX_URL"
+    # imports: bioclip (pulls open_clip_torch, pandas), fastapi, uvicorn,
+    # python-multipart (file upload), PIL
+    "$SID_PY" -m pip install pybioclip fastapi uvicorn python-multipart pillow
+  fi
+  # Non-fatal: with no internet right now the engine is installed but the
+  # weights are not; run the same command again later.
+  if "$SID_PY" "$SID_DIR/server.py" --prefetch; then
+    echo "  - BioCLIP model + embeddings cached"
+  else
+    warn "Species-ID weights were NOT downloaded. Run once while online:"
+    warn "  $SID_PY $SID_DIR/server.py --prefetch"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 7. Aider (coding agent, isolated venv)
 # ---------------------------------------------------------------------------
 if [ "$SKIP_AIDER" -eq 1 ]; then
@@ -396,9 +446,20 @@ else
   if [ -x "$AIDER_VENV/bin/python" ] && [ "$FORCE" -eq 0 ]; then
     skip "aider-venv"
   else
-    python3 -m venv "$AIDER_VENV"
-    "$AIDER_VENV/bin/python" -m pip install --quiet --upgrade pip
-    "$AIDER_VENV/bin/python" -m pip install --quiet aider-chat
+    # aider-chat pins wheels that do not exist for the newest CPython (3.14
+    # on current Arch). Prefer a uv-managed 3.12 venv when uv is available,
+    # and never let this optional step abort the rest of the install.
+    if command -v uv >/dev/null 2>&1; then
+      uv venv --python 3.12 --seed "$AIDER_VENV" || python3 -m venv "$AIDER_VENV"
+    else
+      python3 -m venv "$AIDER_VENV"
+    fi
+    "$AIDER_VENV/bin/python" -m pip install --quiet --upgrade pip || true
+    if ! "$AIDER_VENV/bin/python" -m pip install --quiet aider-chat; then
+      warn "aider-chat did not install on $("$AIDER_VENV/bin/python" -V 2>&1)."
+      warn "Install uv (sudo pacman -S uv) and re-run with --force, or skip"
+      warn "it with --skip-aider. Continuing with the remaining steps."
+    fi
   fi
 fi
 
@@ -476,18 +537,25 @@ fi
 banner "GTT kernel tuning (Strix Halo unified memory)"
 GTT_CONF="/etc/modprobe.d/aegis-gtt.conf"
 GTT_LINE="options ttm pages_limit=31457280 page_pool_size=15728640"
+# Omarchy boots a limine unified kernel image: plain `mkinitcpio -P` rebuilds
+# an initramfs the bootloader never loads, so the ttm options would not apply.
+if command -v limine-mkinitcpio >/dev/null 2>&1; then
+  INITRAMFS_CMD="sudo limine-mkinitcpio"
+else
+  INITRAMFS_CMD="sudo mkinitcpio -P"
+fi
 if [ "$APPLY_GTT" -eq 1 ]; then
   echo "$GTT_LINE" | sudo tee "$GTT_CONF" >/dev/null
   echo "  - wrote $GTT_CONF"
   echo "  Now rebuild the initramfs and reboot:"
-  echo "    sudo mkinitcpio -P && sudo reboot"
+  echo "    $INITRAMFS_CMD && sudo reboot"
 else
   echo "  Not applied (pass --apply-gtt to write it). To serve the 50-76GB"
   echo "  models fully GPU-resident, do this once:"
   echo "    echo '$GTT_LINE' | sudo tee $GTT_CONF"
-  echo "    sudo mkinitcpio -P && sudo reboot"
+  echo "    $INITRAMFS_CMD && sudo reboot"
 fi
-echo "  Also set the BIOS UMA/VRAM carveout SMALL (512MB) - on Linux the GPU"
+echo "  Set the BIOS UMA/VRAM carveout SMALL (512MB) in the SAME reboot - on Linux the GPU"
 echo "  allocates from GTT, not the carveout. (pages_limit=31457280 is 120GiB"
 echo "  and page_pool_size=15728640 is 60GiB, in 4KiB pages; amdgpu.gttsize"
 echo "  is deprecated.)"
@@ -506,6 +574,7 @@ Installed under $ENGINE_DIR:
   sdcpp/sd-server                                [$([ "$SKIP_SD" -eq 1 ] && echo skipped || echo done)]
   comfyui/venv + comfyui/ComfyUI                 [$([ "$SKIP_COMFY" -eq 1 ] && echo skipped || echo done)]
   chatterbox/ + qwen3tts/ (server.py + venv)     [$([ "$SKIP_TTS" -eq 1 ] && echo skipped || echo done)]
+  speciesid/ (server.py + venv)                  [$([ "$SKIP_SPECIESID" -eq 1 ] && echo skipped || echo done)]
   aider-venv/                                    [$([ "$SKIP_AIDER" -eq 1 ] && echo skipped || echo done)]
   node/bin/npx                                   [$([ "$SKIP_NODE" -eq 1 ] && echo skipped || echo done)]
   llama-swap.yaml                                [$([ -f "$SWAP_CFG" ] && echo present || echo MISSING)]

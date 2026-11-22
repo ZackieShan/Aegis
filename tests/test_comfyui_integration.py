@@ -69,14 +69,150 @@ def test_flux2_klein_graph_structure():
     assert clip["type"] == "flux2"
 
 
+def _touch(root, rel):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"x")
+
+
 def test_available_video_models_gated_on_files(tmp_path, monkeypatch):
     monkeypatch.setattr(cw, "_models_dir", lambda: str(tmp_path))
     assert cw.available_video_models() == []
-    for f in cw.COMFY_VIDEO_MODELS["comfy-wan2.2-t2v"]["required_files"]:
-        p = tmp_path / f
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(b"x")
+    spec = cw.COMFY_VIDEO_MODELS["comfy-wan2.2-t2v"]
+    for f in spec["required_files"]:
+        _touch(tmp_path, f)
+    # companions alone are not enough — an expert pair is needed too …
+    assert cw.available_video_models() == []
+    # … and half a pair is still no pair
+    _touch(tmp_path, cw.WAN_T2V_GGUF_HIGH)
+    assert cw.available_video_models() == []
+    _touch(tmp_path, cw.WAN_T2V_GGUF_LOW)
     assert cw.available_video_models() == ["comfy-wan2.2-t2v"]
+    assert set(cw.spec_files(spec)) == set(spec["required_files"]) | {
+        cw.WAN_T2V_GGUF_HIGH, cw.WAN_T2V_GGUF_LOW}
+
+
+@pytest.mark.parametrize("pair", cw.WAN_T2V_EXPERT_PAIRS)
+def test_any_wan_expert_tier_unlocks_the_workflow(tmp_path, monkeypatch, pair):
+    """Q8_0 GGUF, fp8_scaled and Q3_K_M GGUF are interchangeable tiers: any
+    one complete pair makes comfy-wan2.2-t2v available, and the graph loads
+    exactly that pair with the loader its file type needs."""
+    monkeypatch.setattr(cw, "_models_dir", lambda: str(tmp_path))
+    for f in cw.COMFY_VIDEO_MODELS["comfy-wan2.2-t2v"]["required_files"] + list(pair):
+        _touch(tmp_path, f)
+    assert cw.available_video_models() == ["comfy-wan2.2-t2v"]
+    g = cw.wan22_t2v_graph("a fox")
+    for node, rel in (("4", pair[0]), ("5", pair[1])):
+        assert g[node]["inputs"]["unet_name"] == cw._mp(rel)
+        assert g[node]["class_type"] == ("UnetLoaderGGUF" if rel.endswith(".gguf") else "UNETLoader")
+
+
+def test_wan_q8_gguf_preferred_over_fp8_and_q3(tmp_path, monkeypatch):
+    monkeypatch.setattr(cw, "_models_dir", lambda: str(tmp_path))
+    for pair in cw.WAN_T2V_EXPERT_PAIRS:
+        for f in pair:
+            _touch(tmp_path, f)
+    g = cw.wan22_t2v_graph("a fox")
+    assert g["4"]["inputs"]["unet_name"] == cw.WAN_T2V_GGUF_HIGH
+    assert g["5"]["inputs"]["unet_name"] == cw.WAN_T2V_GGUF_LOW
+    assert "Q8_0" in cw.WAN_T2V_GGUF_HIGH
+
+
+def _model_path_inputs(graph):
+    """Every string input that names a model file in a subfolder."""
+    out = []
+    for node in graph.values():
+        for v in node["inputs"].values():
+            if isinstance(v, str) and v.lower().endswith((".safetensors", ".gguf")) \
+                    and ("/" in v or "\\" in v):
+                out.append(v)
+    return out
+
+
+@pytest.mark.parametrize("sep", ["/", "\\"])
+def test_subfolder_model_paths_follow_the_host_separator(monkeypatch, tmp_path, sep):
+    """ComfyUI lists models with the host's os.sep and rejects any other
+    spelling ("value_not_in_list"), so every builder must emit "video/x" on
+    Linux/macOS and "video\\x" on Windows. The graphs were first written with
+    hard-coded backslashes, which broke every workflow on the Linux port."""
+    monkeypatch.setattr(cw, "_models_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(cw, "_SEP", sep)
+    other = "\\" if sep == "/" else "/"
+    graphs = [
+        cw.wan22_t2v_graph("p"),
+        cw.wan22_i2v_graph("p", init_image="in.png"),
+        cw.hunyuanvideo15_t2v_graph("p"),
+        cw.hunyuanvideo15_i2v_graph("p", init_image="in.png"),
+        cw.ltx2_fast_t2v_graph("p"),
+        cw.flux2_dev_t2i_graph("p"),
+        cw.zimage_turbo_t2i_graph("p"),
+        cw.chroma_hd_t2i_graph("p"),
+        cw.noobai_vpred_t2i_graph("p"),
+        cw.krea2_turbo_t2i_graph("p"),
+        cw.ideogram4_t2i_graph("p"),
+        cw.acestep15_song_graph("pop"),
+        cw.supir_restore_graph("in.png"),
+        cw.qwen_controlnet_redraw_graph("in.png"),
+    ]
+    seen = [v for g in graphs for v in _model_path_inputs(g)]
+    assert len(seen) >= 30            # the walk really found the loaders
+    assert all(sep in v and other not in v for v in seen), [v for v in seen if other in v]
+
+
+def test_flux2_dev_graph_structure(tmp_path, monkeypatch):
+    monkeypatch.setattr(cw, "_models_dir", lambda: str(tmp_path))
+    g = cw.flux2_dev_t2i_graph("a fox", width=1030, height=770, seed=3)
+    classes = [n["class_type"] for n in g.values()]
+    assert "UnetLoaderGGUF" in classes and "Flux2Scheduler" in classes and "SaveImage" in classes
+    # dev is guidance-distilled: FluxGuidance → BasicGuider, no CFG/negative pass
+    assert "BasicGuider" in classes and "CFGGuider" not in classes
+    assert g["5"]["class_type"] == "FluxGuidance" and g["5"]["inputs"]["guidance"] == 4.0
+    assert g["10"]["inputs"] == {"model": ["1", 0], "conditioning": ["5", 0]}
+    clip = next(n["inputs"] for n in g.values() if n["class_type"] == "CLIPLoader")
+    assert clip["type"] == "flux2" and "mistral_3_small_flux2" in clip["clip_name"]
+    lat = next(n["inputs"] for n in g.values() if n["class_type"] == "EmptyFlux2LatentImage")
+    assert lat["width"] % 16 == 0 and lat["height"] % 16 == 0
+    sched = next(n["inputs"] for n in g.values() if n["class_type"] == "Flux2Scheduler")
+    assert sched["steps"] == 20 and "LoraLoaderModelOnly" not in classes
+
+
+def test_flux2_dev_turbo_is_an_explicit_choice(tmp_path, monkeypatch):
+    """The Turbo LoRA on disk must NOT silently change comfy-flux2-dev (the
+    full-schedule quality tier); the 8-step path is its own catalog entry."""
+    monkeypatch.setattr(cw, "_models_dir", lambda: str(tmp_path))
+    spec = cw.COMFY_IMAGE_MODELS["comfy-flux2-dev-turbo"]
+    for f in cw.COMFY_IMAGE_MODELS["comfy-flux2-dev"]["required_files"] + [cw.FLUX2_DEV_TEXT_ENCODERS[0]]:
+        _touch(tmp_path, f)
+    assert "comfy-flux2-dev" in cw.available_image_models()
+    assert "comfy-flux2-dev-turbo" not in cw.available_image_models()     # no LoRA yet
+    _touch(tmp_path, f"loras/{cw.FLUX2_TURBO_LORA}")
+    assert "comfy-flux2-dev-turbo" in cw.available_image_models()
+    assert f"loras/{cw.FLUX2_TURBO_LORA}" in spec["required_files"]
+
+    full = cw.build_image_graph("comfy-flux2-dev", prompt="a fox")
+    assert full["9"]["inputs"]["steps"] == 20
+    assert "LoraLoaderModelOnly" not in [n["class_type"] for n in full.values()]
+
+    turbo = cw.build_image_graph("comfy-flux2-dev-turbo", prompt="a fox")
+    lora = next(n["inputs"] for n in turbo.values() if n["class_type"] == "LoraLoaderModelOnly")
+    assert lora["lora_name"] == cw.FLUX2_TURBO_LORA and lora["model"] == ["1", 0]
+    assert turbo["10"]["inputs"]["model"] == ["20", 0]     # guider samples the LoRA'd model
+    assert turbo["9"]["inputs"]["steps"] == 8              # turbo schedule
+    # an explicit step count is still honored
+    assert cw.build_image_graph("comfy-flux2-dev-turbo", prompt="a fox", steps=12)["9"]["inputs"]["steps"] == 12
+
+
+def test_flux2_dev_catalog_needs_one_text_encoder(tmp_path, monkeypatch):
+    monkeypatch.setattr(cw, "_models_dir", lambda: str(tmp_path))
+    spec = cw.COMFY_IMAGE_MODELS["comfy-flux2-dev"]
+    for f in spec["required_files"]:
+        _touch(tmp_path, f)
+    assert "comfy-flux2-dev" not in cw.available_image_models()
+    _touch(tmp_path, cw.FLUX2_DEV_TEXT_ENCODERS[1])       # only the fp8 TE
+    assert "comfy-flux2-dev" in cw.available_image_models()
+    assert cw.flux2_dev_t2i_graph("x")["2"]["inputs"]["clip_name"] == cw._mp(cw.FLUX2_DEV_TEXT_ENCODERS[1])
+    _touch(tmp_path, cw.FLUX2_DEV_TEXT_ENCODERS[0])       # bf16 wins when both exist
+    assert cw.flux2_dev_t2i_graph("x")["2"]["inputs"]["clip_name"] == cw._mp(cw.FLUX2_DEV_TEXT_ENCODERS[0])
 
 
 def test_build_video_graph_unknown_model():

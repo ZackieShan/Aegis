@@ -1655,6 +1655,7 @@ export function createMsgFooter(msgElement) {
     const pinnedCount = mems.filter(m => m.type === 'pinned').length;
     const recalledCount = mems.filter(m => m.type === 'recalled').length;
     const parts = [];
+    if (mems.some(m => m.type === 'profile')) parts.push('profile');
     if (pinnedCount) parts.push(`${pinnedCount} pinned`);
     if (recalledCount) parts.push(`${recalledCount} recalled`);
     pill.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px"><path d="M12 2a7 7 0 0 1 7 7c0 2.5-1.3 4.8-3.5 6-.3.2-.5.5-.5.9V18h-6v-2.1c0-.4-.2-.7-.5-.9C6.3 13.8 5 11.5 5 9a7 7 0 0 1 7-7z"/><path d="M9 18h6v1a3 3 0 0 1-6 0v-1z"/><path d="M12 2v7"/><path d="M8.5 6.5L12 9l3.5-2.5"/></svg><span class="memory-used-pill-text">${parts.join(', ')}</span>`;
@@ -1678,7 +1679,7 @@ export function createMsgFooter(msgElement) {
         row.title = 'Click to open memory manager';
         const badge = document.createElement('span');
         badge.className = 'memory-used-badge ' + (m.type === 'pinned' ? 'pinned' : 'recalled');
-        badge.textContent = m.type === 'pinned' ? '\u25CF' : '\u21BB';
+        badge.textContent = m.type === 'pinned' ? '\u25CF' : (m.type === 'profile' ? '\u25C6' : '\u21BB');
         const text = document.createElement('span');
         text.className = 'memory-used-text';
         text.textContent = m.text;
