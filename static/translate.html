@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121016" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Translate — Aegis</title>
+<link rel="icon" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<script nonce="{{CSP_NONCE}}">
+// The look the person chose for their home screen, before the first paint.
+(function () {
+  try {
+    var look = JSON.parse(localStorage.getItem('aegis-home-look') || '{}');
+    if (look.theme) document.documentElement.setAttribute('data-theme', look.theme);
+    if (/^#[0-9a-f]{6}$/i.test(look.accent || '')) document.documentElement.style.setProperty('--accent', look.accent);
+  } catch (e) { /* defaults */ }
+})();
+</script>
+<link rel="stylesheet" href="/static/lite/lite.css?v=1">
+<link rel="stylesheet" href="/static/lite/translate.css?v=1">
+</head>
+<body>
+<div class="page" id="app"><div class="loading"><span class="spinner"></span></div></div>
+<script type="module" src="/static/lite/translate.js?v=1"></script>
+</body>
+</html>

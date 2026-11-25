@@ -267,6 +267,27 @@ class VectorRAG:
             "failed_count": len(docs) - len(valid),
         }
 
+    def remove_owner(self, owner: str) -> Dict[str, Any]:
+        """Remove every chunk whose metadata names ``owner`` (a deleted
+        account's documents). Ownerless chunks are never matched."""
+        if not self.healthy:
+            return {"success": False, "removed_count": 0, "message": "Collection not initialized"}
+        owner = (owner or "").strip().lower()
+        if not owner:
+            return {"success": True, "removed_count": 0, "message": "No owner given"}
+        removed = 0
+        failed = 0
+        for lane_name, collection in self._collections_for_delete():
+            try:
+                ids = (collection.get(where={"owner": owner}, include=[]) or {}).get("ids") or []
+                if ids:
+                    collection.delete(ids=ids)
+                    removed += len(ids)
+            except Exception as e:
+                logger.warning("remove_owner failed in %s lane: %s", lane_name, e)
+                failed += 1
+        return {"success": failed == 0, "removed_count": removed, "failed_count": failed}
+
     def rename_owner(
         self,
         old_owner: str,

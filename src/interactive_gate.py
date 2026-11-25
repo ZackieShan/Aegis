@@ -65,6 +65,10 @@ _PASSIVE_EXACT_PATHS = {
     "/api/tasks/notifications",
     "/api/research/active",
     "/api/email/urgency-state",
+    # An open tab asks for the unread count once a minute, on its own. Counted as
+    # a person's request, it kept every quiet-window job waiting for as long as a
+    # tab was open anywhere.
+    "/api/email/unread-state",
 }
 
 _PASSIVE_PREFIXES = (
@@ -120,6 +124,24 @@ def has_foreground_activity(now: float | None = None) -> bool:
     if _LAST_ACTIVITY > 0 and (t - _LAST_ACTIVITY) < _quiet_seconds():
         return True
     return _has_recent_browser_activity(t) or _has_active_chat_stream()
+
+
+def someone_is_working(quiet_seconds: float = 60.0, now: float | None = None) -> bool:
+    """True while the app is serving someone: a request in flight, one in the last
+    ``quiet_seconds``, or a chat still being written.
+
+    A tab that is merely open does not count here — unlike ``has_foreground_activity``,
+    which also holds background jobs back for a visible tab's heartbeat. A long nightly
+    job uses this one: it should give way to a person, not to a screen left on.
+    """
+    if not _enabled():
+        return False
+    t = now if now is not None else time.monotonic()
+    if _ACTIVE_REQUESTS > 0:
+        return True
+    if _LAST_ACTIVITY > 0 and (t - _LAST_ACTIVITY) < quiet_seconds:
+        return True
+    return _has_active_chat_stream()
 
 
 def _has_active_chat_stream() -> bool:

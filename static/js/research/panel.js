@@ -217,6 +217,9 @@ export function init(apiBase, markdownMod, sessionMod) {
 }
 
 export function isOpen() { return _open; }
+/** A job started somewhere else (the chat): show it here at once. Goes through
+ *  this module so callers reach the same job list this window draws from. */
+export function adoptSession(sessionId) { return jobs.adoptSession ? jobs.adoptSession(sessionId) : undefined; }
 export function toggle() {
   if (_open) {
     // If minimized, restore instead of closing

@@ -19,6 +19,7 @@ Storage: one JSON file per recipe under RECIPES_DIR.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -26,6 +27,8 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from src.constants import RECIPES_DIR
+
+logger = logging.getLogger(__name__)
 
 NODE_TYPES = {"input", "tool", "model", "output", "branch", "loop"}
 _REF_RE = re.compile(r"\{\{\s*([\w-]+)\s*\}\}")
@@ -110,7 +113,7 @@ def validate_recipe(data: Dict[str, Any]) -> Optional[str]:
     nodes = data.get("nodes")
     edges = data.get("edges", [])
     if not isinstance(nodes, list) or not nodes:
-        return "recipe needs at least one node"
+        return "an automation needs at least one node"
     ids = set()
     for n in nodes:
         nid = n.get("id")
@@ -123,7 +126,7 @@ def validate_recipe(data: Dict[str, Any]) -> Optional[str]:
         if e.get("from") not in ids or e.get("to") not in ids:
             return "edge references a missing node"
     if _topo_order(nodes, edges) is None:
-        return "recipe has a cycle — remove the loop"
+        return "this automation has a cycle — remove the loop"
     # Validate {{ref}} placeholders in node config point at REAL nodes. A
     # typo'd {{summry}} silently resolved to "" (outputs.get(key,"")), so the
     # recipe ran with a missing input and produced garbage with no error.

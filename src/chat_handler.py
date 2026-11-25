@@ -259,6 +259,18 @@ class ChatHandler:
                             except Exception:
                                 vl_desc = None
                         if not vl_desc:
+                            # Sort the photo first: one that shows a living thing goes through the
+                            # species identifier and the home library, never to a general description
+                            # (services/identify.for_chat). Any other photo is described as before.
+                            try:
+                                from services import identify as _identify
+                                vl_desc = await asyncio.to_thread(_identify.for_chat, file_info["path"], message or "", owner)
+                                if vl_desc:
+                                    vl_model = "species identifier"
+                            except Exception as _sort_error:
+                                logger.info("photo not sorted (%s): described instead", type(_sort_error).__name__)
+                                vl_desc = ""
+                        if not vl_desc:
                             vl_result = analyze_image_with_vl_result(file_info["path"], owner=owner)
                             vl_desc = vl_result.get("text", "")
                             vl_model = vl_result.get("model", "")
@@ -331,9 +343,18 @@ class ChatHandler:
             message
         )
         if is_memory_cmd and memory_text:
+            # The entry belongs to the account whose chat this is. Without an
+            # owner it was saved for nobody, matched against everyone's
+            # memories, and handed to the administrator at the next start-up.
+            owner = getattr(session, "owner", None)
+            owner = owner if isinstance(owner, str) and owner else None
             mem = self.memory_manager.load()
-            if not self.memory_manager.find_duplicates(memory_text, mem):
-                new_entry = self.memory_manager.add_entry(memory_text)
+            mine = [m for m in mem if m.get("owner") == owner] if owner else mem
+            if not self.memory_manager.find_duplicates(memory_text, mine):
+                if owner:
+                    new_entry = self.memory_manager.add_entry(memory_text, owner=owner)
+                else:
+                    new_entry = self.memory_manager.add_entry(memory_text)
                 mem.append(new_entry)
                 self.memory_manager.save(mem)
 

@@ -294,6 +294,14 @@ async def do_pipeline(content: str, session_id: Optional[str] = None, owner: Opt
 # ---------------------------------------------------------------------------
 
 async def do_manage_memory(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
+    """The agent's memory tool. Changes it makes are journaled as the
+    assistant's, with the conversation they were made in."""
+    from services.memory import journal as _journal
+    with _journal.cause("assistant", session_id=session_id):
+        return await _do_manage_memory(content, session_id=session_id, owner=owner)
+
+
+async def _do_manage_memory(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
     """Manage memories: list, add, edit, delete, search.
 
     Content format:
@@ -302,7 +310,8 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
 
     Actions:
       list                    — list all memories (optional line 2: category filter)
-      add                     — line 2: text, optional line 3: category (fact|event|contact|preference)
+      add                     — line 2: text, optional line 3: category
+                                (fact|event|contact|preference|identity|interest|project|goal)
       edit                    — line 2: memory_id, line 3: new text
       delete                  — line 2: memory_id
       search                  — line 2: query
@@ -357,6 +366,14 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
                         "results": f"Already remembered (duplicate skipped): {text[:120]}"}
             if _memory_vector and getattr(_memory_vector, "healthy", False):
                 _near = _memory_vector.find_similar(text)
+                # The vector index is shared by every account: a match may be
+                # someone else's memory. Only the caller's own counts — or
+                # their fact would be skipped, and the reply would name the
+                # other account's memory id.
+                if _near and owner:
+                    _mine = next((m for m in _existing if m.get("id") == _near), None)
+                    if _mine is None or (_mine.get("owner") or None) != owner:
+                        _near = None
                 if _near:
                     return {"action": "add", "memory_id": _near,
                             "results": f"Already remembered something very similar (skipped): {text[:120]}"}
@@ -594,7 +611,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
       switch_model <model>    — Change the model for the current session
       set_theme <preset>      — Apply a built-in theme preset (dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute)
       create_theme <name> <bg> <fg> <panel> <border> <accent> [key=val ...] — Create custom theme. Optional key=val: advanced color overrides AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false
-      open_panel <name>       — Open a panel (documents, gallery, email, sessions, notes, memories, skills, settings, cookbook)
+      open_panel <name>       — Open a panel (documents, gallery, email, sessions, notes, memories, skills, settings, model_shopper, automations, kitchen)
       open_email_reply <uid> [folder] [reply|reply-all|ai-reply] [body text] — Open a reply draft document for an email; does not send. ALWAYS append the body text when the user told you what to say (one-shot draft); only omit body when the user just asked to "open a reply" without content.
       get_toggles             — Return current toggle states (server-side knowledge)
     """
@@ -794,9 +811,31 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
         }
 
     elif action == "open_panel":
-        # Open a top-level panel/modal: documents/library, gallery,
-        # email, sessions, notes, memories, skills, settings, cookbook.
-        panel = parts[1].lower() if len(parts) > 1 else ""
+        # Open a top-level panel/modal: documents/library, gallery, email,
+        # sessions, notes, memories, skills, settings, the Model Shopper
+        # (internally "cookbook") and Automations (internally "recipes").
+        # A name may be more than one word and may come with "the" or "my"
+        # ("model shopper", "the model-shopper"); only the first word counted before.
+        _words = [w for w in " ".join(parts[1:]).lower().replace("-", " ").replace("_", " ").split()
+                  if w not in ("the", "my", "a", "panel", "window")]
+        panel = "model_shopper" if _words[:2] == ["model", "shopper"] else (_words[0] if _words else "")
+        # "cookbook" and "recipes" mean food now. The Kitchen and the Reader are
+        # pages of their own rather than panels over the chat: the app takes the
+        # person there once this reply has finished (chatStream.js), and the
+        # link is in the result for anywhere that cannot (a phone notification,
+        # another client).
+        if panel in ("kitchen", "cookbook", "recipes", "recipe", "cooking") or _words[:2] == ["cook", "book"]:
+            return {
+                "ui_event": "open_panel",
+                "panel": "kitchen",
+                "results": "Opening the Kitchen — the user is taken to it when this reply ends. Its link, if they need it: [Kitchen](/kitchen)",
+            }
+        if panel in ("reader", "bookshelf", "shelf"):
+            return {
+                "ui_event": "open_panel",
+                "panel": "reader",
+                "results": "Opening the Reader — the user is taken to it when this reply ends. Its link, if they need it: [Reader](/read)",
+            }
         _panel_aliases = {
             "documents": "documents",
             "document": "documents",
@@ -823,19 +862,27 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
             "skills": "skills",
             "settings": "settings",
             "preferences": "settings",
-            "cookbook": "cookbook",
+            # The Model Shopper: the page still calls its window "cookbook".
+            "model_shopper": "cookbook",
+            "modelshopper": "cookbook",
+            "shopper": "cookbook",
+            "model": "cookbook",
             "models": "cookbook",
             "llm": "cookbook",
             "serve": "cookbook",
             "serving": "cookbook",
+            "automations": "automations",
+            "automation": "automations",
+            "workflows": "automations",
         }
         target = _panel_aliases.get(panel)
         if not target:
-            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, email, sessions, notes, memories, skills, settings, cookbook."}
+            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, email, sessions, notes, memories, skills, settings, model_shopper, automations, kitchen."}
+        _spoken_name = {"cookbook": "the Model Shopper", "automations": "Automations"}.get(target, f"the {target} panel")
         return {
             "ui_event": "open_panel",
             "panel": target,
-            "results": f"Opening {target} panel",
+            "results": f"Opening {_spoken_name}",
         }
 
     elif action == "open_email_reply":

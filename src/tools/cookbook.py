@@ -34,7 +34,7 @@ def _validate_cookbook_ssh_target(remote_host: Any, ssh_port: Any = "") -> tuple
 
 
 async def _cookbook_servers() -> Dict[str, Any]:
-    """Return the cookbook's configured servers + the currently-selected
+    """Return the Model Shopper's configured servers + the currently-selected
     default host. Shape: {default_host, hosts: [{host, platform, env, envPath}]}.
     The agent uses this to route downloads/serves to the right machine
     instead of silently defaulting to localhost."""
@@ -310,7 +310,7 @@ async def _cookbook_register_task(
 
 
 # Patterns for detecting running LLM/diffusion model servers outside
-# the cookbook's task tracker. Each entry: (label, substring-list).
+# the Model Shopper's task tracker. Each entry: (label, substring-list).
 # Match is case-insensitive against the FULL cmdline. First-match wins.
 _MODEL_PROCESS_PATTERNS = [
     ("vLLM",            ["vllm.entrypoints", "vllm serve", "/vllm/", "vllm-openai"]),
@@ -432,7 +432,7 @@ async def do_download_model(content: str, owner: Optional[str] = None) -> Dict:
     # Resolve a friendly server NAME ("gpu-box") to its ssh host string.
     if host:
         host = await _resolve_cookbook_host(host)
-    # No host specified → default to the cookbook's currently-selected
+    # No host specified → default to the Model Shopper's currently-selected
     # server rather than silently downloading to localhost (which is
     # usually NOT where the GPUs / model cache live).
     _host_defaulted = False
@@ -471,7 +471,7 @@ async def do_download_model(content: str, owner: Optional[str] = None) -> Dict:
             )
             note = "" if registered else " (state-write failed — download may not show in UI)"
             where = host or "local"
-            default_note = " (defaulted to the cookbook's selected server — pass host= or local=true to override)" if _host_defaulted else ""
+            default_note = " (defaulted to the Model Shopper's selected server — pass host= or local=true to override)" if _host_defaulted else ""
             return {
                 "output": f"Download started: {repo_id} on {where} (session: {sid}){note}{default_note}",
                 "session_id": sid,
@@ -636,7 +636,7 @@ async def do_list_served_models(content: str, owner: Optional[str] = None) -> Di
 
     if not merged:
         return {
-            "output": "No model servers currently running (cookbook task tracker empty; /proc scan found no vLLM / sglang / MLX / llama.cpp / Ollama / ComfyUI / A1111 / Fooocus / InvokeAI / TGI / Aphrodite / Triton / Diffusers processes).",
+            "output": "No model servers currently running (Model Shopper task tracker empty; /proc scan found no vLLM / sglang / MLX / llama.cpp / Ollama / ComfyUI / A1111 / Fooocus / InvokeAI / TGI / Aphrodite / Triton / Diffusers processes).",
             "exit_code": 0,
         }
 
@@ -660,7 +660,7 @@ async def do_list_served_models(content: str, owner: Optional[str] = None) -> Di
     live_n = sum(1 for t in merged if _rank(t) <= 2)
     header = []
     if cb_n:
-        header.append(f"{cb_n} cookbook-tracked")
+        header.append(f"{cb_n} tracked by the Model Shopper")
     if ext_n:
         header.append(f"{ext_n} external")
     if live_n:
@@ -1039,7 +1039,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
     anything else) into the Cookbook so it appears in list_served_models,
     can be stopped via stop_served_model, and is added to the user's
     endpoint list for chat. Use this when a model was started outside
-    the cookbook's serve flow but you want first-class tracking.
+    the Model Shopper's serve flow but you want first-class tracking.
 
     Args (JSON):
       host:          "user@192.0.2.10" (or omit for localhost)
@@ -1112,7 +1112,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
             r = await client.get(f"{_INTERNAL_BASE}/api/cookbook/state", headers=headers)
             state = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     except Exception as e:
-        return {"error": f"could not read cookbook state: {e}", "exit_code": 1}
+        return {"error": f"could not read the Model Shopper's state: {e}", "exit_code": 1}
     if not isinstance(state, dict):
         state = {}
     tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
@@ -1133,7 +1133,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
                 "Reconnect polling will start streaming tmux output shortly."
             ),
             "ts": int(_time.time() * 1000),
-            "payload": {"repo_id": model, "remote_host": host or "", "_cmd": "(adopted — launched outside cookbook)"},
+            "payload": {"repo_id": model, "remote_host": host or "", "_cmd": "(adopted — launched outside the Model Shopper)"},
             "remoteHost": host or "",
             "sshPort": "",
             "platform": "linux",
@@ -1148,7 +1148,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
                 await client.post(f"{_INTERNAL_BASE}/api/cookbook/state",
                                   json=state, headers=headers)
         except Exception as e:
-            return {"error": f"could not save cookbook state: {e}", "exit_code": 1}
+            return {"error": f"could not save the Model Shopper's state: {e}", "exit_code": 1}
 
     # Optionally register as a chat endpoint
     endpoint_msg = ""
@@ -1178,7 +1178,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
     return {
         "output": (
             f"Adopted session {sess!r} ({model}) on {host or 'local'}:{port}. "
-            + ("Already tracked — skipped state write. " if adopted_already else "Added to cookbook state. ")
+            + ("Already tracked — skipped state write. " if adopted_already else "Added to the Model Shopper. ")
             + ("Server responding. " if server_up else "Server not responding yet (still loading?). ")
             + endpoint_msg
         ).strip(),
@@ -1191,7 +1191,7 @@ async def do_adopt_served_model(content: str, owner: Optional[str] = None) -> Di
 
 
 async def do_list_cookbook_servers(content: str, owner: Optional[str] = None) -> Dict:
-    """List the cookbook's configured servers and which one is the
+    """List the Model Shopper's configured servers and which one is the
     current default. Use this to decide where to download/serve a
     model, or to show the user options when the target host is
     ambiguous."""
@@ -1199,7 +1199,7 @@ async def do_list_cookbook_servers(content: str, owner: Optional[str] = None) ->
     hosts = servers.get("hosts") or []
     default = servers.get("default_host") or ""
     if not hosts:
-        return {"output": "No cookbook servers configured. Downloads/serves default to localhost.", "servers": [], "default_host": "", "exit_code": 0}
+        return {"output": "No Model Shopper servers configured. Downloads/serves default to localhost.", "servers": [], "default_host": "", "exit_code": 0}
     # Resolve which server is the default by its friendly name too.
     default_name = next((h.get("name") for h in hosts if h.get("host") == default and h.get("name")), default or "local")
     lines = [f"{len(hosts)} configured server(s) (default: {default_name}):"]
@@ -1227,12 +1227,12 @@ async def do_list_serve_presets(content: str, owner: Optional[str] = None) -> Di
                                     headers=_internal_headers())
             state = resp.json() or {}
     except Exception as e:
-        return {"error": f"Failed to fetch cookbook state: {e}", "exit_code": 1}
+        return {"error": f"Failed to fetch the Model Shopper's state: {e}", "exit_code": 1}
 
     presets = state.get("presets") or []
     if not presets:
         return {
-            "output": "No serve presets saved. Tell the user to save one from the Cookbook UI first, or use serve_model with explicit repo_id + cmd + host.",
+            "output": "No serve presets saved. Tell the user to save one in the Model Shopper first, or use serve_model with explicit repo_id + cmd + host.",
             "presets": [],
             "exit_code": 0,
         }
@@ -1276,7 +1276,7 @@ async def do_serve_preset(content: str, owner: Optional[str] = None) -> Dict:
                                     headers=_internal_headers())
             state = resp.json() or {}
     except Exception as e:
-        return {"error": f"Failed to fetch cookbook state: {e}", "exit_code": 1}
+        return {"error": f"Failed to fetch the Model Shopper's state: {e}", "exit_code": 1}
 
     presets = state.get("presets") or []
     # Match by exact name first, then case-insensitive substring.
@@ -1486,8 +1486,8 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
                 downloaded = []
             host_str = f" on {raw_host}" if raw_host else ""
             if downloaded:
-                lines = [f"No cache paths were detected{host_str}, but Cookbook has completed download task(s):"]
-                lines.extend(f"- {repo} — downloaded via Cookbook task" for repo in downloaded)
+                lines = [f"No cache paths were detected{host_str}, but Model Shopper has completed download task(s):"]
+                lines.extend(f"- {repo} — downloaded via Model Shopper task" for repo in downloaded)
                 return {"output": "\n".join(lines), "models": [{"repo_id": repo, "source": "cookbook_task"} for repo in downloaded], "exit_code": 0}
             return {"output": f"No cached models found{host_str}.", "exit_code": 0}
         # Multi-host scan: group by host so the agent sees inventory per server.

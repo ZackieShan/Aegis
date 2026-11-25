@@ -1,0 +1,186 @@
+/* The simple home screen (/home). Builds on lite.css. Phone first. */
+body.home { padding-bottom: calc(74px + var(--safe-bottom)); }
+#app { max-width: 720px; margin: 0 auto; }
+.screen { padding: 0 16px 24px; }
+
+/* ── top and bottom bars ────────────────────────────────────────────────── */
+.hello { display: flex; align-items: center; gap: 10px; padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 8px; position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.hello h1 { flex: 1 1 auto; min-width: 0; font-size: 1.35rem; }
+.hello .sub { display: block; font-size: .84rem; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+.avatar { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--accent-soft); color: var(--accent); font-weight: 600; cursor: pointer; flex: 0 0 auto; }
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; justify-content: center; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: var(--safe-bottom); }
+.nav-inner { display: flex; width: 100%; max-width: 720px; }
+.nav button { flex: 1 1 0; min-width: 0; border: none; background: none; padding: 9px 2px 8px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--faint); cursor: pointer; font-size: .72rem; position: relative; }
+.nav button[aria-current="page"] { color: var(--accent); font-weight: 600; }
+.nav .dot { position: absolute; top: 5px; left: calc(50% + 8px); min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--danger); color: #fff; font-size: .66rem; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+
+/* ── chat ───────────────────────────────────────────────────────────────── */
+.chat { display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 12px; }
+.bubble { max-width: 88%; padding: 10px 14px; border-radius: 18px; overflow-wrap: anywhere; }
+.bubble.me { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 6px; white-space: pre-wrap; }
+.bubble.them { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+.bubble.them a { font-weight: 500; }
+.bubble.oops { border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); }
+/* The waiting line: a moving mark, what is going on, how long, a bar while the model reads, and the latest line of
+   what it is thinking. The mark, the light over the words and the bar are drawn by static/js/working.js. */
+.working { align-self: flex-start; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: .9rem; padding: 2px 6px; max-width: 88%; --working-accent: var(--accent); }
+.working-top { display: flex; align-items: center; gap: 8px; }
+.working .working-label { font-weight: 500; }
+.working .working-bar { width: min(220px, 60vw); }
+.working .working-thought { font-size: .84rem; line-height: 1.4; }
+.working [hidden] { display: none; }
+/* A reply with nothing in it yet is not drawn: the waiting line under it says what is going on. */
+.bubble.them:empty { display: none; }
+.thought { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 0; border: none; background: none; color: var(--faint); font: inherit; font-size: .78rem; cursor: pointer; }
+.thought:hover { color: var(--text); text-decoration: underline; }
+.thought-full { font-size: .92rem; color: var(--muted); overflow-wrap: anywhere; }
+.suggest { display: flex; flex-direction: column; gap: 8px; }
+.suggest button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px 14px; cursor: pointer; display: flex; gap: 10px; align-items: center; }
+.suggest button svg { color: var(--accent); }
+.composer { position: fixed; left: 0; right: 0; bottom: calc(58px + var(--safe-bottom)); z-index: 25; display: flex; justify-content: center; padding: 8px 12px; background: linear-gradient(to top, var(--bg) 70%, transparent); }
+.composer-inner { display: flex; align-items: flex-end; gap: 8px; width: 100%; max-width: 696px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 6px 6px 6px 14px; box-shadow: var(--shadow); }
+.composer textarea { flex: 1 1 auto; border: none; outline: none; background: transparent; resize: none; max-height: 140px; padding: 8px 0; line-height: 1.4; }
+.send { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
+.send:disabled { opacity: .45; }
+body.home.on-chat { padding-bottom: calc(150px + var(--safe-bottom)); }
+
+/* ── due today ──────────────────────────────────────────────────────────── */
+.due { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.due + .due { border-top: 1px solid var(--line); }
+.tick { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; color: transparent; }
+.tick.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.late { color: var(--danger); }
+
+/* ── lists ──────────────────────────────────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; cursor: pointer; text-align: left; min-height: 104px; display: flex; flex-direction: column; gap: 4px; }
+.tile h3 { font-size: 1rem; }
+.tile .peek { color: var(--muted); font-size: .84rem; flex: 1 1 auto; overflow: hidden; }
+.tile .left { font-size: .8rem; color: var(--accent); font-weight: 500; }
+.item { display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 12px; }
+.item + .item { border-top: 1px solid var(--line); }
+.item .text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.item.done .text { text-decoration: line-through; color: var(--faint); }
+.addline { display: flex; gap: 8px; margin-bottom: 12px; }
+
+/* ── trackers ───────────────────────────────────────────────────────────── */
+.tracker { display: flex; flex-direction: column; gap: 10px; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 42px; }
+.bars i { flex: 1 1 0; background: var(--accent-soft); border-radius: 3px 3px 0 0; min-height: 3px; }
+.bars i.on { background: var(--accent); }
+.bars.tall { height: 110px; }
+.scale { display: flex; gap: 8px; }
+.scale button { flex: 1 1 0; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-weight: 600; }
+.scale button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.bigdone { display: flex; align-items: center; justify-content: center; gap: 8px; height: 46px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-weight: 500; }
+.bigdone.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.progress { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.choice { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: 13px; padding: 11px 13px; cursor: pointer; }
+.choice.on { border-color: var(--accent); background: var(--accent-soft); }
+.choice input { margin-top: 3px; accent-color: var(--accent); }
+
+/* ── boards ─────────────────────────────────────────────────────────────── */
+.boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.board { border: none; background: none; padding: 0; text-align: left; cursor: pointer; }
+.mosaic { aspect-ratio: 1; border-radius: var(--radius); overflow: hidden; background: var(--surface-2); display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; border: 1px solid var(--line); }
+.mosaic.one { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.mosaic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mosaic .blank { display: flex; align-items: center; justify-content: center; color: var(--faint); grid-column: 1 / -1; grid-row: 1 / -1; }
+.board h3 { margin-top: 7px; font-size: .96rem; }
+.pins { columns: 2; column-gap: 10px; }
+@media (min-width: 620px) { .pins { columns: 3; } }
+.pin { break-inside: avoid; margin-bottom: 10px; border-radius: 14px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); cursor: pointer; display: block; width: 100%; padding: 0; text-align: left; }
+.pin img { width: 100%; display: block; background: var(--surface-2); }
+.pin .cap { padding: 8px 10px; font-size: .86rem; }
+.pin .cap .site { display: block; color: var(--muted); font-size: .74rem; margin-top: 2px; }
+.pin.note .cap { font-size: .92rem; white-space: pre-wrap; padding: 12px; }
+.pinbig { width: 100%; border-radius: 12px; display: block; }
+.addbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+
+/* photos in the chat */
+.composer-stack { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 696px; }
+.composer-stack .composer-inner { padding-left: 6px; }
+.cam { width: 40px; height: 40px; border-radius: 50%; border: none; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: 0 0 auto; }
+.cam:hover { background: var(--surface-2); color: var(--text); }
+.waiting-photo { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; font-size: .86rem; color: var(--muted); box-shadow: var(--shadow); }
+.waiting-photo img { width: 44px; height: 44px; object-fit: cover; border-radius: 10px; flex: 0 0 auto; }
+.bubble img.shot { display: block; max-width: min(100%, 240px); max-height: 240px; border-radius: 12px; margin-bottom: 6px; object-fit: cover; }
+.shot-preview { align-self: center; max-width: 100%; max-height: 30dvh; border-radius: 12px; object-fit: contain; }
+.choice { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 12px 14px; text-align: left; cursor: pointer; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 14px; }
+.choice b { font-weight: 600; font-size: 1rem; }
+.choice span { font-size: .86rem; color: var(--muted); line-height: 1.35; }
+.choice.primary { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+
+/* ── an answer in the shape of the thing asked for ──
+   Cards under a reply (tiles for a sunset, a forecast, an identification with
+   its cautions), the quiet line above it, where it came from, and what can be
+   done next. */
+.bubble.wide { max-width: 100%; width: 100%; }
+.bubble.them { position: relative; }
+.bubble .note, .note { display: flex; gap: 7px; align-items: flex-start; font-size: .86rem; color: var(--muted); background: var(--surface-2); border-radius: 10px; padding: 7px 10px; margin-bottom: 8px; }
+.bubble .note svg { flex: 0 0 auto; margin-top: 2px; }
+.acard { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 14px; padding: 12px 13px; background: var(--bg); margin-top: 8px; }
+.bubble > .acard:first-child { margin-top: 0; }
+.acard-head { display: flex; align-items: center; gap: 10px; }
+.acard-head > svg { color: var(--accent); flex: 0 0 auto; }
+.card-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 8px; }
+.card-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.card-tile .big { font-size: 1.12rem; font-weight: 600; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.huge { font-size: 1.5rem; font-weight: 650; line-height: 1.2; overflow-wrap: anywhere; }
+.huge.said, .read.said { color: var(--accent); }
+.acard.result { gap: 4px; }
+.parts { display: flex; gap: 8px; flex-wrap: wrap; }
+.part { flex: 1 1 76px; display: flex; flex-direction: column; gap: 2px; background: var(--surface); border-radius: 10px; padding: 7px 9px; font-size: .92rem; }
+.part svg { color: var(--muted); }
+.days { display: flex; flex-direction: column; }
+.day { display: flex; align-items: center; gap: 9px; padding: 7px 0; }
+.day + .day { border-top: 1px solid var(--line); }
+.day .name { width: 46px; font-weight: 600; }
+.day .temps { font-weight: 600; white-space: nowrap; }
+.day .rain { color: var(--accent); white-space: nowrap; }
+.day svg { color: var(--muted); flex: 0 0 auto; }
+.alert { display: flex; gap: 8px; align-items: flex-start; font-size: .9rem; border-radius: 10px; padding: 8px 10px; background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--text); }
+.alert svg { color: var(--warn); flex: 0 0 auto; margin-top: 2px; }
+.ident .ref { width: 76px; height: 76px; object-fit: cover; border-radius: 12px; flex: 0 0 auto; }
+.latin { font-style: italic; }
+.sure { display: inline-block; margin-top: 5px; font-size: .8rem; font-weight: 600; border-radius: 99px; padding: 3px 10px; }
+.sure.high { background: color-mix(in srgb, var(--ok) 18%, var(--surface)); color: var(--ok); }
+.sure.medium { background: color-mix(in srgb, var(--warn) 20%, var(--surface)); color: var(--warn); }
+.sure.low { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--danger); }
+.part-label { font-size: .76rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 2px; }
+.look { font-size: .94rem; }
+.more { border-top: 1px solid var(--line); padding-top: 8px; }
+.more > summary { cursor: pointer; color: var(--accent); font-size: .9rem; font-weight: 500; }
+.more > summary + * { margin-top: 8px; }
+.more ul { margin: 4px 0 8px; padding-left: 18px; }
+.read { white-space: pre-wrap; font-size: .95rem; max-height: 40dvh; overflow: auto; background: var(--surface); border-radius: 10px; padding: 9px 11px; }
+.fixes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border-top: 1px solid var(--line); padding-top: 9px; }
+ul.plain { margin: 0; padding-left: 18px; }
+.made img { display: block; max-width: 100%; border-radius: 12px; margin: 8px 0; }
+.from { margin-top: 9px; display: flex; flex-direction: column; gap: 6px; }
+.from .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.choices-row { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.choices-row .btn { justify-content: flex-start; flex-direction: column; align-items: flex-start; gap: 1px; white-space: normal; text-align: left; height: auto; padding: 9px 12px; }
+.btn.offer { margin-top: 10px; justify-content: flex-start; gap: 8px; white-space: normal; text-align: left; height: auto; padding: 10px 12px; }
+.say { position: absolute; right: 6px; bottom: 6px; width: 30px; height: 30px; border-radius: 50%; border: none; background: transparent; color: var(--faint); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.say:hover { background: var(--surface-2); color: var(--text); }
+.bubble.them:has(> .say) { padding-bottom: 30px; }
+.cam.mic.live { background: color-mix(in srgb, var(--danger) 18%, var(--surface)); color: var(--danger); animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .cam.mic.live { animation: none; } }
+.today { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; color: inherit; font: inherit; }
+.today .line span { display: inline-flex; align-items: center; gap: 4px; }
+.today svg { color: var(--accent); }
+.trip-line { display: flex; gap: 7px; align-items: center; font-size: .95rem; }
+.trip-line svg { color: var(--accent); flex: 0 0 auto; }
+ul.plain.watch li { margin-bottom: 9px; }
+ul.plain.watch .chip { margin-top: 4px; max-width: 100%; }
+/* Reading aloud: the line under an answer while a recorded voice is being made, and the voices to choose from. */
+.saying { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: .84rem; color: var(--muted); --working-accent: var(--accent); }
+.saying[hidden] { display: none; }
+.voice-choice { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); cursor: pointer; }
+.voice-choice.on { border-color: var(--accent); background: var(--accent-soft); }
+.voice-choice .dot { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--faint); }
+.voice-choice.on .dot { border-color: var(--accent); background: radial-gradient(circle, var(--accent) 0 45%, transparent 50%); }

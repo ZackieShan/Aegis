@@ -29,6 +29,7 @@ from .providers import (
     google_pse_search,
     tavily_search,
     serper_search,
+    kiwix_search,
     _get_search_settings,
     _get_provider_key,
     _get_result_count,
@@ -107,6 +108,8 @@ def _call_provider(provider_name: str, query: str, count: int, time_filter: str 
         return tavily_search(query, count, time_filter)
     elif provider_name == "serper":
         return serper_search(query, count, time_filter)
+    elif provider_name == "kiwix":
+        return kiwix_search(query, count, time_filter)
     return []
 
 
@@ -128,6 +131,79 @@ def _build_provider_chain(primary: str) -> List[str]:
         if fb and fb != primary and fb not in chain and fb != "disabled":
             chain.append(fb)
     return chain
+
+
+def _library_ready() -> bool:
+    """True when the offline library (kiwix-serve) is switched on and answering."""
+    try:
+        from services import library
+        return bool(library.available())
+    except Exception:
+        return False
+
+
+def _internet_up() -> bool:
+    try:
+        from .netstate import internet_available
+        return bool(internet_available())
+    except Exception:
+        return True
+
+
+def _effective_provider_chain(primary: str) -> List[str]:
+    """The configured chain, adjusted for the offline library ("kiwix").
+
+    * Library not installed / not answering: it is left out, the chain is
+      exactly what ``_build_provider_chain`` says.
+    * Library answering, internet up: "kiwix" is added as the last resort
+      (unless the user already placed it somewhere in the chain).
+    * Library answering, internet down: the chain is just ["kiwix"]. Online
+      providers would each burn two connect timeouts first — a self-hosted
+      SearXNG is up but cannot reach its engines either — and the agent's
+      web_search gives up after 30 s.
+    """
+    chain = _build_provider_chain(primary)
+    if not _library_ready():
+        without = [p for p in chain if p != "kiwix"]
+        return without or chain
+    if "kiwix" not in chain:
+        chain.append("kiwix")
+    if not _internet_up():
+        return ["kiwix"]
+    return chain
+
+
+# How much of a search answer may be passages. The agent's tools cut any output at 10,000 characters;
+# the source list, the summary of results and the closing instructions need the rest.
+_PASSAGE_ROOM = 5200
+_PASSAGE_ROOM_PER_PAGE = 1800
+
+
+def _brave_passages(query: str, time_filter: Optional[str], pages: int):
+    """(results, {url: passages}) from Brave, or ([], {}) when it cannot give them — no key, switched
+    off, over this month's limit, the request failed, or it found nothing. Never raises."""
+    try:
+        from . import brave
+        if brave.why_not() is not None:
+            return [], {}
+        results, texts = brave.passages(query, time_filter, urls=max(3, min(pages, 6)), tokens=2048)
+        return (results, texts) if results and texts else ([], {})
+    except Exception as problem:
+        logger.warning("Brave passages not used: %s", problem)
+        return [], {}
+
+
+def _fetch_result_content(url: str, query: str) -> dict:
+    """Fetch one search result: library links through the library (they are
+    loopback/tailnet addresses the SSRF-guarded web fetcher rightly refuses),
+    everything else through the normal web fetcher."""
+    try:
+        from services import library
+        if library.owns_url(url):
+            return library.fetch_content(url, query=query, budget=3000)
+    except Exception as e:
+        logger.debug(f"library fetch dispatch failed for {url}: {e}")
+    return fetch_webpage_content(url, 8, retry_attempt=0)
 
 
 # ----------------------------------------------------------------------
@@ -171,9 +247,10 @@ def searxng_search_results(query: str, count: int = 10, time_filter: str = None)
         logger.info("Search is disabled via admin settings")
         return []
 
-    provider_chain = _build_provider_chain(search_provider)
+    provider_chain = _effective_provider_chain(search_provider)
 
     results: List[dict] = []
+    used_provider = ""
     for provider_name in provider_chain:
         for attempt in range(2):
             try:
@@ -181,16 +258,24 @@ def searxng_search_results(query: str, count: int = 10, time_filter: str = None)
                 results = _call_provider(provider_name, query, count, time_filter)
                 if results:
                     logger.info(f"{provider_name} search succeeded with {len(results)} results")
+                    used_provider = provider_name
                     break
             except (NetworkError, ParseError, RateLimitError) as e:
                 error_logger.error(f"{provider_name} search error (attempt {attempt + 1}): {e}")
             except Exception as e:
                 error_logger.error(f"Unexpected error during {provider_name} search (attempt {attempt + 1}): {e}")
+            if provider_name == "kiwix":
+                break  # local and deterministic: a retry returns the same thing
         if results:
             break
 
     success = bool(results)
     _record_query(query, success, cache_hit=False)
+
+    if success and used_provider == "kiwix":
+        # Library results are already ordered and cost milliseconds to redo;
+        # caching them here would keep serving them after the web comes back.
+        return results
 
     if success:
         results = rank_search_results(query, results)
@@ -276,11 +361,24 @@ def comprehensive_web_search(
     # Use configured result count (at least max_pages for content fetching)
     fetch_count = max(result_count, max_pages)
 
-    provider_chain = _build_provider_chain(search_provider)
+    provider_chain = _effective_provider_chain(search_provider)
+    offline = provider_chain == ["kiwix"] and search_provider != "kiwix"
 
     search_results = []
     provider_attempts = {}
+    used_provider = ""
+    passages: Dict[str, List[str]] = {}
+    plain_filters = domain_whitelist is None and domain_blacklist is None and not content_type and not language
     for provider_name in provider_chain:
+        if provider_name == "brave" and plain_filters:
+            # Brave can hand back the passages that answer the question along with their pages: one
+            # request, no page fetching. When it has none, the ordinary search below takes its turn.
+            search_results, passages = _brave_passages(query, time_filter, max(max_pages, 3))
+            if search_results:
+                provider_attempts[provider_name] = f"ok ({len(search_results)}, with passages)"
+                logger.info(f"Comprehensive search: brave returned passages from {len(search_results)} pages")
+                used_provider = provider_name
+                break
         last_err = None
         empty = False
         for attempt in range(2):
@@ -289,11 +387,14 @@ def comprehensive_web_search(
                 if search_results:
                     provider_attempts[provider_name] = f"ok ({len(search_results)})"
                     logger.info(f"Comprehensive search: {provider_name} returned {len(search_results)} results")
+                    used_provider = provider_name
                     break
                 empty = True
             except Exception as e:
                 last_err = e
                 logger.warning(f"Comprehensive search: {provider_name} attempt {attempt + 1} failed: {e}")
+            if provider_name == "kiwix":
+                break  # local and deterministic: a retry returns the same thing
         if search_results:
             break
         if last_err is not None:
@@ -304,6 +405,14 @@ def comprehensive_web_search(
     if not search_results:
         tally = ", ".join(f"{p}:{r}" for p, r in provider_attempts.items()) or "no providers configured"
         any_errors = any(r.startswith("error") for r in provider_attempts.values())
+        if offline:
+            msg = (
+                "The internet is unreachable and the offline library has nothing matching this query. "
+                "The library is searched by keyword — retry with fewer, more specific words "
+                "(for example the name of the thing rather than a whole question)."
+            )
+            logger.warning(msg)
+            return (msg, []) if return_sources else msg
         if any_errors:
             msg = f"Web search failed — all providers errored or returned empty. Tried: {tally}"
         else:
@@ -315,7 +424,12 @@ def comprehensive_web_search(
         logger.warning(msg)
         return (msg, []) if return_sources else msg
 
-    search_results = rank_search_results(query, search_results)
+    from_library = used_provider == "kiwix"
+    if not from_library and not passages:
+        # Library hits arrive already ordered (exact titles first, then by how
+        # much of the question they cover); the web ranker's domain/recency
+        # signals mean nothing for them.
+        search_results = rank_search_results(query, search_results)
 
     # URL filter helper
     def url_passes_filters(url: str) -> bool:
@@ -362,11 +476,18 @@ def comprehensive_web_search(
         r["url"]: i for i, r in enumerate(search_results, 1) if r.get("url")
     }
 
-    # Fetch content in parallel
+    # Fetch content in parallel — unless the provider already gave the passages
     fetched_content = []
+    if passages:
+        for result in search_results:
+            parts = passages.get(result["url"])
+            if parts:
+                fetched_content.append({"url": result["url"], "title": result["title"], "content": "\n\n".join(parts),
+                                        "success": True, "source_index": _url_index.get(result["url"]), "passages": True})
+        filtered_urls = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {
-            executor.submit(fetch_webpage_content, url, 8, retry_attempt=0): url
+            executor.submit(_fetch_result_content, url, query): url
             for url in filtered_urls
         }
         for future in as_completed(future_to_url):
@@ -398,9 +519,26 @@ def comprehensive_web_search(
         output_parts.append("")
 
     output_parts.append("=" * 70)
-    output_parts.append("WEB SEARCH RESULTS AND FETCHED CONTENT")
+    if from_library:
+        output_parts.append("OFFLINE LIBRARY RESULTS AND FETCHED CONTENT")
+        if offline:
+            output_parts.append(
+                "NOTE: the internet is unreachable. These results come from the offline reference "
+                "library on this server (Wikipedia snapshot, manuals, Q&A archives) — not live web pages."
+            )
+        else:
+            output_parts.append(
+                "NOTE: the web providers returned nothing, so these results come from the offline "
+                "reference library on this server — not live web pages."
+            )
+        output_parts.append("Tell the user when a question needs information newer than the library holds.")
+    else:
+        output_parts.append("WEB SEARCH RESULTS AND FETCHED CONTENT")
     output_parts.append(f"Query: {query}")
-    output_parts.append(f"Searched {len(search_results)} results, fetched {len(fetched_content)} pages")
+    if passages:
+        output_parts.append(f"The parts of {len(fetched_content)} pages that bear on the question")
+    else:
+        output_parts.append(f"Searched {len(search_results)} results, fetched {len(fetched_content)} pages")
     output_parts.append("=" * 70)
     output_parts.append("")
 
@@ -413,7 +551,28 @@ def comprehensive_web_search(
         if result.get("age"):
             output_parts.append(f"    Age: {result['age']}")
 
-    if fetched_content:
+    if fetched_content and passages:
+        # Passages are already the relevant parts: no trimming to a page's first screens, and none of
+        # the guessed key points, quotes and statistics a whole page needs. The room is shared out in
+        # the provider's order, so the best page gets the most of it.
+        output_parts.append("\n" + "=" * 70)
+        output_parts.append("PASSAGES FROM THE PAGES (the parts that bear on the question):")
+        output_parts.append("-" * 50)
+        room = _PASSAGE_ROOM
+        for content in fetched_content:
+            if room < 300:
+                break
+            text = content["content"][: min(_PASSAGE_ROOM_PER_PAGE, room)]
+            if len(content["content"]) > len(text):
+                text = text.rsplit(" ", 1)[0] + " … [more on the page]"
+            room -= len(text)
+            _idx = content.get("source_index")
+            output_parts.append(f"\n{f'[CONTENT {_idx}]' if _idx else '[CONTENT]'} From: {content['url']}")
+            output_parts.append(f"Title: {content['title']}")
+            output_parts.append("-" * 30)
+            output_parts.append(text)
+            output_parts.append("")
+    elif fetched_content:
         output_parts.append("\n" + "=" * 70)
         output_parts.append("FETCHED PAGE CONTENT:")
         output_parts.append("-" * 50)
@@ -467,7 +626,8 @@ def comprehensive_web_search(
     instructions = (
         "\n\nIMPORTANT INSTRUCTIONS:\n"
         "1. Use the above web search results and fetched content to answer the user's question\n"
-        "2. Prioritize information from the FETCHED PAGE CONTENT section as it contains actual page data\n"
+        + ("2. Prioritize information from the PASSAGES section as it contains actual page text\n" if passages else
+           "2. Prioritize information from the FETCHED PAGE CONTENT section as it contains actual page data\n") +
         "3. Cross-reference multiple sources when possible\n"
         "4. If the information is time-sensitive, pay attention to the age of the results\n"
         "5. Be explicit if the search results don't contain sufficient information to fully answer the question"

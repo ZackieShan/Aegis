@@ -111,15 +111,29 @@ function _row(job) {
   return row;
 }
 
+// Jobs seen unfinished: when one of them turns up done, the Gallery has
+// something new and is told to look.
+const _pending = new Set();
+function _noteFinished(jobs) {
+  let landed = false;
+  for (const job of jobs) {
+    const live = !['done', 'error', 'cancelled'].includes(job.status);
+    if (live) _pending.add(job.id);
+    else if (_pending.delete(job.id) && job.status === 'done') landed = true;
+  }
+  if (landed) window.dispatchEvent(new CustomEvent('gallery-refresh', { detail: { source: 'queue' } }));
+}
+
 function _render(data) {
   if (!_host) return;
+  _noteFinished(data.jobs || []);
   _host.replaceChildren();
 
   const head = _el('div', 'q-head');
   head.appendChild(_el('h2', '', 'Queue'));
   head.appendChild(_el('div', 'admin-toggle-sub',
-    'Everything slow, in one place — renders, films, automations and research. '
-    + 'Media renders run one at a time; they share a single GPU.'));
+    'What is being made right now, and what was made lately. Pictures, videos and songs '
+    + 'are made one at a time — they share one graphics card.'));
   _host.appendChild(head);
 
   if (data.gpu_busy && data.gpu_job) {
@@ -133,7 +147,7 @@ function _render(data) {
 
   const jobs = data.jobs || [];
   if (!jobs.length) {
-    _host.appendChild(_el('div', 'q-empty', 'Nothing running. Generate an image or video and it shows up here.'));
+    _host.appendChild(_el('div', 'q-empty', 'Nothing is being made right now. Start something under Create and it shows up here.'));
     return;
   }
 

@@ -2528,6 +2528,49 @@ body.bg-pattern-sparkles {
       color: var(--fg);
       background: color-mix(in srgb, var(--fg) 9%, transparent);
     }
+    /* The camera button's menu and the "what to do with this photo" sheet */
+    /* Deep Research on the message box: hidden means hidden (the buttons' own display would win otherwise). */
+    #composer-research-btn[hidden], #overflow-deepresearch-btn[hidden] { display: none !important; }
+    .photo-menu {
+      position: fixed; z-index: 1200; min-width: 190px; padding: 6px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    .photo-menu-item {
+      display: flex; align-items: center; gap: 10px; width: 100%; height: auto; min-height: 42px; padding: 8px 12px;
+      background: none; border: none; border-radius: 8px; color: var(--fg); font: inherit; font-size: 0.95rem;
+      text-align: left; cursor: pointer;
+    }
+    .photo-menu-item:hover, .photo-menu-item:focus-visible { background: color-mix(in srgb, var(--fg) 9%, transparent); outline: none; }
+    .photo-menu-item svg { flex: 0 0 auto; opacity: 0.75; }
+    .photo-scrim {
+      position: fixed; inset: 0; z-index: 1300; display: flex; align-items: flex-end; justify-content: center;
+      background: rgba(0, 0, 0, 0.55);
+    }
+    .photo-sheet {
+      width: 100%; max-width: 480px; max-height: 92dvh; overflow: auto; display: flex; flex-direction: column; gap: 10px;
+      padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-bottom: none; border-radius: 18px 18px 0 0;
+    }
+    @media (min-width: 640px) {
+      .photo-scrim { align-items: center; }
+      .photo-sheet { border-radius: 16px; border-bottom: 1px solid var(--border); }
+    }
+    .photo-preview { align-self: center; flex: 0 1 auto; min-height: 0; max-width: 100%; max-height: 30dvh; border-radius: 10px; object-fit: contain; }
+    .photo-title { font-weight: 600; font-size: 1rem; }
+    .photo-choice {
+      display: flex; flex-direction: column; gap: 3px; width: 100%; height: auto; flex: 0 0 auto; padding: 12px 14px; text-align: left; cursor: pointer;
+      background: transparent; color: var(--fg); border: 1px solid var(--border); border-radius: 12px; font: inherit;
+    }
+    .photo-choice b { font-size: 1rem; }
+    .photo-choice span { font-size: 0.84rem; opacity: 0.7; line-height: 1.35; }
+    .photo-choice.primary { background: color-mix(in srgb, var(--accent, var(--red)) 18%, transparent); border-color: color-mix(in srgb, var(--accent, var(--red)) 55%, var(--border)); }
+    .photo-choice:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+    .photo-hint {
+      width: 100%; height: auto; flex: 0 0 auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+      background: transparent; color: var(--fg); font: inherit; font-size: 0.92rem;
+    }
+    .photo-cancel { align-self: center; height: auto; flex: 0 0 auto; padding: 8px 18px; background: none; border: none; color: var(--fg); opacity: 0.65; font: inherit; cursor: pointer; }
     /* GitHub-style task lists (- [ ] / - [x]) */
     li.task-item {
       list-style: none;
@@ -2830,6 +2873,86 @@ body.bg-pattern-sparkles {
     #mode-chat-btn {
       border-radius: 0 10px 10px 0;
     }
+    /* Code is the third mode (js/codeMode.js). Inside the app it IS agent
+       mode, so the Agent button keeps its `active` class; while Code is the
+       selected mode it must not look selected. */
+    #mode-code-btn {
+      border-radius: 0 10px 10px 0;
+    }
+    .mode-toggle.mode-toggle-three #mode-chat-btn {
+      border-radius: 0;
+    }
+    .mode-toggle.mode-third #mode-agent-btn.active,
+    .mode-toggle.mode-third #mode-agent-btn.active:focus {
+      color: color-mix(in srgb, var(--fg) 40%, transparent) !important;
+      cursor: pointer;
+    }
+    .mode-toggle.mode-third #mode-agent-btn.active:hover {
+      color: color-mix(in srgb, var(--fg) 60%, transparent) !important;
+    }
+    /* Code mode's machine picker: a pill among the composer's indicators,
+       with a small menu that opens upward. */
+    .code-host-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+    #code-host-btn.code-host-remote #code-host-name {
+      font-weight: 700;           /* working on another computer: make that hard to miss */
+    }
+    .code-host-menu {
+      position: fixed;            /* placed by codeMode.js; it sits on <body> */
+      min-width: 230px;
+      max-width: min(320px, 86vw);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 4px;
+      box-shadow: var(--shadow-md);
+      z-index: 1000;
+    }
+    .code-host-menu[hidden] {
+      display: none;
+    }
+    .code-host-head {
+      font-size: 11px;
+      color: color-mix(in srgb, var(--fg) 55%, transparent);
+      padding: 6px 10px 4px;
+    }
+    .code-host-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      width: 100%;
+      height: auto;               /* buttons in the composer have a fixed height */
+      min-height: 0;
+      line-height: 1.25;
+      padding: 8px 10px;
+      background: none;
+      border: none;
+      border-radius: 8px;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .code-host-item:hover {
+      background: color-mix(in srgb, var(--fg) 8%, transparent);
+    }
+    .code-host-item.active {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+    .code-host-item-about {
+      font-size: 11px;
+      color: color-mix(in srgb, var(--fg) 55%, transparent);
+    }
+    .code-host-hint {
+      font-size: 11px;
+      line-height: 1.45;
+      color: color-mix(in srgb, var(--fg) 55%, transparent);
+      padding: 6px 10px 8px;
+    }
     .mode-toggle-btn {
       background: none;
       border: none;
@@ -3072,7 +3195,7 @@ body.bg-pattern-sparkles {
       transform: rotate(90deg);
     }
     .model-picker-list {
-      max-height: min(280px, 50dvh);
+      max-height: min(420px, 56dvh);      /* rows carry a description now */
       overflow-y: auto;
     }
     .model-picker-list.is-empty {
@@ -3117,6 +3240,73 @@ body.bg-pattern-sparkles {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    /* Name on top; under it a sentence on what the model is and what it is for. */
+    .model-picker-list .model-switch-item .mp-model-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .model-picker-list .model-switch-item.has-note {
+      align-items: flex-start;
+      padding-top: 6px;
+      padding-bottom: 7px;
+    }
+    .model-picker-list .model-switch-item .mp-model-note {
+      font-size: 0.86em;
+      line-height: 1.3;
+      white-space: normal;
+      color: color-mix(in srgb, var(--fg) 74%, transparent);
+    }
+    .model-picker-list .model-switch-item .mp-model-use {
+      color: color-mix(in srgb, var(--fg) 58%, transparent);
+    }
+    .model-picker-list .mp-note-edit {
+      flex: 0 0 auto;
+      background: none;
+      border: none;
+      padding: 0 2px;
+      color: var(--fg);
+      opacity: 0;
+      cursor: pointer;
+      font-size: 0.95em;
+    }
+    .model-picker-list .model-switch-item:hover .mp-note-edit,
+    .model-picker-list .mp-note-edit:focus-visible { opacity: 0.5; }
+    .model-picker-list .mp-note-edit:hover { opacity: 1 !important; }
+    @media (hover: none) { .model-picker-list .mp-note-edit { opacity: 0.35; } }
+    .model-picker-list .mp-note-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px;
+    }
+    .model-picker-list .mp-note-editor-title { font-size: 0.85em; font-weight: 600; }
+    .model-picker-list .mp-note-editor input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--fg);
+      font: inherit;
+      font-size: 0.85em;
+    }
+    .model-picker-list .mp-note-editor-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+    .model-picker-list .mp-note-editor-actions button {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: none;
+      color: var(--fg);
+      font: inherit;
+      font-size: 0.8em;
+      cursor: pointer;
+    }
+    .model-picker-list .mp-note-editor-actions button.primary {
+      background: color-mix(in srgb, var(--red) 18%, transparent);
     }
     .model-picker-list .model-switch-item .model-switch-ep {
       flex: 0 1 auto;
@@ -4624,6 +4814,8 @@ body.bg-pattern-sparkles {
       }
       #mode-agent-btn { border-radius: 12px 0 0 12px; }
       #mode-chat-btn { border-radius: 0 12px 12px 0; }
+      #mode-code-btn { border-radius: 0 12px 12px 0; }
+      .mode-toggle.mode-toggle-three .mode-toggle-btn { padding: 0 11px; }
       /* Diff mode — stack toolbar, bigger buttons */
       .diff-toolbar {
         padding: 8px 12px;
@@ -8962,7 +9154,13 @@ button.hamburger {
 .katex { font-size: 1.1em; }
 
 /* Hide thinking sections globally via settings toggle */
-body.hide-thinking .thinking-section { display: none !important; }
+/* "Show the thinking" off: what was thought is not shown — but while the model is
+   thinking its header stays ("Thinking  6 s", with the moving mark), because a reply
+   that shows nothing for ten seconds looks broken. */
+body.hide-thinking .thinking-section:not(.is-live) { display: none !important; }
+body.hide-thinking .thinking-section.is-live .thinking-content,
+body.hide-thinking .thinking-section.is-live .thinking-toggle { display: none !important; }
+body.hide-thinking .thinking-section.is-live .thinking-header { cursor: default; border-bottom: 0; }
 
 /* Widen chat area via settings toggle */
 body.fullwidth-chat .chat-history {
@@ -11949,6 +12147,10 @@ textarea.memory-add-input {
 .memory-cat-contact {
   background: color-mix(in srgb, #98c379 15%, transparent);
   color: #98c379;
+}
+.memory-cat-interest {
+  background: color-mix(in srgb, #56b6c2 15%, transparent);
+  color: #56b6c2;
 }
 .memory-cat-project {
   background: color-mix(in srgb, var(--hl-string) 15%, transparent);
@@ -25565,6 +25767,138 @@ details.hwfit-serve-advanced > .hwfit-serve-checks:last-of-type {
   align-items: center;
   gap: 6px;
 }
+
+/* ── Studio: three tabs up front, the rest under More ───────────────────── */
+.gallery-tab-more {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; line-height: 1;
+  height: auto; padding: 8px 18px; background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--fg); opacity: 0.6; cursor: pointer; font-size: 13px; font-weight: 500; flex-shrink: 0;
+}
+.gallery-tab-more:hover { opacity: 0.85; }
+.gallery-tab-more.active, .gallery-tab-more[aria-expanded="true"] { opacity: 1; }
+.gallery-tab-more.active { border-bottom-color: var(--red); }
+.gallery-more-menu {
+  position: absolute; z-index: 40; min-width: 220px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+.gallery-more-menu[hidden] { display: none; }
+.gallery-more-menu .gallery-tab,
+.gallery-more-menu .gallery-tab:has(svg) {
+  display: flex; justify-content: flex-start; width: 100%; min-width: 0; height: auto; padding: 10px 12px; gap: 10px;
+  border-bottom: none; border-radius: 8px; font-size: 13.5px; opacity: 0.85; text-align: left;
+}
+.gallery-more-menu .gallery-tab:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); opacity: 1; }
+.gallery-more-menu .gallery-tab.active { background: color-mix(in srgb, var(--red) 16%, transparent); opacity: 1; }
+.gallery-more-menu .gallery-tab:has(svg) .gallery-tab-label { display: inline !important; }
+.gallery-more-menu .gallery-tab .gallery-tab-close { margin-left: auto; }
+/* With four things in the strip there is room for words, however narrow the window. */
+.gallery-tabs > .gallery-tab:has(svg), .gallery-tabs > .gallery-tab-more {
+  width: auto; min-width: 0; font-size: 13px; padding-left: 14px; padding-right: 14px;
+}
+.gallery-tabs > .gallery-tab:has(svg) .gallery-tab-label { display: inline !important; }
+@media (max-width: 600px) {
+  .gallery-tabs > .gallery-tab, .gallery-tabs > .gallery-tab-more { flex: 1 1 0 !important; padding: 11px 4px; }
+}
+
+/* ── Studio → Create ─────────────────────────────────────────────────────── */
+.sh-wrap { max-width: 720px; margin: 0 auto; padding: 14px 14px 28px; display: flex; flex-direction: column; gap: 12px; }
+.sh-lead { font-size: 1.05rem; font-weight: 600; }
+.sh-icon { display: inline-flex; align-items: center; }
+.sh-kinds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.sh-kind {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: auto; min-height: 68px; padding: 10px 6px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent); border: 1px solid var(--border); border-radius: 12px;
+  color: var(--fg); font: inherit; font-size: 0.92rem; font-weight: 500; cursor: pointer; opacity: 0.75;
+}
+.sh-kind:hover { opacity: 1; }
+.sh-kind.on { opacity: 1; background: color-mix(in srgb, var(--red) 16%, transparent); border-color: color-mix(in srgb, var(--red) 60%, var(--border)); }
+.sh-form { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--fg) 3%, transparent); }
+.sh-loading { opacity: 0.6; font-size: 0.9rem; }
+.sh-ask { font-weight: 600; font-size: 0.98rem; }
+.sh-prompt, .sh-input {
+  width: 100%; height: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--fg); font: inherit; font-size: 0.95rem; line-height: 1.45;
+}
+.sh-prompt { resize: vertical; min-height: 76px; }
+.sh-prompt:focus, .sh-input:focus { outline: none; border-color: color-mix(in srgb, var(--red) 70%, var(--border)); }
+select.sh-input { height: 40px; }
+.sh-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sh-label { font-size: 0.8rem; opacity: 0.65; min-width: 52px; }
+.sh-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sh-chip {
+  height: auto; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: transparent;
+  color: var(--fg); font: inherit; font-size: 0.86rem; cursor: pointer; opacity: 0.8;
+}
+.sh-chip:hover { opacity: 1; }
+.sh-chip.on { opacity: 1; background: color-mix(in srgb, var(--red) 20%, transparent); border-color: color-mix(in srgb, var(--red) 60%, var(--border)); font-weight: 500; }
+.sh-field { display: flex; flex-direction: column; gap: 4px; }
+.sh-hint { font-size: 0.78rem; opacity: 0.6; line-height: 1.35; }
+.sh-check { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; cursor: pointer; }
+.sh-check input { width: 18px; height: 18px; accent-color: var(--red); }
+.sh-more { border-top: 1px solid var(--border); padding-top: 8px; }
+.sh-more > summary { cursor: pointer; font-size: 0.86rem; opacity: 0.75; padding: 4px 0; user-select: none; }
+.sh-more-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; padding-top: 10px; }
+.sh-say { font-size: 0.86rem; opacity: 0.85; }
+.sh-say.bad, .sh-bad { color: #ff7b7b; opacity: 1; }
+.sh-go-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sh-go {
+  height: auto; min-height: 46px; padding: 10px 26px; border: none; border-radius: 12px; cursor: pointer;
+  background: var(--red); color: #fff; font: inherit; font-size: 1rem; font-weight: 600;
+}
+.sh-go:hover { filter: brightness(1.08); }
+.sh-go:disabled { opacity: 0.55; cursor: default; }
+.sh-act {
+  display: inline-flex; align-items: center; height: auto; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--fg); font: inherit; font-size: 0.82rem; cursor: pointer; text-decoration: none; opacity: 0.85; align-self: flex-start;
+}
+.sh-act:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); text-decoration: none; }
+.sh-act.strong { border-color: color-mix(in srgb, var(--red) 60%, var(--border)); background: color-mix(in srgb, var(--red) 14%, transparent); font-weight: 500; }
+.sh-source { display: flex; align-items: center; gap: 12px; padding: 8px; border: 1px dashed var(--border); border-radius: 12px; flex-wrap: wrap; }
+.sh-source img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; }
+.sh-source-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 160px; font-size: 0.86rem; }
+.sh-source-text span { opacity: 0.65; }
+.sh-none { display: flex; flex-direction: column; gap: 6px; padding: 8px 2px; font-size: 0.9rem; }
+.sh-none span { opacity: 0.7; }
+.sh-gpu { font-size: 0.84rem; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, #e2a336 16%, transparent); }
+.sh-section { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; margin-top: 6px; }
+.sh-jobs { display: flex; flex-direction: column; gap: 10px; }
+.sh-job { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--fg) 3%, transparent); }
+.sh-job.failed { border-color: color-mix(in srgb, #ff7b7b 45%, var(--border)); }
+.sh-job-head { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.sh-job-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-job-took { font-size: 0.76rem; opacity: 0.55; }
+.sh-job-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.84rem; opacity: 0.9; flex-wrap: wrap; }
+.sh-bar { height: 6px; border-radius: 6px; background: color-mix(in srgb, var(--fg) 12%, transparent); overflow: hidden; }
+.sh-bar i { display: block; height: 100%; width: 0; background: var(--red); border-radius: 6px; transition: width 0.6s ease; }
+.sh-bar.unknown i { width: 35%; animation: sh-slide 1.4s ease-in-out infinite; }
+@keyframes sh-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(300%); } }
+.sh-preview { display: block; max-width: 100%; max-height: 62vh; border-radius: 10px; align-self: center; cursor: pointer; background: #000; }
+video.sh-preview { cursor: default; width: 100%; }
+.sh-audio { width: 100%; }
+.sh-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.sh-x { position: absolute; top: 6px; right: 8px; height: auto; padding: 2px 6px; background: none; border: none; color: var(--fg); opacity: 0.5; font-size: 1.1rem; cursor: pointer; }
+/* The app gives every button a panel-coloured hover and every <details> a tinted box. Not these. */
+.sh-go, .sh-go:hover, .sh-go:focus { background: var(--red); color: #fff; }
+.sh-go:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.sh-kind:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.sh-kind.on, .sh-kind.on:hover { background: color-mix(in srgb, var(--red) 16%, transparent); }
+.sh-chip:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.sh-chip.on, .sh-chip.on:hover { background: color-mix(in srgb, var(--red) 20%, transparent); }
+.sh-prompt:hover, .sh-input:hover { background: var(--bg); }
+.sh-x:hover { background: none; opacity: 1; }
+.gallery-tab-more:hover { background: none; }
+details.sh-more, details.sh-more[open] { background: none; border: none; border-top: 1px solid var(--border); border-radius: 0; margin: 0; padding-top: 4px; overflow: visible; }
+details.sh-more > summary, details.sh-more > summary:hover { background: none; border: none; padding: 8px 0 4px; color: var(--fg); font-size: 0.86rem; font-weight: 400; }
+details.sh-more > .sh-more-body { padding: 10px 0 0; font-size: inherit; animation: none; }
+.sh-prompt { max-height: none; overflow-y: auto; }
+@media (max-width: 480px) {
+  .sh-wrap { padding: 10px 8px 24px; }
+  .sh-kinds { gap: 6px; }
+  .sh-kind { min-height: 62px; font-size: 0.84rem; }
+  .sh-go { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .sh-bar.unknown i { animation: none; width: 100%; opacity: 0.4; } }
+
 .gallery-tab-icon {
   display: inline-flex;
   align-items: center;
@@ -40961,3 +41295,112 @@ body.theme-frosted .modal {
 }
 /* .settings-col's display:flex would defeat the hidden attribute */
 #media-style-form[hidden] { display: none !important; }
+
+
+/* ── One line between a person's tools and the server's ─────────────────────────────
+   The server writes data-admin on <html>: "1" for an administrator. Everything marked
+   data-admin-only (and the older .admin-only) is the administrator's — models, engine,
+   connections, schedules, documents, the mode switch, the readouts under a reply. For
+   anyone else it is never drawn. This is what people see; what they may do is decided
+   on the server. */
+html:not([data-admin="1"]) [data-admin-only],
+html:not([data-admin="1"]) .admin-only { display: none !important; }
+
+/* The web-search switch left the message box: the web is used when the question is about
+   something dated. The element stays for the state it carries (see index.html). */
+#web-toggle-btn { display: none !important; }
+
+/* The Workshop: the server's controls, folded away under the everyday tools. */
+.workshop-group { margin-top: 6px; }
+.workshop-toggle { width: 100%; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.workshop-chevron { flex-shrink: 0; opacity: .45; margin-right: 6px; transition: transform .15s ease; }
+.workshop-toggle[aria-expanded="true"] .workshop-chevron { transform: rotate(90deg); }
+.workshop-items { margin: 2px 0 4px 13px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); }
+.workshop-items[hidden] { display: none; }
+#user-bar-family { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* The mode switch: Auto | Code. "No tools" is a setting now and shows here only while
+   it is on. The sliding pill is replaced by a plain mark on the chosen side, so the
+   switch is right whether it has one, two or three positions. */
+.mode-toggle::before { display: none !important; }
+.mode-toggle .mode-toggle-btn.active { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.mode-toggle.mode-third #mode-agent-btn.active { background: transparent; }
+#mode-chat-btn:not(.active) { display: none !important; }
+#mode-chat-btn.active { border-radius: 0 10px 10px 0; color: var(--color-warning, #d9a441); }
+.mode-toggle:not(.mode-toggle-three):not(.mode-chat) { display: none; }      /* Auto alone is not a choice */
+#mode-code-btn { border-radius: 0; }
+.mode-toggle:not(.mode-chat) #mode-code-btn { border-radius: 0 10px 10px 0; }
+/* It used to drop out at phone width, which left Code with no button there. Two short
+   words fit; it goes only when the bar is narrower than a phone. */
+@container chatbar (max-width: 340px) { .chat-input-right .mode-toggle { display: flex !important; } }
+@container chatbar (max-width: 290px) { .chat-input-right .mode-toggle { display: none !important; } }
+@container chatbar (max-width: 340px) { .chat-input-right .mode-toggle:not(.mode-toggle-three):not(.mode-chat) { display: none !important; } }
+
+/* The workings — which model, how fast, how full the context is, each tool by its
+   internal name — are off unless the administrator switches them on
+   (Settings, Appearance, "Show the workings"). A step still says in plain words what
+   was used, and opens when tapped. */
+body:not(.show-workings) .response-metrics,
+body:not(.show-workings) .metrics-divider,
+body:not(.show-workings) .ctx-ring,
+body:not(.show-workings) .ctx-divider,
+body:not(.show-workings) .role-provider-logo { display: none !important; }
+body:not(.show-workings) .agent-thread-tool[data-plain] { font-size: 0; letter-spacing: 0; }
+body:not(.show-workings) .agent-thread-tool[data-plain]::after {
+  content: attr(data-plain); font-size: 13px; text-transform: none; letter-spacing: 0; color: color-mix(in srgb, var(--fg) 75%, transparent); font-weight: 600;
+}
+/* The name over a reply is the assistant's, not the model's id. (::before is the coloured dot.) */
+body:not(.show-workings) .msg-ai .role[data-plain] { font-size: 0; gap: 0; }
+body:not(.show-workings) .msg-ai .role[data-plain]::before { margin-right: 6px; }
+body:not(.show-workings) .msg-ai .role[data-plain]::after { content: attr(data-plain); font-size: 0.875rem; order: 1; }
+body:not(.show-workings) .msg-ai .role[data-plain] .role-timestamp { font-size: 0.7rem; order: 2; }
+
+/* Scheduled: automations that run by themselves, shown in the same list as the tasks. */
+.tasks-autos-head { margin: 14px 2px 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .55; }
+.tasks-auto-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px; margin-bottom: 6px; border: 1px solid var(--border, rgba(127,127,127,.25)); border-radius: 10px; }
+.tasks-auto-row.off { opacity: .6; }
+.tasks-auto-main { flex: 1 1 auto; min-width: 0; }
+.tasks-auto-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tasks-auto-when { font-size: 11.5px; opacity: .7; margin-top: 2px; }
+.tasks-auto-failed { color: var(--danger, #d33); opacity: 1; }
+.tasks-auto-actions { display: flex; gap: 6px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+
+/* ── Signs of life while a reply is being made ─────────────────────────────────────
+   The moving mark and the words are drawn by static/js/working.js (its styles travel
+   with it); these rules only place them in this app's chat. */
+.ai-working { display: inline-flex; flex-direction: column; gap: 6px; max-width: 100%; font-family: inherit !important; white-space: normal !important; font-size: 0.9em; }
+.ai-working-line { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.ai-working-label { font-weight: 500; }
+.ai-working-bar { width: min(240px, 62vw); }
+.agent-thinking-dots .ai-spinner.ai-working { font-size: 0.85em; letter-spacing: 0; }
+.agent-thread-wave { letter-spacing: 0; display: inline-flex; align-items: center; }
+.agent-thread-wave .working-mark { width: 11px; height: 10px; }
+
+/* Thinking, live: a compact window on what the model is thinking — the newest lines,
+   following along — under a header that moves. It opens fully when tapped and folds
+   to "Thought for 6 s" when the answer starts. */
+.thinking-header-left .working-mark { display: inline-flex; overflow: visible; flex: 0 0 auto; }
+.thinking-section.is-live .thinking-content.expanded { max-height: 118px; padding: 8px 12px 10px; scroll-behavior: smooth; }
+.thinking-section.is-live .thinking-content.is-long { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px); mask-image: linear-gradient(to bottom, transparent 0, #000 26px); }
+.thinking-section.is-live .thinking-content-inner { font-style: italic; opacity: 0.8; }
+.thinking-section.is-live .thinking-content-inner > :first-child { margin-top: 0; }
+.thinking-section.is-live .thinking-content-inner > :last-child { margin-bottom: 0; }
+.thinking-section .live-think-timer:empty { display: none; }
+
+
+/* ── Reading aloud ─────────────────────────────────────────────────────────────────
+   The speaker under an answer is drawn for everyone and shown when there is a voice to
+   read with (tts-ai.js marks the page). While a recorded voice is being prepared the
+   button carries the moving mark and the line beside it says how far along it is. */
+.ai-tts-button { display: none; background: none; border: none; color: color-mix(in srgb, var(--fg) 50%, transparent); cursor: pointer; padding: 2px 6px; border-radius: 4px; line-height: 1; align-items: center; justify-content: center; min-width: 26px; min-height: 22px; transition: color .15s; }
+body.can-read-aloud .ai-tts-button { display: inline-flex; }
+.ai-tts-button:hover, .ai-tts-button.playing, .ai-tts-button.loading { color: var(--accent, var(--red)); }
+.ai-tts-button .working-mark { width: 12px; height: 11px; }
+.read-aloud-status { font-size: 11.5px; color: color-mix(in srgb, var(--fg) 60%, transparent); margin: 0 6px 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: min(46vw, 320px); }
+.read-aloud-status[hidden] { display: none; }
+#overflow-tts-btn { display: none; }
+body.can-read-aloud #overflow-tts-btn { display: flex; }
+.reading-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.reading-row .settings-select { flex: 1 1 180px; min-width: 0; }
+.reading-note { font-size: 11.5px; line-height: 1.45; color: color-mix(in srgb, var(--fg) 58%, transparent); margin-top: 6px; min-height: 1.4em; }
+.reading-note.bad { color: var(--color-error, #d66); }

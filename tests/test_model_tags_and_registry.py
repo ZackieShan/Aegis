@@ -45,6 +45,63 @@ def test_companions_detected(name):
     assert is_companion(tags), name
 
 
+# ── 2026-11 model refresh: the new big chat models and their companions ──────
+@pytest.mark.parametrize("name", [
+    "mistral_3_small_flux2_bf16.safetensors",     # FLUX.2-dev text encoder — NOT an image model
+    "mistral_3_small_flux2_fp8.safetensors",
+    "qwen_2.5_vl_7b.safetensors",                 # HunyuanVideo 1.5 text encoder, full precision
+    "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+    "qwen_3_4b.safetensors",                      # Z-Image text encoder
+    "qwen_0.6b_ace15.safetensors",                # ACE-Step text encoders
+    "qwen3vl_4b_fp8_scaled.safetensors",          # Krea 2 text encoder
+])
+def test_text_encoder_repacks_are_companions(name):
+    tags = classify(name)
+    assert is_companion(tags), name
+    assert tags["capabilities"] == ["companion"]  # never offered as a chat/image/vision model
+
+
+@pytest.mark.parametrize("name", [
+    "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",         # a real vision LLM keeps its tags
+    "Qwen3.6-35B-A3B-Q8_0.gguf",
+    "gemma-3-12b-it-UD-Q4_K_XL.gguf",
+    "mistralai_Mistral-Small-4-119B-2603-Q4_K_M-00001-of-00002.gguf",
+    "mistral-small-4",
+    "qwen-vl",
+])
+def test_real_llms_are_not_mistaken_for_text_encoders(name):
+    assert not is_companion(classify(name)), name
+
+
+def test_new_chat_models_get_useful_tags():
+    oss = classify("kldzj_gpt-oss-120b-heretic-MXFP4_MOE-00001-of-00002.gguf")
+    assert {"chat", "uncensored", "moe"} <= set(oss["capabilities"])       # "heretic" = decensored
+    assert "step-by-step reasoning" in oss["best_for"]
+    assert "uncensored" not in classify("gpt-oss-120b")["capabilities"]     # the bare alias claims nothing
+
+    mm = classify("MiniMax-M2.1-REAP-139B-A10B.Q4_K_M.gguf")
+    assert {"coding", "chat", "moe"} <= set(mm["capabilities"])              # A10B = MoE
+    assert "coding & agent tool use" in classify("minimax-m2.1-reap")["best_for"]
+
+    steam = classify("GLM-Steam-106B-A12B-v1b-Q4_K_M-00001-of-00002.gguf")
+    assert steam["best_for"][0] == "creative writing & roleplay" and "moe" in steam["capabilities"]
+    assert "creative writing & roleplay" not in classify("glm-4.7-flash-q4")["best_for"]
+
+    assert "translation & multilingual chat" in classify("mistral-small-4")["best_for"]
+    assert "uncensored" in classify("Huihui-Qwen3.8-Flash-Next-abliterated")["capabilities"]
+
+
+@pytest.mark.parametrize("name,is_moe", [
+    ("Qwen3.6-35B-A3B-Q8_0.gguf", True),
+    ("Qwopus3.5-122B-A10B-Kimi-K2.6-destill-healed-abliterated-Q4_K_M.gguf", True),
+    ("Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-Q5_K_M.gguf", False),   # dense
+    ("supergemma4-26b-uncensored-fast-v2-Q4_K_M.gguf", False),
+    ("llama-3.1-8b-instruct", False),             # "a" + digits elsewhere must not trip it
+])
+def test_moe_detected_from_active_param_token(name, is_moe):
+    assert ("moe" in classify(name)["capabilities"]) is is_moe, name
+
+
 def test_wanda_chat_never_matches_wan():
     caps = classify("wanda-chat")["capabilities"]
     assert caps == ["chat"]

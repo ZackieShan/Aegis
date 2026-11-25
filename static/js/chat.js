@@ -13,6 +13,7 @@ import chatStream from './chatStream.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
+import working from './working.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
@@ -202,20 +203,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       }
       const node = document.createElement('div');
       node.className = 'agent-thread-node running';
-      node.innerHTML = '<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">▶</span><span class="agent-thread-tool">Writing</span><span class="agent-thread-wave">▁▂▃</span></div><div class="agent-thread-content"></div>';
+      node.innerHTML = '<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">▶</span><span class="agent-thread-tool">Writing</span><span class="agent-thread-wave">' + working.MARK_HTML + '</span></div><div class="agent-thread-content"></div>';
       thread.appendChild(node);
       chatBox.insertBefore(thread, msg);
       msg._docWritingThread = thread;
 
-      const waveEl = node.querySelector('.agent-thread-wave');
-      if (waveEl) {
-        const waveFrames = ['▁▂▃', '▂▃▄', '▃▄▅', '▄▅▆', '▅▆▇', '▆▅▄', '▅▄▃', '▄▃▂'];
-        let waveIdx = 0;
-        node._waveInterval = setInterval(() => {
-          waveIdx = (waveIdx + 1) % waveFrames.length;
-          waveEl.textContent = waveFrames[waveIdx];
-        }, 100);
-      }
       node._startTime = Date.now();
       node._elapsedTicker = setInterval(() => {
         const hdr = node.querySelector('.agent-thread-header');
@@ -228,8 +220,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           if (icon && icon.nextSibling) hdr.insertBefore(el, icon.nextSibling);
           else hdr.appendChild(el);
         }
-        const s = (Date.now() - node._startTime) / 1000;
-        el.textContent = s < 60 ? `${s.toFixed(2)}s` : `${Math.floor(s / 60)}m ${(s % 60).toFixed(2).padStart(5, '0')}s`;
+        el.textContent = _stepElapsed(Date.now() - node._startTime);
       }, 50);
     }
     msg.style.display = 'none';
@@ -256,6 +247,16 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       const header = node.querySelector('.agent-thread-header');
       if (header) header.appendChild(status);
     }
+  }
+
+  /** How long a running step has taken. With the workings shown it counts in hundredths
+   *  (1.00, 1.05, …) so a long command visibly ticks; otherwise in whole seconds, from the third. */
+  function _stepElapsed(ms) {
+    if (document.body.classList.contains('show-workings')) {
+      const s = ms / 1000;
+      return s < 60 ? `${s.toFixed(2)}s` : `${Math.floor(s / 60)}m ${(s % 60).toFixed(2).padStart(5, '0')}s`;
+    }
+    return ms >= 3000 ? working.seconds(ms) : '';
   }
 
   let currentAccumulated = ''; // Track accumulated text across function scope
@@ -941,9 +942,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     const scheduleFirstTokenWaitMessages = () => {
       clearFirstTokenWaitTimers();
       const steps = [
-        [20000, 'Still waiting for first token'],
-        [60000, 'Large local model is pre-filling context'],
-        [120000, 'Still working - no tokens yet from the model'],
+        [20000, 'Still reading'],
+        [60000, 'Still reading. A long chat takes a while'],
+        [120000, 'Still at it. Nothing has come back from the model yet'],
       ];
       firstTokenWaitTimers = steps.map(([ms, text]) => setTimeout(() => {
         if (!accumulated && spinner && spinner.element && !(currentAbort && currentAbort.signal.aborted)) {
@@ -1224,7 +1225,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       // on; explicit web/current-info requests are handled by the backend
       // intent gate.
       const toggleState = Storage.loadToggleState();
-      let isAgentMode = (toggleState.mode || 'chat') === 'agent';
+      let isAgentMode = (toggleState.mode || 'agent') === 'agent';
       const incognitoChk = el('incognito-toggle');
       const isIncognito = !!(incognitoChk && incognitoChk.checked);
       // Auto-escalate to agent mode when a document is open — the user expects
@@ -1257,6 +1258,16 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         fd.set('mode', 'chat');
       }
       fd.append('allow_bash', el('bash-toggle').checked ? 'true' : 'false');
+      // Code mode: a coding agent on the machine picked in the composer. It
+      // implies the shell; the server decides whether this account may use it.
+      try {
+        const _code = (isAgentMode && window.aegisCodeMode) ? window.aegisCodeMode.sendFields(sessionModule.getCurrentSessionId()) : {};
+        if (_code.code_mode) {
+          fd.append('code_mode', _code.code_mode);
+          fd.append('code_host', _code.code_host);
+          fd.set('allow_bash', 'true');
+        }
+      } catch (_) {}
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');
@@ -1278,7 +1289,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       currentAbort = abortCtrl;
 
       const _tState = Storage.loadToggleState();
-      const _isAgent = (_tState.mode || 'chat') === 'agent';
+      const _isAgent = (_tState.mode || 'agent') === 'agent';
 
       // Timeout: 6 min for research and agent mode, 3 min otherwise
       const timeoutMs = el('research-toggle').checked || _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
@@ -1338,7 +1349,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       holder.style.position = 'relative';
       
       // Create spinner
-      spinner = spinnerModule.create('Initializing', 'right', 'wave');
+      spinner = spinnerModule.create('Getting ready', 'right', 'wave');
       currentSpinner = spinner;
       const bodyDiv = holder.querySelector('.body');
       bodyDiv.appendChild(spinner.createElement());
@@ -1352,7 +1363,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         spinner.updateMessage('Researching');
         setTimeout(() => spinner.updateMessage('Analyzing sources'), 1500);
       } else {
-        spinner.updateMessage('Processing request');
+        spinner.updateMessage('Reading your message');
         scheduleFirstTokenWaitMessages();
       }
       
@@ -1523,6 +1534,12 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       const _searchIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
       const _toolLabels = {
         'web_search': 'Searching',
+        'library_search': 'Searching the library',
+        'manage_kitchen': 'Setting out the recipe',
+        'manage_projects': 'Project',
+        'manage_apps': 'Hosting',
+        'manage_hosts': 'Remote machine',
+        'delegate_agent': 'Handing off',
         'bash': 'Running',
         'python': 'Running',
         'read_document': 'Reading',
@@ -1546,6 +1563,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       };
       const _toolIcons = {
         'web_search': _searchIcon,
+        'library_search': _searchIcon,
       };
       function _thinkingLabel() {
         if (!_lastToolName) {
@@ -1613,10 +1631,31 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         return Math.max(1, Math.ceil(clean.length / 4));
       }
 
-      function _formatThinkStats(seconds, tokenCount) {
+      function _formatThinkStats(seconds, tokenCount, done) {
+        const full = document.body.classList.contains('show-workings');
+        const tokens = full && tokenCount ? tokenCount + ' tok' : '';
+        if (done) return tokens;                       // the header itself says "Thought for 6 s"
+        if (!full) return seconds >= 1 ? Math.floor(seconds) + ' s' : '';
         const time = seconds ? seconds + 's' : '';
-        const tokens = tokenCount ? tokenCount + ' tok' : '';
         return time && tokens ? time + ' · ' + tokens : (time || tokens);
+      }
+
+      /** The live thinking box stops being live: no moving mark, and its header says how long it took. */
+      function _settleLiveThinking(elapsed) {
+        if (_liveThinkSection) {
+          _liveThinkSection.classList.remove('is-live');
+          const _mark = _liveThinkSection.querySelector('.working-mark');
+          if (_mark) _mark.remove();
+          // Fold it away now that the answer (or the next step) is coming; one tap opens it again.
+          if (_liveThinkContent) _liveThinkContent.classList.remove('expanded', 'is-long');
+          if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
+        }
+        if (_liveThinkHeader) {
+          _liveThinkHeader.classList.remove('working-label');
+          const _label = markdownModule.thoughtLabel ? markdownModule.thoughtLabel(elapsed) : '';
+          if (_label) { _liveThinkHeader.textContent = _label; _liveThinkHeader.dataset.fixed = '1'; }
+          else _liveThinkHeader.textContent = 'View thinking process';
+        }
       }
 
       function _replyAfterClosedThinking(text) {
@@ -1812,10 +1851,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   accumulated = accumulated.replace(/<think>/i, '<think time="' + _elapsedDone + '">');
                   roundText = roundText.replace(/<think>/i, '<think time="' + _elapsedDone + '">');
                 }
-                if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                _settleLiveThinking(_elapsedDone);
                 if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                 if (_liveThinkTimerEl && _elapsedDone) {
-                  _liveThinkTimerEl.textContent = _formatThinkStats(_elapsedDone, _liveThinkTokenCount);
+                  _liveThinkTimerEl.textContent = _formatThinkStats(_elapsedDone, _liveThinkTokenCount, true);
                   _liveThinkTimerEl.style.marginLeft = 'auto';
                   _liveThinkTimerEl.style.marginRight = '5px';
                   var _hdrDone = _liveThinkTimerEl.closest('.thinking-header');
@@ -1857,7 +1896,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 typewriterInto(roundHolder.querySelector('.body'), errMsg);
                 break;
               }
-              if (json.delta || json.type === 'agent_prep' || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
+              if (json.delta || json.type === 'reading' || json.type === 'agent_prep' || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
                 clearResponseTimeout();
                 clearProcessingProbe();
                 clearFirstTokenWaitTimers();
@@ -1867,6 +1906,23 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   _cancelThinkingTimer();
                   _replaceThinkingSpinner('Preparing agent');
                 }
+                continue;
+              }
+              if (json.type === 'reading') {
+                // The model is reading the conversation before it writes: a wait
+                // that can be measured, so the waiting line gets a real bar.
+                if (!_isBg && spinner && spinner.element) {
+                  const _read = working.reading(json);
+                  if (_read) {
+                    spinner.updateMessage((json.round || 1) > 1 ? 'Reading what it found' : 'Reading your message');
+                    spinner.setProgress(_read.percent);
+                  }
+                }
+                continue;
+              }
+              if (json.type === 'notice') {
+                // The model had to be loaded first: say so where the wait is shown.
+                if (!_isBg && json.code === 'waking' && json.text && spinner && spinner.element) spinner.updateMessage(json.text);
                 continue;
               }
               if (json.delta) {
@@ -1980,7 +2036,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   if (_thinkLen < 20) {
                     const _afterClose = normalizedRoundText.replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:think(?:ing)?|thought)>/i, '').trim();
                     // Only keep waiting if there's trailing text that looks like thinking (not tool calls)
-                    const _hasToolCall = /```(?:bash|python|web_search|read_file|write_file|create_document|edit_document|manage_|generate_image)/i.test(_afterClose);
+                    const _hasToolCall = /```(?:bash|python|web_search|library_search|read_file|write_file|create_document|edit_document|manage_|generate_image)/i.test(_afterClose);
                     const _hasOrphanClose = /<\/(?:think(?:ing)?|thought)>/i.test(_afterClose);
                     if (!_hasToolCall && (_hasOrphanClose || (Date.now() - thinkingStartTime) < 500)) {
                       hasUnclosedThink = true; // keep waiting for real </think>
@@ -1999,9 +2055,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   thinkContent.style.minHeight = '';
                   _liveThinkDomId = 'live-think-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
                   thinkContent.innerHTML = `
-                    <div class="thinking-section">
+                    <div class="thinking-section is-live">
                       <div class="thinking-header" data-thinking-id="${_liveThinkDomId}">
-                        <div class="thinking-header-left"><span class="live-think-header-text">Thinking\u2026</span></div>
+                        <div class="thinking-header-left">${working.MARK_HTML}<span class="live-think-header-text working-label">Thinking</span></div>
                         <span class="live-think-spinner-slot" style="flex-shrink:0;margin-left:auto;"></span>
                         <span class="live-think-timer" style="font-size:11px;opacity:0.4;font-variant-numeric:tabular-nums;margin-left:6px;margin-right:5px;"></span>
                         <span class="thinking-toggle live-think-toggle expanded" id="${_liveThinkDomId}-toggle"></span>
@@ -2027,15 +2083,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                     _thinkTimerRAF = requestAnimationFrame(_tickThinkTimer);
                   }
                   _thinkTimerRAF = requestAnimationFrame(_tickThinkTimer);
-                  // Whirlpool spinner
-                  if (_liveThinkSpinnerSlot) {
-                    var _wp = spinnerModule.createWhirlpool(12);
-                    _wp.element.style.margin = '0';
-                    _wp.element.style.width = '12px';
-                    _wp.element.style.height = '12px';
-                    _wp.element.style.transform = 'translateY(-1px)'; // align the whirlpool with the header text
-                    _liveThinkSpinnerSlot.appendChild(_wp.element);
-                  }
+                  working.ensureStyles();   // the moving mark in the header
                 } else if (hasUnclosedThink && isThinking) {
                   if (_liveThinkInner) {
                     // Extract raw thinking text (strip known thinking wrappers and prefixes)
@@ -2058,6 +2106,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                       var nearBottom = thinkBox.scrollHeight - thinkBox.clientHeight - thinkBox.scrollTop < 80;
                       if (nearBottom) thinkBox.scrollTop = thinkBox.scrollHeight;
                       _followThinking = nearBottom;
+                      thinkBox.classList.toggle('is-long', thinkBox.scrollHeight > thinkBox.clientHeight + 6 && thinkBox.scrollTop > 4);
                     }
                   }
                   if (_followThinking) uiModule.scrollHistory();
@@ -2095,11 +2144,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                     accumulated = accumulated.replace(/<think>/i, '<think time="' + elapsed + '">');
                     roundText = roundText.replace(/<think>/i, '<think time="' + elapsed + '">');
                   }
-                  if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                  _settleLiveThinking(elapsed);
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                   // Move timer to right side of header
                   if (_liveThinkTimerEl && elapsed) {
-                    _liveThinkTimerEl.textContent = _formatThinkStats(elapsed, _liveThinkTokenCount);
+                    _liveThinkTimerEl.textContent = _formatThinkStats(elapsed, _liveThinkTokenCount, true);
                     _liveThinkTimerEl.style.marginLeft = 'auto';
                     _liveThinkTimerEl.style.marginRight = '5px';
                     var _hdrRow = _liveThinkTimerEl.closest('.thinking-header');
@@ -2313,6 +2362,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                     holder._requestedModel = json.requested_model || json.model || holder._requestedModel;
                     holder._actualModel = json.model || holder._actualModel || holder._requestedModel;
                     if (json.suffix) holder._roleSuffix = json.suffix;
+                    // Auto (services/router.py) says how it answered this turn:
+                    // "quick" for a plain or simple one, "careful" for a hard one.
+                    if (json.auto && json.auto.label && !holder._roleSuffix) holder._roleSuffix = json.auto.label;
+                    if (json.auto && json.auto.why) holder._autoWhy = json.auto.why;
                     // Prepend character name if sent by server or set locally
                     var _charName = json.character_name || (presetsModule.getCharacterName ? presetsModule.getCharacterName() : '');
                     if (_charName) holder._characterName = _charName;
@@ -2320,6 +2373,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                       suffix: holder._roleSuffix,
                       characterName: holder._characterName,
                     });
+                    if (holder._autoWhy) roleEl.title = 'Auto: ' + holder._autoWhy;
                   }
                 }
               } else if (json.type === 'fallback') {
@@ -2503,7 +2557,19 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 if (currentHolder && json.id) currentHolder.dataset.dbId = json.id;
 
               } else if (json.type === 'tool_start') {
+                // The thinking ended in a tool call instead of in words. Close it here: left open, the
+                // next step's thinking arrives without its opening tag and is drawn as if it were the
+                // answer (and this step's is left as a dead "Thinking" stub instead of a section that opens).
+                var _thinkClosedByTool = _thinkOpen;
+                if (_thinkOpen) {
+                  accumulated += '</think>';
+                  currentAccumulated = accumulated;
+                  _thinkOpen = false;
+                  var bgToolEntry = _backgroundStreams.get(streamSessionId);
+                  if (bgToolEntry) bgToolEntry.accumulated = accumulated;
+                }
                 if (_isBg) continue;
+                if (_thinkClosedByTool) roundText += '</think>';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 // Force-close thinking if still open — tools are real content, not thinking
@@ -2511,8 +2577,12 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   isThinking = false;
                   cancelAnimationFrame(_thinkTimerRAF);
                   var _elapsed2 = thinkingStartTime ? ((Date.now() - thinkingStartTime) / 1000).toFixed(1) : null;
-                  if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
-                  if (_liveThinkTimerEl) _liveThinkTimerEl.textContent = _elapsed2 ? _formatThinkStats(_elapsed2, _liveThinkTokenCount) : '';
+                  if (_elapsed2) {
+                    accumulated = accumulated.replace(/<think>/i, '<think time="' + _elapsed2 + '">');
+                    roundText = roundText.replace(/<think>/i, '<think time="' + _elapsed2 + '">');
+                  }
+                  _settleLiveThinking(_elapsed2);
+                  if (_liveThinkTimerEl) _liveThinkTimerEl.textContent = _elapsed2 ? _formatThinkStats(_elapsed2, _liveThinkTokenCount, true) : '';
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                   // Assign stable IDs
                   var _thinkId2 = 'think-' + Date.now();
@@ -2581,20 +2651,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 const node = document.createElement('div')
                 node.className = 'agent-thread-node running';
                 const cmdHtml = cmd ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
-                node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${toolIcon}</span><span class="agent-thread-tool">${esc(toolLabel)}</span><span class="agent-thread-wave">▁▂▃</span></div><div class="agent-thread-content">${cmdHtml}</div>`;
+                node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${toolIcon}</span><span class="agent-thread-tool">${esc(toolLabel)}</span><span class="agent-thread-wave">${working.MARK_HTML}</span></div><div class="agent-thread-content">${cmdHtml}</div>`;
                 // Expand/collapse via delegated click handler (init at module bottom).
                 threadWrap.appendChild(node);
                 currentToolBubble = node;
                 // Animate the wave
-                const waveEl = node.querySelector('.agent-thread-wave');
-                if (waveEl) {
-                  const waveFrames = ['▁▂▃', '▂▃▄', '▃▄▅', '▄▅▆', '▅▆▇', '▆▅▄', '▅▄▃', '▄▃▂'];
-                  let waveIdx = 0;
-                  node._waveInterval = setInterval(() => {
-                    waveIdx = (waveIdx + 1) % waveFrames.length;
-                    waveEl.textContent = waveFrames[waveIdx];
-                  }, 100);
-                }
                 // Smooth per-second "cooking" timer — ticks every second (not
                 // just on the 2s backend heartbeat) so a long-running tool
                 // always shows visible motion and never reads as frozen.
@@ -2611,9 +2672,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                     if (icon && icon.nextSibling) hdr2.insertBefore(el2, icon.nextSibling);
                     else hdr2.appendChild(el2);
                   }
-                  const s = (Date.now() - node._startTime) / 1000;
-                  // Hundredths so it visibly counts sub-second (1.00, 1.05, …).
-                  el2.textContent = s < 60 ? `${s.toFixed(2)}s` : `${Math.floor(s / 60)}m ${(s % 60).toFixed(2).padStart(5, '0')}s`;
+                  el2.textContent = _stepElapsed(Date.now() - node._startTime);
                 }, 50);
                 uiModule.scrollHistory();
 
@@ -2834,6 +2893,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 if (_pu) _setStoredPlan(_pu);
 
               } else if (json.type === 'agent_step') {
+                // A new step starts with its thinking closed, whatever the last one left.
+                if (_thinkOpen) { accumulated += '</think>'; currentAccumulated = accumulated; _thinkOpen = false; }
                 if (_isBg) continue;
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
@@ -2875,7 +2936,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   newBody.appendChild(spinner.createElement());
                   spinner.start();
                 }
-                if (streamingTTS) window.aiTTSManager._streamSentencesSent = 0;
+                if (streamingTTS) window.aiTTSManager.streamingNewRound();
                 uiModule.scrollHistory();
               } else if (json.type === 'budget_exceeded') {
                 if (_isBg) continue;
@@ -3146,37 +3207,18 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         }
         // Also store raw on the footer target so copy/TTS work
         if (footerTarget !== holder) footerTarget.dataset.raw = accumulated;
-        if (addAITTSButton && accumulated && window.aiTTSManager?._provider !== 'disabled' && window.aiTTSManager?.available) {
-          addAITTSButton(footerTarget, accumulated);
-        }
+        // The speaker under the answer (createMsgFooter draws it; this covers a footer made by an older path).
+        if (addAITTSButton && accumulated) addAITTSButton(footerTarget, accumulated);
         try { window.bonziBuddy?.onReplyDone?.(accumulated); } catch (_) {}
-        // TTS auto-play: streaming mode flushes remaining text, non-streaming enqueues full message
-        if (accumulated && window.aiTTSManager && window.aiTTSManager.autoPlay) {
-          const ttsBtn = holder.querySelector('.ai-tts-button');
-          if (ttsBtn) {
-            var ICON_PLAY_TTS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
-            var ICON_STOP_TTS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
-            const resetFn = () => {
-              ttsBtn.innerHTML = ICON_PLAY_TTS;
-              ttsBtn.classList.remove('playing', 'loading');
-              ttsBtn.style.color = '#6b7280';
-              ttsBtn.title = 'Read aloud';
-            };
-            if (streamingTTS) {
-              // Flush remaining partial sentence and attach the real button
-              window.aiTTSManager.streamingEnd(accumulated);
-              window.aiTTSManager.streamingAttachButton(ttsBtn, resetFn);
-              // If still playing sentences from the stream, show stop icon
-              if (window.aiTTSManager.isPlaying || window.aiTTSManager._processing) {
-                ttsBtn.innerHTML = ICON_STOP_TTS;
-                ttsBtn.classList.add('playing');
-                ttsBtn.style.color = '#ccc';
-                ttsBtn.title = 'Stop';
-              }
-            } else {
-              // Non-streaming fallback (autoPlay toggled mid-stream, etc.)
-              window.aiTTSManager.enqueue(accumulated, ttsBtn, resetFn);
-            }
+        // Reading every answer aloud: a reading that began while the answer was being written gets
+        // the rest of its words and the answer's own speaker to show on; otherwise it starts now.
+        if (window.aiTTSManager) {
+          const ttsBtn = footerTarget.querySelector('.ai-tts-button');
+          if (streamingTTS) {
+            window.aiTTSManager.streamingEnd(roundText);
+            if (ttsBtn) window.aiTTSManager.streamingAttachButton(ttsBtn);
+          } else if (accumulated && window.aiTTSManager.autoPlay && ttsBtn) {
+            window.aiTTSManager.enqueue(footerTarget.dataset.raw || accumulated, ttsBtn);
           }
         }
         if (metrics) {

@@ -1132,11 +1132,11 @@ def setup_shell_routes() -> APIRouter:
             {
                 "name": "tmux",
                 "pip": "",
-                "desc": "Required for Linux/Termux Cookbook background downloads and serves",
+                "desc": "Required for Linux/Termux Model Shopper background downloads and serves",
                 "category": "System",
                 "target": "remote",
                 "kind": "system",
-                "install_hint": "Run Cookbook server setup, or install tmux with apt/pacman/dnf/apk/zypper.",
+                "install_hint": "Run Model Shopper server setup, or install tmux with apt/pacman/dnf/apk/zypper.",
             },
             {
                 "name": "docker",
@@ -1699,7 +1699,7 @@ def setup_shell_routes() -> APIRouter:
             'if [ "$(id -u)" = "0" ]; then SUDO=""; '
             'elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then SUDO="sudo -n"; '
             'else '
-            '  echo "ERROR: this target needs sudo for its OS package manager, but passwordless sudo is unavailable. Open a terminal on the target and run the shown install command once, then retry in Cookbook." >&2; exit 2; fi; '
+            '  echo "ERROR: this target needs sudo for its OS package manager, but passwordless sudo is unavailable. Open a terminal on the target and run the shown install command once, then retry in Model Shopper." >&2; exit 2; fi; '
             'if command -v apt-get >/dev/null 2>&1; then '
             f'  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends {apt_pkgs}; '
             'elif command -v pacman >/dev/null 2>&1; then '

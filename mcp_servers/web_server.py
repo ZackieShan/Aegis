@@ -13,73 +13,30 @@ Data source: public web pages fetched over HTTPS. No API key.
 """
 
 import asyncio
-import re
 import sys
 from collections import deque
 from pathlib import Path
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import urlparse
 
-import httpx
-from bs4 import BeautifulSoup
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# One page reader for the whole app: this toolbox reads pages through the same
+# guarded fetcher search uses (public addresses only, redirects re-checked,
+# bodies size-capped). It used to carry its own, with none of those checks.
+from services.search.content import read_public_page  # noqa: E402
+
 server = Server("web")
 
-_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 _TIMEOUT = 15.0
-_ASSET_RE = re.compile(r"\.(png|jpe?g|gif|webp|svg|ico|css|js|pdf|zip|gz|mp4|mp3|woff2?|ttf|xml|json)(\?|$)", re.I)
 
 
-def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True,
-                             headers={"User-Agent": _UA, "Accept": "text/html,application/xhtml+xml"})
-
-
-def _extract(html: str, url: str) -> tuple[str, str, list[str]]:
-    """Return (title, markdown_text, same-section links) from an HTML page."""
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "noscript", "svg", "iframe"]):
-        tag.decompose()
-    title = (soup.title.get_text(strip=True) if soup.title else "") or url
-    main = soup.find("main") or soup.find("article") or soup.body or soup
-    parts: list[str] = []
-    for el in main.find_all(["h1", "h2", "h3", "h4", "p", "li", "pre", "blockquote"]):
-        txt = el.get_text(" ", strip=True)
-        if not txt:
-            continue
-        name = el.name
-        if name in ("h1", "h2", "h3", "h4"):
-            parts.append(("#" * int(name[1])) + " " + txt)
-        elif name == "li":
-            parts.append("- " + txt)
-        elif name == "blockquote":
-            parts.append("> " + txt)
-        else:
-            parts.append(txt)
-    text = "\n\n".join(parts)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    # same-domain, non-asset links for crawling
-    base = urlparse(url)
-    links = []
-    for a in soup.find_all("a", href=True):
-        u = urldefrag(urljoin(url, a["href"]))[0]
-        p = urlparse(u)
-        if p.scheme in ("http", "https") and p.netloc == base.netloc and not _ASSET_RE.search(p.path):
-            links.append(u)
-    return title, text, links
-
-
-async def _fetch(c: httpx.AsyncClient, url: str) -> tuple[str, str, list[str]]:
-    r = await c.get(url)
-    ctype = r.headers.get("content-type", "")
-    if "html" not in ctype and "<html" not in r.text[:200].lower():
-        return (url, f"[not an HTML page: {ctype or 'unknown type'}]", [])
-    return _extract(r.text, url)
+async def _fetch(url: str) -> tuple[str, str, list[str]]:
+    """(title, markdown, same-site links) of one public page."""
+    return await asyncio.to_thread(read_public_page, url, _TIMEOUT)
 
 
 async def _extract_one(url: str) -> str:
@@ -87,8 +44,7 @@ async def _extract_one(url: str) -> str:
     if not u.startswith("http"):
         u = "https://" + u
     try:
-        async with _client() as c:
-            title, text, _ = await _fetch(c, u)
+        title, text, _ = await _fetch(u)
     except Exception as e:
         return f"Fetch failed for {u}: {type(e).__name__}: {e}"
     if not text:
@@ -108,22 +64,21 @@ async def _crawl(url: str, max_pages: int = 8, same_domain: bool = True) -> str:
     q: deque[str] = deque([start])
     out: list[str] = []
     try:
-        async with _client() as c:
-            while q and len(seen) < max_pages:
-                u = q.popleft()
-                if u in seen:
-                    continue
-                seen.add(u)
-                try:
-                    title, text, links = await _fetch(c, u)
-                except Exception as e:
-                    out.append(f"## {u}\n(failed: {type(e).__name__})")
-                    continue
-                if text:
-                    out.append(f"## {title}\n<{u}>\n\n{text[:4000]}")
-                for link in links:
-                    if link not in seen and len(seen) + len(q) < max_pages * 2:
-                        q.append(link)
+        while q and len(seen) < max_pages:
+            u = q.popleft()
+            if u in seen:
+                continue
+            seen.add(u)
+            try:
+                title, text, links = await _fetch(u)
+            except Exception as e:
+                out.append(f"## {u}\n(failed: {type(e).__name__})")
+                continue
+            if text:
+                out.append(f"## {title}\n<{u}>\n\n{text[:4000]}")
+            for link in links:
+                if link not in seen and len(seen) + len(q) < max_pages * 2:
+                    q.append(link)
     except Exception as e:
         return f"Crawl failed for {start}: {type(e).__name__}: {e}"
     if not out:

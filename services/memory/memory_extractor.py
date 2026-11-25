@@ -71,17 +71,21 @@ def _save_tidy_state(memory_manager, owner: Optional[str], fingerprint: str) -> 
 EXTRACT_SYSTEM_PROMPT = (
     "You are a memory extraction assistant. Analyze the conversation and extract ONLY "
     "durable personal facts about the user that would be useful across many future conversations.\n\n"
-    "Good examples: name, job title, city, family members, long-term projects, strong preferences.\n"
+    "Good examples: name, job title, city, family members, long-term projects, strong preferences, "
+    "and lasting interests — a hobby, craft, field or subject the user is plainly into.\n"
     "Bad examples: what they asked about today, temporary moods, generic statements, "
-    "things the assistant said, one-off tasks, opinions on the current topic.\n\n"
+    "things the assistant said, one-off tasks, opinions on the current topic. One question about "
+    "a subject is not an interest; what the user says they do, own, practise, follow or plan is.\n\n"
     "Rules:\n"
-    "- MAX 2 facts per conversation — only the most important\n"
+    "- MAX 5 facts per conversation — only the ones that will still matter in a month\n"
     "- Only extract facts the USER stated or clearly implied\n"
     "- Each fact must be a single short sentence (under 15 words)\n"
     "- If a fact is similar to something likely already known, skip it\n"
     "- If nothing durable was revealed, return []\n\n"
     "Return a JSON array of objects with 'text' and 'category' fields.\n"
-    "Categories: 'identity', 'preference', 'fact', 'contact', 'project', 'goal'\n\n"
+    "Categories: 'identity', 'preference', 'interest', 'fact', 'contact', 'project', 'goal'\n"
+    "Use 'interest' for what the user is into, keeping the detail they gave "
+    "(e.g. 'Keeps bees: two hives, wants a third').\n\n"
     "Return ONLY valid JSON, no markdown fences."
 )
 
@@ -653,7 +657,9 @@ async def audit_memories(
             ]
         else:
             saved_entries = final_entries + added_during_audit
-        memory_manager.save(saved_entries)
+        from services.memory import journal as _journal
+        with _journal.cause("tidy"):
+            memory_manager.save(saved_entries)
         logger.info(
             f"Memory audit complete: {before_count} -> {after_count} entries "
             f"({before_count - after_count} removed/merged)"

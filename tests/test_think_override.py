@@ -68,3 +68,38 @@ def test_override_is_request_local():
     p = {"model": "qwen3.6-35b-a3b"}
     llm_core._apply_think_override(p, "http://127.0.0.1:9090/v1", "qwen3.6-35b-a3b")
     assert "chat_template_kwargs" not in p and "think" not in p
+
+
+# ── effort-steered models (gpt-oss): the toggle maps to reasoning_effort ─────
+
+def test_gpt_oss_toggle_maps_to_reasoning_effort():
+    """gpt-oss has no enable_thinking switch — only low/medium/high. Sending it
+    the boolean knobs did nothing, so the UI toggle was dead for this family."""
+    on = _apply("http://127.0.0.1:9090/v1", "gpt-oss-120b", True)
+    assert on == {"model": "gpt-oss-120b", "reasoning_effort": "high"}
+    off = _apply("http://127.0.0.1:9090/v1", "gpt-oss-120b-fast", False)
+    assert off == {"model": "gpt-oss-120b-fast", "reasoning_effort": "low"}
+    # no boolean thinking knobs for this family
+    assert "think" not in on and "chat_template_kwargs" not in on
+
+
+def test_gpt_oss_auto_and_cloud_are_untouched():
+    assert _apply("http://127.0.0.1:9090/v1", "gpt-oss-120b", None) == {"model": "gpt-oss-120b"}
+    assert _apply("https://openrouter.ai/api/v1", "openai/gpt-oss-120b", True) == {"model": "openai/gpt-oss-120b"}
+
+
+def test_gpt_oss_explicit_effort_from_the_caller_wins():
+    payload = {"model": "gpt-oss-120b", "reasoning_effort": "medium"}
+    llm_core.set_think_override(True)
+    try:
+        llm_core._apply_think_override(payload, "http://127.0.0.1:9090/v1", "gpt-oss-120b")
+    finally:
+        llm_core.set_think_override(None)
+    assert payload["reasoning_effort"] == "medium"
+
+
+def test_reasoning_effort_helper_only_matches_effort_models():
+    assert llm_core._reasoning_effort_for("gpt-oss-120b", True) == "high"
+    assert llm_core._reasoning_effort_for("GPT-OSS-20B", False) == "low"
+    for other in ("qwen3.6-35b-a3b", "mistral-small-4", "gpt-4o", "", None):
+        assert llm_core._reasoning_effort_for(other, True) is None

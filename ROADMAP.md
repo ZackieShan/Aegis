@@ -9,13 +9,42 @@ Feedback and contributions are very welcome — see [CONTRIBUTING.md](CONTRIBUTI
 
 The local-first foundation is in place:
 
+- **Deep memory you can inspect** — facts with the user's own words as evidence, a dossier
+  per subject, a digest of every conversation and a profile written from all of it, kept
+  current by one background pass that adds, updates and retires; and `/mind`, a page that
+  shows every item, where it came from and every change made to it, with undo, export and
+  delete. See [docs/memory-and-users.md](docs/memory-and-users.md).
+- **People and access** — roles (Administrator, Member, Household, Guest, or your own),
+  per-person app and assistant manner, PINs with a per-account sign-in slowdown, and an
+  administrator's console with an activity log.
+- **A home screen for non-technical people** — chat, lists, reminders with phone
+  notifications, trackers and boards on one plain phone screen, with assistant tools for
+  each. See [docs/home.md](docs/home.md).
+- **Offline reference library** — Kiwix collections (Wikipedia, medicine, how-to, Stack
+  Exchange) plus a page-level index of every PDF manual inside them, used automatically
+  when the internet is down and available to the agent as `library_search`.
+  See [docs/offline-library.md](docs/offline-library.md).
+- **Translate** — `/translate`: type, speak or photograph something and read or hear it
+  in another language; a translation model that rides beside the chat model, 160
+  languages, no internet. See [docs/translate.md](docs/translate.md).
+- **Almanac** — `/almanac`: unit conversion, map positions (lat/long, UTM, MGRS, distance
+  and bearing), sunrise, sunset and the moon for any place and day, and calendar
+  arithmetic — arithmetic the assistant calls instead of doing in its head, checked
+  against independent implementations. See [docs/almanac.md](docs/almanac.md).
+- **Photo identification** — `/identify`: a species classifier and a local vision model
+  name what is in a photo, with field checks, lookalikes and the library's own notes.
+- **Workbench** — projects in git, apps hosted as services with an address, commands on
+  other machines over SSH (Windows included), and hand-offs to other coding agents — all
+  from a chat. See [docs/workbench.md](docs/workbench.md).
+- **Linux engine setup** — `scripts/setup-engine.sh` and a guide for running the engine
+  and the app as services on an always-on machine.
 - **Local model engine** — llama.cpp + llama-swap hot-swapping GGUFs with reliable native
   tool calls, a zero-config `models/` drop folder, and a GPU-aware context auto-tuner.
 - **Agents** — Toolboxes (OSINT / market / troubleshoot / web), Deep Research, and
   Playwright browser automation.
-- **Recipes — run, schedule, build** — a library of one-click workflows (summarize,
-  triage, stock bull/base/bear, inbox declutter…); turn any of them into an **automation**
-  that runs on a schedule or when new email arrives and delivers the result; and build
+- **Automations — run, schedule, build** — a library of one-click workflows (summarize,
+  triage, stock bull/base/bear, inbox declutter…); **schedule** any of them to run by
+  itself, on a timer or when new email arrives, and deliver the result; and build
   your own by **describing it** to a local model — no blank canvas.
 - **Software** — a git-aware coding agent (Aider), a Code Canvas (generate / edit / run),
   and repo → wiki.
@@ -40,17 +69,17 @@ The local-first foundation is in place:
   diffusion model fills the card while llama-swap resolves contention by *evicting*, a chat
   message used to kill an in-flight render: chat now falls back to a CPU-pinned model until
   the GPU is free, says so, and switches back.
-- **Knowledge & operability** — knowledge-graph memory, local call tracing, a Control
+- **Knowledge & operability** — local call tracing, a Control
   Center dashboard, and a Doctor self-check with guarded one-click fixes.
 - **One-line install** — `curl | sh` (macOS/Linux) and `irm | iex` (Windows) installers
   that go from nothing to a running app with the browser opening itself; a Start Menu
-  launcher on Windows; Cookbook downloads/serves no longer require tmux on macOS.
+  launcher on Windows; Model Shopper downloads/serves no longer require tmux on macOS.
 
 ## Where it's going
 
 ### Make it reproducible everywhere
-- **Cross-platform engine setup** — the one-command engine installer and guide are
-  Windows-first today; bring the same to Linux and macOS (matching release binaries + layout).
+- **Cross-platform engine setup** — the one-command engine installer and guide exist for
+  Windows and Linux; bring the same to macOS (matching release binaries + layout).
 - **Fresh-install smoke tests** across Linux, macOS, and Windows — native, Docker, and WSL.
   The macOS installer especially needs a real first-run test by a Mac user.
 - **Tray supervisor** — a tiny signed tray app (Tauri) that starts/stops the services,
@@ -61,7 +90,7 @@ The local-first foundation is in place:
 
 ### Local models for every machine
 - **Hardware-tiered model presets** — recommended model / quant / parameter profiles for
-  small, medium, and large setups, surfaced in Cookbook and Deep Research so nobody guesses.
+  small, medium, and large setups, surfaced in Model Shopper and Deep Research so nobody guesses.
 - **Smarter model ranking** — score by architecture age, quant format, VRAM/RAM fit, backend
   support, and vision/mmproj needs instead of scoring everything the same.
 - **Slimmer agent prompts** — tool schemas, skills, memory, and instructions can eat a small
@@ -84,6 +113,19 @@ The local-first foundation is in place:
   bundled ffmpeg already has `xfade`, and TTS is already local.
 
 ### Deepen the loop
+- **Maps you can ask** — the offline library can already show a map; next is a searchable
+  one with routes (a routing engine over an OpenStreetMap extract), elevation for any
+  point, and magnetic declination, so the Almanac's bearings can be walked with a compass.
+- **A dictionary beside the translator** — Wiktionary, wired to Translate for definitions,
+  word forms and usage.
+- **Memory everywhere** — scheduled tasks and automations still run without the person's
+  memory; give them the same picture chat has. Match topics to a message by meaning, not
+  only by words.
+- **More for the home screen** — lists shared between two accounts, photos in chat,
+  drag to reorder, a weekly look-back on trackers.
+- **Workbench reach** — optional LAN publishing for hosted apps (today: the server itself
+  and a private network), and desktop (GUI) automation on remote machines, not only
+  commands.
 - **Code Canvas everywhere** — "open in canvas" on chat code blocks, and auto-open when the
   model writes a substantial file.
 - **Richer voice** — continuous / push-to-talk conversation mode.

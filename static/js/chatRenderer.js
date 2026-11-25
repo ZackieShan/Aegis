@@ -4,7 +4,7 @@
 import uiModule from './ui.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
-import { addAITTSButton } from './tts-ai.js';
+import { addAITTSButton, readAloudButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
 import settingsModule from './settings.js';
 import spinnerModule from './spinner.js';
@@ -948,12 +948,28 @@ export function buildSourcesBox(sources, type, expanded) {
   var esc = uiModule.esc;
   var id = 'sources-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5);
   var count = sources.length;
-  var label = type === 'research' ? 'Research sources' : 'Web sources';
+  // Say where they are from. A page of the offline library is not a "web source": each source
+  // carries its kind (services/search/origin.py); older saved ones are told by their address.
+  var kindOf = function(src) {
+    if (src && (src.kind === 'library' || src.kind === 'web')) return src.kind;
+    try {
+      var u = new URL(src.url, location.href);
+      if (u.pathname.indexOf('/api/reference/') === 0) return 'library';
+      if (u.hostname === location.hostname && u.pathname.indexOf('/content/') === 0) return 'library';
+    } catch (e) { /* not an address */ }
+    return 'web';
+  };
+  var fromLibrary = sources.filter(function(src) { return kindOf(src) === 'library'; }).length;
+  var label = type === 'research' ? 'Research sources'
+    : (fromLibrary === count ? (count === 1 ? 'source from the home library' : 'sources from the home library')
+      : (fromLibrary === 0 ? (count === 1 ? 'source from the web, today' : 'sources from the web, today')
+        : 'sources: ' + fromLibrary + ' from the home library, ' + (count - fromLibrary) + ' from the web'));
   var lines = '';
   for (var i = 0; i < count; i++) {
     var s = sources[i];
     var domain = '';
     try { domain = new URL(s.url).hostname.replace('www.', ''); } catch(e) { domain = s.url; }
+    if (kindOf(s) === 'library') domain = 'Home library';
     var title = esc(s.title || domain || '');
     var safeUrl = _safeHref(s.url);
     lines += '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" class="source-link">'
@@ -1240,6 +1256,11 @@ document.addEventListener('click', function(e) {
       if (open) open(id);
     }).catch(() => {});
   } else if (kind === 'research') {
+    // The window the sidebar and the message-box button use (app.js keeps the
+    // one copy). Importing the file again here made a second copy with its own
+    // idea of whether the window was open.
+    const shared = window.researchPanelModule;
+    if (shared && typeof shared.openPanel === 'function') { shared.openPanel(id); return; }
     import('./research/panel.js').then(mod => {
       const open = mod.openPanel || (mod.default && mod.default.openPanel);
       if (open) open(id);
@@ -1369,17 +1390,8 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
       // Ensure the Studio modal is open so the editor has a container
       // to render into; switch its tabs to the Edit tab.
       galleryMod.default.openGallery();
-      const modal = document.getElementById('gallery-modal');
-      if (modal) {
-        modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
-        modal.querySelector('.gallery-tab[data-tab="editor"]')?.classList.add('active');
-      }
-      const imagesContainer = document.getElementById('gallery-images-container');
-      const albumsContainer = document.getElementById('gallery-albums-container');
-      if (imagesContainer) imagesContainer.style.display = 'none';
-      if (albumsContainer) albumsContainer.style.display = 'none';
-      const editorContainer = document.getElementById('gallery-editor-container');
-      if (editorContainer) editorContainer.style.display = 'flex';
+      // Show the Editor tab (and hide whichever tab the Studio opened on).
+      galleryMod.default.showStudioTab('editor');
       const label = (prompt || '').trim().slice(0, 60) || 'Generated image';
       editorMod.openEditor(imageUrl, null, null, label);
     } catch (err) {
@@ -1593,6 +1605,12 @@ export function createMsgFooter(msgElement) {
     container.appendChild(btn);
   }
 
+  // The speaker comes first and is always there (when there is a voice to read with — the page is
+  // marked can-read-aloud). It is not one of the three "recent" buttons: it has states of its own.
+  const [speaker, speakerStatus] = readAloudButton(() => copyMessageText(msgElement));
+  actions.appendChild(speaker);
+  actions.appendChild(speakerStatus);
+
   visible.forEach(a => _addBtn(a, actions));
 
   // Overflow "···" button
@@ -1655,6 +1673,7 @@ export function createMsgFooter(msgElement) {
     const pinnedCount = mems.filter(m => m.type === 'pinned').length;
     const recalledCount = mems.filter(m => m.type === 'recalled').length;
     const parts = [];
+    if (mems.some(m => m.type === 'profile')) parts.push('profile');
     if (pinnedCount) parts.push(`${pinnedCount} pinned`);
     if (recalledCount) parts.push(`${recalledCount} recalled`);
     pill.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px"><path d="M12 2a7 7 0 0 1 7 7c0 2.5-1.3 4.8-3.5 6-.3.2-.5.5-.5.9V18h-6v-2.1c0-.4-.2-.7-.5-.9C6.3 13.8 5 11.5 5 9a7 7 0 0 1 7-7z"/><path d="M9 18h6v1a3 3 0 0 1-6 0v-1z"/><path d="M12 2v7"/><path d="M8.5 6.5L12 9l3.5-2.5"/></svg><span class="memory-used-pill-text">${parts.join(', ')}</span>`;
@@ -1678,7 +1697,7 @@ export function createMsgFooter(msgElement) {
         row.title = 'Click to open memory manager';
         const badge = document.createElement('span');
         badge.className = 'memory-used-badge ' + (m.type === 'pinned' ? 'pinned' : 'recalled');
-        badge.textContent = m.type === 'pinned' ? '\u25CF' : '\u21BB';
+        badge.textContent = m.type === 'pinned' ? '\u25CF' : (m.type === 'profile' ? '\u25C6' : '\u21BB');
         const text = document.createElement('span');
         text.className = 'memory-used-text';
         text.textContent = m.text;

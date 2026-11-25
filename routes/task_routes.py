@@ -81,19 +81,21 @@ def _maybe_cascade_calendar_event(task) -> None:
         _try_delete(event_uid)
         return
 
-    # Strategy 2: scan the Cookbook calendar for matching summaries.
+    # Strategy 2: scan the Model Shopper calendar for matching summaries.
     # Only runs for tasks missing the marker (old tasks or PATCH failures).
     if not task.name:
         return
     try:
         with httpx.Client(timeout=10) as client:
-            # Find the Cookbook calendar.
+            # Find the Model Shopper calendar.
             cal_r = client.get(f"{internal_api_base()}/api/calendar/calendars", headers=headers)
             if cal_r.status_code >= 400:
                 return
             cals = (cal_r.json() or {}).get("calendars", [])
+            # The calendar is named "Model Shopper" now; one made while the
+            # feature was called Cookbook keeps its old name.
             cookbook_cal = next(
-                (c for c in cals if (c.get("name") or "").lower() == "cookbook"),
+                (c for c in cals if (c.get("name") or "").lower() in ("model shopper", "cookbook")),
                 None,
             )
             if not cookbook_cal:

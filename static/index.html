@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{{ROOT_ATTRS}}>
 <head>
   <meta charset="UTF-8" />
   <title>Aegis Chat</title>
@@ -127,11 +127,11 @@
           "<line x1='10' y1='10' x2='22' y2='10' stroke='" + ac + "' stroke-width='2'/>" +
           "<line x1='10' y1='15' x2='22' y2='15' stroke='" + ac + "' stroke-width='2'/>" +
           "<line x1='10' y1='20' x2='18' y2='20' stroke='" + ac + "' stroke-width='2'/>",
+        // The Model Shopper (its address was /cookbook): a shopping bag.
         '/cookbook':
-          "<path d='M5 8 L5 26 A2 2 0 0 0 7 28 L25 28 A2 2 0 0 0 27 26 L27 8' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linejoin='round'/>" +
-          "<path d='M9 4 L23 4 L23 8 L9 8 Z' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linejoin='round'/>" +
-          "<line x1='11' y1='14' x2='21' y2='14' stroke='" + ac + "' stroke-width='2'/>" +
-          "<line x1='11' y1='19' x2='17' y2='19' stroke='" + ac + "' stroke-width='2'/>",
+          "<path d='M9 4 L5 9 L5 26 A2 2 0 0 0 7 28 L25 28 A2 2 0 0 0 27 26 L27 9 L23 4 Z' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linejoin='round'/>" +
+          "<line x1='5' y1='9' x2='27' y2='9' stroke='" + ac + "' stroke-width='2.5'/>" +
+          "<path d='M21 14 A5 5 0 0 1 11 14' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linecap='round'/>",
         '/email':
           "<rect x='4' y='7' width='24' height='18' rx='2' fill='none' stroke='" + ac + "' stroke-width='2.5'/>" +
           "<path d='M5 9 L16 17 L27 9' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/>",
@@ -150,6 +150,11 @@
           "<rect x='13' y='5' width='5' height='22' rx='1' fill='none' stroke='" + ac + "' stroke-width='2.5'/>" +
           "<rect x='21' y='8' width='6' height='19' rx='1' fill='none' stroke='" + ac + "' stroke-width='2.5' transform='rotate(8 24 17)'/>",
       };
+      SHAPES['/model-shopper'] = SHAPES['/cookbook'];      // the Model Shopper's address (/cookbook still works)
+      SHAPES['/automations'] =
+          "<rect x='4' y='5' width='10' height='9' rx='2' fill='none' stroke='" + ac + "' stroke-width='2.5'/>" +
+          "<rect x='18' y='18' width='10' height='9' rx='2' fill='none' stroke='" + ac + "' stroke-width='2.5'/>" +
+          "<path d='M14 9.5 H23 V18' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/>";
       var inner = SHAPES[path];
       if (!inner) return; // Root path keeps the default boat icon.
       var svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>" + inner + "</svg>";
@@ -164,7 +169,9 @@
       var titles = {
         '/calendar': 'Calendar — Aegis',
         '/notes': 'Notes — Aegis',
-        '/cookbook': 'Cookbook — Aegis',
+        '/cookbook': 'Model Shopper — Aegis',
+        '/model-shopper': 'Model Shopper — Aegis',
+        '/automations': 'Automations — Aegis',
         '/email': 'Email — Aegis',
         '/memory': 'Memory — Aegis',
         '/gallery': 'Studio — Aegis',
@@ -260,9 +267,10 @@
   </script>
   <!-- Memory Management Modal -->
   <div id="memory-modal" class="modal hidden">
-    <div class="modal-content memory-modal-content" role="dialog" aria-label="Brain" style="background:var(--bg)">
+    <div class="modal-content memory-modal-content" role="dialog" aria-label="Skills and memory tools" style="background:var(--bg)">
       <div class="modal-header">
-        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg>Brain</h4>
+        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg>Skills and memory tools</h4>
+        <a href="/mind" class="memory-inspect-link" title="Everything kept about you: where each piece came from, every change, and how to correct or remove it" style="margin-left:auto;margin-right:10px;font-size:12px;color:var(--accent);text-decoration:none;">See everything &amp; history &rarr;</a>
         <button class="close-btn" id="close-memory-modal" aria-label="Close memory modal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="modal-body memory-modal-body">
@@ -696,8 +704,8 @@
     <button class="icon-rail-btn" id="rail-delete-session" title="Delete session"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     <div class="rail-separator"></div>
     <!-- Control Center: one dashboard for every capability + live status -->
-    <button class="icon-rail-btn" id="rail-control" title="Control Center — see & try everything"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
-    <button class="icon-rail-btn" id="rail-canvas" title="Code Canvas — write & edit code with AI"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+    <button class="icon-rail-btn" id="rail-control" data-admin-only title="Control Center — see & try everything"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+    <button class="icon-rail-btn" id="rail-canvas" hidden style="display:none" title="Code Canvas — write & edit code with AI"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
     <button class="icon-rail-btn" id="rail-voice" title="Voice Mode — speak to drive the agent (hands-free)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
     <div class="rail-separator"></div>
     <!-- Dynamic contextual indicators (shown only while active) -->
@@ -705,17 +713,17 @@
     <button class="icon-rail-btn rail-dynamic" id="rail-documents" title="Documents" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></button>
     <!-- Tool launchers — always visible, alphabetical -->
     <button class="icon-rail-btn" id="rail-calendar" title="Calendar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="17" rx="3"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/><path d="M3 10h18"/><path d="M8 14.5h.01"/><path d="M12 14.5h.01"/><path d="M16 14.5h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg></button>
-    <button class="icon-rail-btn" id="rail-compare" title="Compare"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg></button>
-    <button class="icon-rail-btn" id="rail-recipes" title="Recipes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg></button>
-    <button class="icon-rail-btn" id="rail-cookbook" title="Cookbook"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/><path d="M6.6 17v3.5h10.8V17"/></svg></button>
-    <button class="icon-rail-btn" id="rail-research" title="Deep Research"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg></button>
-    <button class="icon-rail-btn" id="rail-email" title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></button>
+    <button class="icon-rail-btn" id="rail-compare" data-admin-only title="Compare"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg></button>
+    <button class="icon-rail-btn" id="rail-recipes" data-admin-only title="Automations"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg></button>
+    <button class="icon-rail-btn" id="rail-cookbook" data-admin-only title="Model Shopper"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></button>
+    <button class="icon-rail-btn" id="rail-research" data-admin-only title="Deep Research"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg></button>
+    <button class="icon-rail-btn" id="rail-email" data-admin-only title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></button>
     <button class="icon-rail-btn" id="rail-gallery" title="Studio"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/><path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/><circle cx="12.5" cy="7.5" r="1.4"/><path d="M21 12.5 17.75 9.25 11 16"/></svg></button>
-    <button class="icon-rail-btn" id="rail-archive" title="Library"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/></svg></button>
-    <button class="icon-rail-btn" id="rail-memory" title="Brain"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg></button>
+    <button class="icon-rail-btn" id="rail-archive" data-admin-only title="Documents"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/></svg></button>
+    <button class="icon-rail-btn" id="rail-memory" data-admin-only title="Skills and memory tools"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg></button>
     <button class="icon-rail-btn" id="rail-notes" title="Notes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 13.5V6A2.5 2.5 0 0 0 18 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h7.5z"/><path d="M13.5 20.5V16a2.5 2.5 0 0 1 2.5-2.5h4.5"/><path d="M8 9h8"/><path d="M8 13h4"/></svg></button>
-    <button class="icon-rail-btn" id="rail-tasks" title="Tasks"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><path d="m5.5 7 1.4 1.4 2.7-2.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M14.5 7h6"/><path d="M14.5 17h6"/></svg></button>
-    <button class="icon-rail-btn" id="rail-theme" title="Theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg></button>
+    <button class="icon-rail-btn" id="rail-tasks" data-admin-only title="Scheduled"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><path d="m5.5 7 1.4 1.4 2.7-2.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M14.5 7h6"/><path d="M14.5 17h6"/></svg></button>
+    <button class="icon-rail-btn" id="rail-theme" data-admin-only title="Theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg></button>
     <div style="flex:1"></div>
     <!-- Static: bottom -->
     <button class="icon-rail-btn" id="rail-help" title="Commands & help" aria-label="Commands and help"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>
@@ -809,7 +817,7 @@
         </div>
       </div>
 
-      <div class="section" id="email-section">
+      <div class="section" id="email-section" data-admin-only>
         <div class="section-header-flex">
           <span class="section-title" id="email-section-title" style="cursor:pointer;" title="Open email inbox"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg><span>Email</span></span>
           <button type="button" class="section-header-btn list-item-plus-btn" id="email-compose-btn" title="Compose email">
@@ -825,7 +833,7 @@
         </div>
       </div>
 
-      <div class="section" id="models-section">
+      <div class="section" id="models-section" data-admin-only>
         <div class="section-header-flex">
           <span class="section-title"><svg class="section-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>Models</span>
           <div style="position:relative; display:inline-block;">
@@ -858,15 +866,27 @@
         <div class="section-header-flex">
           <span class="section-title"><svg class="section-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Tools</span>
         </div>
-        <div class="list-item" id="tool-memory-btn">
+        <div class="list-item" id="tool-gallery-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
-            <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
-            <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
-            <path d="M12 5v13"/>
+            <rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/>
+            <path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/>
+            <circle cx="12.5" cy="7.5" r="1.4"/>
+            <path d="M21 12.5 17.75 9.25 11 16"/>
           </svg>
-          <span class="grow">Brain</span>
+          <span class="grow">Studio</span>
+        </div>
+        <div class="list-item" id="tool-notes-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="flex-shrink:0;opacity:0.5;">
+            <path d="M20.5 13.5V6A2.5 2.5 0 0 0 18 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h7.5z"/>
+            <path d="M13.5 20.5V16a2.5 2.5 0 0 1 2.5-2.5h4.5"/>
+            <path d="M8 9h8"/>
+            <path d="M8 13h4"/>
+          </svg>
+          <span class="grow">Notes</span>
         </div>
         <div class="list-item" id="tool-calendar-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -884,89 +904,124 @@
           </svg>
           <span class="grow">Calendar</span>
         </div>
-        <div class="list-item" id="tool-compare-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg>
-          <span class="grow">Compare</span>
-        </div>
-        <div class="list-item" id="tool-recipes-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg>
-          <span class="grow">Recipes</span>
-        </div>
-        <div class="list-item" id="tool-cookbook-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/>
-            <path d="M6.6 17v3.5h10.8V17"/>
-          </svg>
-          <span class="grow">Cookbook</span>
-          <span id="cookbook-bg-status" style="display:none;font-size:9px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:12px;flex-shrink:1;min-width:0;position:relative;top:-1px;"></span>
-          <span class="cookbook-notif-dot" id="cookbook-notif-dot" style="display:none;margin-left:6px;margin-right:4px;position:relative;top:-1px;left:0px;"></span>
-        </div>
-        <div class="list-item" id="tool-engine-btn" title="Engine: model tuning, VRAM, health">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
-          <span class="grow">Engine</span>
-        </div>
-        <div class="list-item" id="tool-research-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg>
-          <span class="grow">Deep Research</span>
-        </div>
-        <div class="list-item" id="tool-gallery-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/>
-            <path d="M16.5 21H6.5a3 3 0 0 1-3-3V7.5"/>
-            <circle cx="12.5" cy="7.5" r="1.4"/>
-            <path d="M21 12.5 17.75 9.25 11 16"/>
-          </svg>
-          <span class="grow">Studio</span>
-        </div>
-        <div class="list-item" id="tool-library-btn">
+        <a class="list-item" id="tool-kitchen-link" href="/kitchen" title="Kitchen: recipes set out for cooking — old measures translated, step by step" style="text-decoration:none;color:inherit;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
-            <path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/>
+            <path d="M5 11h14v5a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4v-5z"/><path d="M3 11h18"/><path d="M9 7V5"/><path d="M12 7V4"/><path d="M15 7V5"/>
           </svg>
-          <span class="grow">Library</span>
-          <button type="button" class="list-item-plus-btn" id="library-new-doc-btn" title="New document">
-            <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span class="list-item-plus-label">document</span>
+          <span class="grow">Kitchen</span>
+        </a>
+        <a class="list-item" id="tool-reader-link" href="/read" title="Reader: read what is in the offline library, highlight, take notes, and give what matters to memory" style="text-decoration:none;color:inherit;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
+            <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4z"/><path d="M5 17a3 3 0 0 1 3-3h11"/>
+          </svg>
+          <span class="grow">Reader</span>
+        </a>
+        <a class="list-item" id="tool-translate-link" href="/translate" title="Translate: type, speak or photograph something and read or hear it in another language — works with no internet" style="text-decoration:none;color:inherit;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
+            <circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.500 5.6 12 3z"/>
+          </svg>
+          <span class="grow">Translate</span>
+        </a>
+        <a class="list-item" id="tool-almanac-link" href="/almanac" title="Almanac: unit conversion, map positions (lat/long, UTM, MGRS), sunrise and sunset, date arithmetic — exact answers, with no internet" style="text-decoration:none;color:inherit;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
+            <path d="M12 16.5a4.5 4.5 0 100-9 4.5 4.5 0 000 9zM12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>
+          </svg>
+          <span class="grow">Almanac</span>
+        </a>
+        <a class="list-item" id="tool-mind-link" href="/mind" title="Memory: what Aegis knows about you — see it, correct it, undo it" style="text-decoration:none;color:inherit;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
+            <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/>
+          </svg>
+          <span class="grow">Memory</span>
+        </a>
+        <!-- The workshop: everything that runs the server rather than helps a person. Administrators only
+             (the server writes data-admin on <html>; see style.css), folded away until opened. -->
+        <div class="workshop-group" id="workshop-group" data-admin-only>
+          <button type="button" class="list-item workshop-toggle" id="workshop-toggle" aria-expanded="false" aria-controls="workshop-items" title="Workshop: models, engine, automations, schedules, documents and the rest of the server's controls">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <span class="grow">Workshop</span>
+            <svg class="workshop-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg>
           </button>
-        </div>
-        <div class="list-item" id="tool-notes-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <path d="M20.5 13.5V6A2.5 2.5 0 0 0 18 3.5H6A2.5 2.5 0 0 0 3.5 6v12A2.5 2.5 0 0 0 6 20.5h7.5z"/>
-            <path d="M13.5 20.5V16a2.5 2.5 0 0 1 2.5-2.5h4.5"/>
-            <path d="M8 9h8"/>
-            <path d="M8 13h4"/>
-          </svg>
-          <span class="grow">Notes</span>
-        </div>
-        <div class="list-item" id="tool-tasks-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <rect x="3.5" y="3.5" width="7" height="7" rx="2"/>
-            <path d="m5.5 7 1.4 1.4 2.7-2.8"/>
-            <rect x="3.5" y="13.5" width="7" height="7" rx="2"/>
-            <path d="M14.5 7h6"/>
-            <path d="M14.5 17h6"/>
-          </svg>
-          <span class="grow">Tasks</span>
-          <span id="assistant-notif-dot" class="sidebar-notif-dot" style="display:none"></span>
-        </div>
-
-        <div class="list-item" id="tool-theme-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/>
-            <path d="M7.5 10.5h.01"/>
-            <path d="M11 6.5h.01"/>
-            <path d="M15.5 8h.01"/>
-          </svg>
-          <span class="grow">Theme</span>
+          <div class="workshop-items" id="workshop-items" hidden>
+            <div class="list-item" id="tool-cookbook-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                style="flex-shrink:0;opacity:0.5;">
+                <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>
+              </svg>
+              <span class="grow">Model Shopper</span>
+              <span id="cookbook-bg-status" style="display:none;font-size:9px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:12px;flex-shrink:1;min-width:0;position:relative;top:-1px;"></span>
+              <span class="cookbook-notif-dot" id="cookbook-notif-dot" style="display:none;margin-left:6px;margin-right:4px;position:relative;top:-1px;left:0px;"></span>
+            </div>
+            <div class="list-item" id="tool-engine-btn" title="Engine: model tuning, VRAM, health">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+              <span class="grow">Engine</span>
+            </div>
+            <div class="list-item" id="tool-control-btn" title="Control Center: every capability and its live status on one page">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+              <span class="grow">Control Center</span>
+            </div>
+            <div class="list-item" id="tool-research-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/><circle cx="11" cy="11" r="2.5"/></svg>
+              <span class="grow">Deep Research</span>
+            </div>
+            <div class="list-item" id="tool-compare-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="9" cy="12" r="6.5"/><circle cx="15" cy="12" r="6.5"/></svg>
+              <span class="grow">Compare</span>
+            </div>
+            <div class="list-item" id="tool-recipes-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg>
+              <span class="grow">Automations</span>
+            </div>
+            <div class="list-item" id="tool-tasks-btn" title="Scheduled: things that run on a schedule or when something happens">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                style="flex-shrink:0;opacity:0.5;">
+                <rect x="3.5" y="3.5" width="7" height="7" rx="2"/>
+                <path d="m5.5 7 1.4 1.4 2.7-2.8"/>
+                <rect x="3.5" y="13.5" width="7" height="7" rx="2"/>
+                <path d="M14.5 7h6"/>
+                <path d="M14.5 17h6"/>
+              </svg>
+              <span class="grow">Scheduled</span>
+              <span id="assistant-notif-dot" class="sidebar-notif-dot" style="display:none"></span>
+            </div>
+            <div class="list-item" id="tool-library-btn" title="Documents: what you have written and saved here">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
+                <path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/>
+              </svg>
+              <span class="grow">Documents</span>
+              <button type="button" class="list-item-plus-btn" id="library-new-doc-btn" title="New document">
+                <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span class="list-item-plus-label">document</span>
+              </button>
+            </div>
+            <div class="list-item" id="tool-memory-btn" title="Skills, and the tools for importing, tidying and extracting memories">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                style="flex-shrink:0;opacity:0.5;">
+                <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+                <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+                <path d="M12 5v13"/>
+              </svg>
+              <span class="grow">Skills and memory tools</span>
+            </div>
+            <div class="list-item" id="tool-theme-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                style="flex-shrink:0;opacity:0.5;">
+                <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/>
+                <path d="M7.5 10.5h.01"/>
+                <path d="M11 6.5h.01"/>
+                <path d="M15.5 8h.01"/>
+              </svg>
+              <span class="grow">Theme</span>
+            </div>
+            <a class="list-item" id="tool-people-link" href="/admin" title="People and access: accounts, roles, and what is set for the household" style="text-decoration:none;color:inherit;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span class="grow">People and access</span>
+            </a>
+          </div>
         </div>
       </div>
     </div>
@@ -976,6 +1031,9 @@
         <span class="user-bar-name" id="user-bar-name">User</span>
       </div>
       <div class="user-bar-actions">
+        <a class="user-bar-btn" id="user-bar-family" href="/switch/family" title="Family mode: the simple home screen. Come back from its account menu." aria-label="Switch to family mode">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4v-9z"/></svg>
+        </a>
         <button type="button" class="user-bar-btn" id="user-bar-settings" title="Settings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
@@ -1051,7 +1109,7 @@
         <div id="message-ghost" class="ghost-text-overlay" aria-hidden="true"></div>
         <textarea id="message" placeholder="Message Aegis..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
-        <div class="model-picker-wrap" id="model-picker-wrap">
+        <div class="model-picker-wrap" id="model-picker-wrap" data-admin-only>
           <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <!-- Which engine model is resident in VRAM right now (llama-swap
@@ -1089,20 +1147,28 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                 <span>Attach files</span>
               </button>
+              <button type="button" class="overflow-menu-item" id="overflow-identify-btn" title="Take or choose a photo and identify what it shows">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                <span>Identify photo</span>
+              </button>
+              <button type="button" class="overflow-menu-item" id="overflow-deepresearch-btn" data-admin-only title="Read many sources and write a report with links">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h4v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
+                <span>Deep research</span>
+              </button>
               <button type="button" class="overflow-menu-item" id="overflow-doc-btn">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
                 </svg>
                 <span>Documents</span>
               </button>
-              <button type="button" class="overflow-menu-item" id="overflow-rag-btn">
+              <button type="button" class="overflow-menu-item" id="overflow-rag-btn" data-admin-only>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
                 </svg>
                 <span>RAG</span>
                 <span class="overflow-active-dot"></span>
               </button>
-              <button type="button" class="overflow-menu-item" id="overflow-workspace-btn">
+              <button type="button" class="overflow-menu-item" id="overflow-workspace-btn" data-admin-only>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                 </svg>
@@ -1114,13 +1180,14 @@
                    #research-toggle checkbox is kept inert so existing JS refs
                    don't break; without this entry point it can't be enabled. -->
               <!-- Group Chat moved to Characters modal Group tab -->
-              <!-- TTS Mode hidden — read-aloud feature is off in this build. -->
-              <button type="button" class="overflow-menu-item" id="overflow-tts-btn" hidden style="display:none">
+              <!-- Read every answer aloud, in the voice chosen under Settings → Appearance (or the Studio's
+                   Voice Lab). Shown when there is a voice to read with (tts-ai.js marks the page). -->
+              <button type="button" class="overflow-menu-item" id="overflow-tts-btn" title="Read every answer aloud as it is written">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                <span>TTS Mode</span>
+                <span>Read answers aloud</span>
                 <span class="overflow-active-dot"></span>
               </button>
-              <button type="button" class="overflow-menu-item" id="overflow-preset-btn">
+              <button type="button" class="overflow-menu-item" id="overflow-preset-btn" data-admin-only>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/>
                 </svg>
@@ -1129,13 +1196,26 @@
             </div>
           </div>
           <!-- Web search (magnifying glass) -->
-          <button type="button" class="input-icon-btn" title="Web search" id="web-toggle-btn" data-mode-tool="true" aria-label="Web search" aria-pressed="false">
+          <!-- Photo: take or choose a picture, then identify it or ask about it.
+               On the bar itself — it used to be two taps deep in the menu to the left. -->
+          <button type="button" class="input-icon-btn" id="composer-photo-btn" title="Photo: take or choose a picture to identify or ask about" aria-label="Add a photo" aria-haspopup="menu" aria-expanded="false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </button>
+          <!-- Deep Research: opens its window with whatever is typed carried over.
+               In a chat it used to be reachable only by typing a command. -->
+          <button type="button" class="input-icon-btn" id="composer-research-btn" data-admin-only title="Deep Research: read many sources and write a report with links" aria-label="Deep Research" aria-haspopup="dialog">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h4v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
+          </button>
+          <!-- The web-search switch is gone from the bar: the web is used when the question is about something
+               dated (services/router.wants_web), and nobody is asked to decide that first. The element stays,
+               never shown, because the per-chat state it carries is still what /web off changes. -->
+          <button type="button" class="input-icon-btn" title="Web search" id="web-toggle-btn" data-mode-tool="true" aria-label="Web search" aria-pressed="false" hidden tabindex="-1">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
           </button>
           <!-- Shell commands (terminal) -->
-          <button type="button" class="input-icon-btn" title="Shell Access" id="bash-toggle-btn" data-mode-tool="true" aria-label="Shell access" aria-pressed="false">
+          <button type="button" class="input-icon-btn" title="Shell Access" id="bash-toggle-btn" data-admin-only data-mode-tool="true" aria-label="Shell access" aria-pressed="false">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
@@ -1146,6 +1226,15 @@
             <span style="font-size:11px;margin-left:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="workspace-indicator-name"></span>
             <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
+          <!-- Code mode: the machine being worked on (hidden outside Code mode) -->
+          <div class="code-host-wrap" id="code-host-wrap" style="display:none;">
+            <button type="button" class="input-icon-btn tool-indicator active" id="code-host-btn" aria-haspopup="menu" aria-expanded="false" title="The machine Code mode works on">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+              <span id="code-host-name" style="font-size:11px;margin-left:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">This server</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:3px;opacity:.7;"><path d="M6 15l6-6 6 6"/></svg>
+            </button>
+            <div class="code-host-menu" id="code-host-menu" role="menu" aria-label="Machine to work on" hidden></div>
+          </div>
           <!-- RAG toolbar indicator (hidden until active) -->
           <button type="button" class="input-icon-btn tool-indicator" title="RAG active — click to deactivate" id="rag-indicator-btn" style="display:none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1181,10 +1270,16 @@
           </button>
         </div>
         <div class="chat-input-right">
-          <!-- Agent / Chat mode toggle -->
-          <div class="mode-toggle">
-            <button type="button" class="mode-toggle-btn active" id="mode-agent-btn" aria-pressed="true">Agent</button>
-            <button type="button" class="mode-toggle-btn" id="mode-chat-btn" aria-pressed="false">Chat</button>
+          <!-- Auto / Code. "Auto" is agent mode (the ids and the stored mode keep that name) with the router in
+               front of it: tools when the message calls for them, a plain quick answer when it is only
+               conversation. Administrators only: everyone else is always on Auto and is not asked.
+               "No tools" (plain chat) is not a position any more — it is a switch in Settings, Appearance, and
+               shows here only while it is on, so it cannot be left on unnoticed. -->
+          <div class="mode-toggle" data-admin-only>
+            <button type="button" class="mode-toggle-btn active" id="mode-agent-btn" aria-pressed="true" title="Auto: uses tools when your message calls for them, answers directly when it is plain conversation, and thinks harder when the question is hard">Auto</button>
+            <!-- Code: a coding agent on the machine picked in the composer. Shown by codeMode.js. -->
+            <button type="button" class="mode-toggle-btn" id="mode-code-btn" aria-pressed="false" style="display:none;" title="Code: build and change software, on the machine you pick">Code</button>
+            <button type="button" class="mode-toggle-btn" id="mode-chat-btn" aria-pressed="false" title="No tools: plain answers only. Press Auto to give the assistant its tools back.">No tools</button>
           </div>
           <button type="submit" form="chat-form" class="send-btn newchat-mode" data-mode="newchat" aria-label="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span class="send-btn-label">+ New</span>
@@ -1372,10 +1467,10 @@
 
   <!-- Cookbook Modal -->
   <div id="cookbook-modal" class="modal hidden">
-    <div class="modal-content" role="dialog" aria-label="Cookbook" style="width: min(780px, 92vw); background: var(--bg);">
+    <div class="modal-content" role="dialog" aria-label="Model Shopper" style="width: min(780px, 92vw); background: var(--bg);">
       <div class="modal-header">
-        <h4 style="margin:0;margin-right:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/><path d="M6.6 17v3.5h10.8V17"/></svg>Cookbook</h4>
-        <button class="close-btn" id="close-cookbook-modal" aria-label="Close cookbook"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        <h4 style="margin:0;margin-right:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Model Shopper</h4>
+        <button class="close-btn" id="close-cookbook-modal" aria-label="Close Model Shopper"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
       </div>
       <div class="modal-body cookbook-body"></div>
     </div>
@@ -1395,31 +1490,31 @@
       <div class="settings-layout">
         <div class="settings-sidebar">
           <!-- Section 1: AI plumbing (Add Models → AI Defaults → Search) -->
-          <button class="settings-nav-item active" data-settings-tab="services">
+          <button class="settings-nav-item active admin-only" data-settings-tab="services">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
             <span>Add Models</span>
           </button>
-          <button class="settings-nav-item" data-settings-tab="added-models">
+          <button class="settings-nav-item admin-only" data-settings-tab="added-models">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             <span>Added Models</span>
           </button>
-          <button class="settings-nav-item" data-settings-tab="ai">
+          <button class="settings-nav-item admin-only" data-settings-tab="ai">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/></svg>
             <span>AI Defaults</span>
           </button>
-          <button class="settings-nav-item" data-settings-tab="search">
+          <button class="settings-nav-item admin-only" data-settings-tab="search">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <span>Search</span>
           </button>
-          <div class="settings-sidebar-divider"></div>
+          <div class="settings-sidebar-divider admin-only"></div>
           <!-- Section 2: Comms (Integrations → Email → Reminders).
                Integrations leads here because it's where the underlying
                accounts the other two tabs depend on actually live. -->
-          <button class="settings-nav-item" data-settings-tab="integrations">
+          <button class="settings-nav-item admin-only" data-settings-tab="integrations">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             <span>Integrations</span>
           </button>
-          <button class="settings-nav-item" data-settings-tab="email">
+          <button class="settings-nav-item admin-only" data-settings-tab="email">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
             <span>Email</span>
           </button>
@@ -1427,13 +1522,13 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             <span>Reminders</span>
           </button>
-          <div class="settings-sidebar-divider"></div>
+          <div class="settings-sidebar-divider admin-only"></div>
           <!-- Section 3: UX (Appearance → Shortcuts) -->
           <button class="settings-nav-item" data-settings-tab="appearance">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.2a1.9 1.9 0 0 1 1.9-1.9h2.2a4 4 0 0 0 4-4C21 6.5 16.9 3 12 3z"/><path d="M7.5 10.5h.01"/><path d="M11 6.5h.01"/><path d="M15.5 8h.01"/></svg>
             <span>Appearance</span>
           </button>
-          <button class="settings-nav-item" data-settings-tab="shortcuts">
+          <button class="settings-nav-item admin-only" data-settings-tab="shortcuts">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>
             <span>Shortcuts</span>
           </button>
@@ -1712,6 +1807,7 @@
                   <option value="google_pse" data-search-logo="google_pse">Google PSE</option>
                   <option value="tavily" data-search-logo="tavily">Tavily</option>
                   <option value="serper" data-search-logo="serper">Serper.dev</option>
+                  <option value="kiwix" data-search-logo="kiwix">Offline library (Kiwix)</option>
                   <option value="disabled" data-search-logo="disabled">Disabled</option>
                 </select>
                 <button type="button" class="admin-btn-sm" id="set-searchTestBtn" title="Run a test query against the configured provider" style="margin-left:2px;flex-shrink:0;position:relative;top:2px;display:inline-flex;align-items:center;gap:4px;">
@@ -1803,6 +1899,24 @@
 
         <!-- ═══ APPEARANCE TAB ═══ -->
         <div data-settings-panel="appearance" class="settings-appearance-panel hidden">
+          <!-- Reading aloud: each person's own choice (static/js/readingSettings.js). -->
+          <div class="admin-card" id="reading-card">
+            <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>Reading aloud</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Tap the speaker under any answer to hear it. The voice is yours to choose: this device's own, or one recorded in the Studio.</div>
+            <div class="reading-row">
+              <label class="settings-label" for="reading-voice">Voice</label>
+              <select id="reading-voice" class="settings-select" aria-describedby="reading-note"></select>
+              <button type="button" id="reading-preview" class="admin-btn-sm">Hear it</button>
+            </div>
+            <div id="reading-note" class="reading-note" role="status"></div>
+            <div class="vis-toggles" style="margin-top:6px;">
+              <label class="vis-row">
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg></span>
+                <span class="vis-label">Read every answer aloud <span class="vis-hint">Starts by itself as each answer is written</span></span>
+                <input type="checkbox" id="reading-auto"><span class="vis-switch"></span>
+              </label>
+            </div>
+          </div>
           <div class="admin-card" style="padding-bottom:6px;">
             <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>Sidebar<span style="flex:1"></span><button type="button" class="vis-reset-btn" data-vis-reset title="Reset this section to defaults" aria-label="Reset Sidebar to defaults" style="background:none;border:none;padding:2px 4px;cursor:pointer;color:inherit;opacity:0.55;display:inline-flex;align-items:center;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></h2>
             <div class="vis-toggles">
@@ -1843,7 +1957,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/></svg></span>
-                <span class="vis-label">Brain</span>
+                <span class="vis-label">Skills and memory tools</span>
                 <input type="checkbox" checked data-ui-key="tool-memory"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -1858,12 +1972,12 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M10.5 6.75h3.75a3 3 0 0 1 3 3v3.75"/></svg></span>
-                <span class="vis-label">Recipes</span>
+                <span class="vis-label">Automations</span>
                 <input type="checkbox" checked data-ui-key="tool-recipes"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 17v-3.1a4.2 4.2 0 0 1-2.6-3.9 4.2 4.2 0 0 1 3.5-4.1 4.8 4.8 0 0 1 9 0 4.2 4.2 0 0 1 3.5 4.1 4.2 4.2 0 0 1-2.6 3.9V17z"/><path d="M6.6 17v3.5h10.8V17"/></svg></span>
-                <span class="vis-label">Cookbook</span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></span>
+                <span class="vis-label">Model Shopper</span>
                 <input type="checkbox" checked data-ui-key="tool-cookbook"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -1878,7 +1992,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v17"/><path d="M9.5 3.5v17"/><path d="M13.7 4.2l4.6 15.8"/></svg></span>
-                <span class="vis-label">Library</span>
+                <span class="vis-label">Documents</span>
                 <input type="checkbox" checked data-ui-key="tool-library"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -1888,7 +2002,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><path d="m5.5 7 1.4 1.4 2.7-2.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M14.5 7h6"/><path d="M14.5 17h6"/></svg></span>
-                <span class="vis-label">Tasks</span>
+                <span class="vis-label">Scheduled</span>
                 <input type="checkbox" checked data-ui-key="tool-tasks"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -1938,8 +2052,18 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a7 7 0 0 0-7 7c0 3 2 5.5 4.5 7.5.7.6 1.2 1.3 1.5 2h2c.3-.7.8-1.4 1.5-2C17 14.5 19 12 19 9a7 7 0 0 0-7-7z"/><line x1="10" y1="22" x2="14" y2="22"/></svg></span>
-                <span class="vis-label">Thinking Process <span class="vis-hint">Show &lt;think&gt; collapsible bars</span></span>
+                <span class="vis-label">Show the thinking <span class="vis-hint">What it is thinking while it works, and afterwards under "Thought for…"</span></span>
                 <input type="checkbox" checked data-ui-key="show-thinking"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row" data-admin-only>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
+                <span class="vis-label">Show the workings <span class="vis-hint">Model, speed, context used and each tool step by name, under every reply</span></span>
+                <input type="checkbox" data-ui-key="show-workings"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row" data-admin-only>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg></span>
+                <span class="vis-label">Answer without tools <span class="vis-hint">Plain answers only, in this browser, until switched back</span></span>
+                <input type="checkbox" id="set-no-tools"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg></span>
@@ -1967,11 +2091,6 @@
             <h2 style="display:flex;align-items:center;gap:8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>Chat Bar<span style="flex:1"></span><button type="button" class="vis-reset-btn" data-vis-reset title="Reset this section to defaults" aria-label="Reset Chat Bar to defaults" style="background:none;border:none;padding:2px 4px;cursor:pointer;color:inherit;opacity:0.55;display:inline-flex;align-items:center;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button></h2>
             <div class="vis-toggles">
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-                <span class="vis-label">Web Search</span>
-                <input type="checkbox" checked data-ui-key="web-toggle-btn"><span class="vis-switch"></span>
-              </label>
-              <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
                 <span class="vis-label">Document Editor</span>
                 <input type="checkbox" checked data-ui-key="doc-toggle-btn"><span class="vis-switch"></span>
@@ -1988,7 +2107,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon vis-icon-text">A|C</span>
-                <span class="vis-label">Agent / Chat <span class="vis-hint">Mode switcher</span></span>
+                <span class="vis-label">Auto / Code <span class="vis-hint">Mode switch</span></span>
                 <input type="checkbox" checked data-ui-key="mode-toggle"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -2175,6 +2294,16 @@
             </div>
           </div>
           <div class="admin-card">
+            <h2>People and access</h2>
+            <div class="admin-toggle-row">
+              <div>
+                <div class="admin-toggle-label">Roles, each person's app, PINs and activity</div>
+                <div class="admin-toggle-sub">Give someone the simple home screen, choose what the assistant may do for them, switch an account off, see sign-ins.</div>
+              </div>
+              <a href="/admin" class="admin-btn-add" style="text-decoration:none;white-space:nowrap;">Open the console</a>
+            </div>
+          </div>
+          <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Users</h2>
             <div id="adm-userList"><div class="admin-empty">Loading...</div></div>
           </div>
@@ -2357,9 +2486,14 @@
         <!-- ═══ TOOLS TAB ═══ -->
         <!-- ═══ INTEGRATIONS TAB ═══ -->
         <div data-settings-panel="integrations" class="hidden">
+          <div class="admin-card" id="connections-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/></svg>Services</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:4px">Outside services the assistant can use to look things up. One set of keys serves the whole house: once a key is saved here, every account's assistant uses it. Keys are kept on this server, encrypted, and are never shown again.</div>
+            <div id="connections-list"></div>
+          </div>
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Integrations</h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">All external service connections in one place.</div>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Your own accounts and connections: email, calendars, contacts, other APIs, MCP servers and coding agents.</div>
             <div id="unified-integrations-list"></div>
             <div id="unified-intg-form" style="display:none"></div>
             <div style="text-align:right;padding:8px 0;">

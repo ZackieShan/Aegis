@@ -21,6 +21,7 @@ import documentModule from './document.js';
 import workspaceModule from './workspace.js';
 import settingsModule from './settings.js';
 import cookbookModule from './cookbook.js';
+import fileHandlerModule from './fileHandler.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
 
@@ -1348,7 +1349,7 @@ async function _cmdToggleSidebar(args, ctx) {
 async function _cmdOpen(args, ctx) {
   const target = (args[0] || '').trim().toLowerCase();
   if (!target) {
-    slashReply('Open what? Try /open Cookbook, /open Settings, /open Studio, /open Notes, /open Tasks, /open Library, /open Research, or /open Compare.');
+    slashReply('Open what? Try /open Shopper, /open Automations, /open Settings, /open Studio, /open Notes, /open Tasks, /open Library, /open Research, or /open Compare.');
     return true;
   }
   const clickFirst = (...ids) => {
@@ -1359,7 +1360,10 @@ async function _cmdOpen(args, ctx) {
     return false;
   };
   try {
-    if (target === 'cookbook' || target === 'cook') {
+    if (target === 'kitchen') { window.location.href = '/kitchen'; return true; }
+    if (target === 'reader') { window.location.href = '/read'; return true; }
+    // "Model Shopper" is the model catalogue's name; it was called Cookbook.
+    if (['shopper', 'model', 'models', 'modelshopper', 'model-shopper', 'cookbook', 'cook'].includes(target)) {
       if (cookbookModule && typeof cookbookModule.open === 'function') await cookbookModule.open({ tab: 'Download' });
       else clickFirst('tool-cookbook-btn', 'rail-cookbook');
       return true;
@@ -1383,7 +1387,9 @@ async function _cmdOpen(args, ctx) {
       memories: ['tool-memory-btn', 'rail-memory'],
       research: ['tool-research-btn', 'rail-research'],
       compare: ['tool-compare-btn', 'rail-compare'],
-      recipes: ['tool-recipes-btn', 'rail-recipes'],
+      automations: ['tool-recipes-btn', 'rail-recipes'],
+      automation: ['tool-recipes-btn', 'rail-recipes'],
+      recipes: ['tool-recipes-btn', 'rail-recipes'],        // their old name
       theme: ['tool-theme-btn', 'rail-theme'],
     };
     const ids = targets[target];
@@ -1393,6 +1399,11 @@ async function _cmdOpen(args, ctx) {
   }
   slashReply(`I don't know how to open "${ctx.esc(target)}" yet.`);
   return true;
+}
+
+/** A command typed under a feature's old name: do it, and say what it is called now. */
+function _renamed(was, now, command) {
+  try { uiModule.showToast(`${was} is now called ${now} (${command}). Food recipes are in the Kitchen (/kitchen).`, 7000); } catch (_) { /* a hint only */ }
 }
 
 async function _cmdToolPanel(tool, args, ctx) {
@@ -1417,7 +1428,7 @@ async function _cmdToolPanel(tool, args, ctx) {
           document.getElementById('tool-cookbook-btn')?.click();
         }
       } catch (e) {
-        slashReply(`Could not open Cookbook Serve${e?.message ? `: ${ctx.esc(e.message)}` : ''}`);
+        slashReply(`Could not open Model Shopper Serve${e?.message ? `: ${ctx.esc(e.message)}` : ''}`);
       }
       return true;
     }
@@ -1569,40 +1580,6 @@ async function _cmdTraces(args) {
     slashReplyMd(lines.join('\n'));
   } catch (e) {
     slashReplyMd('Could not read traces: ' + e.message);
-  }
-  return true;
-}
-
-// Local knowledge-graph memory. `/graph <term>` recalls connected facts;
-// `/graph build` extracts a graph from your saved memories; `/graph stats`.
-async function _cmdGraph(args) {
-  const sub = (args[0] || '').toLowerCase();
-  try {
-    if (sub === 'build') {
-      await typewriterReply('Extracting a knowledge graph from your saved memories…');
-      const r = await fetch('/api/graph/build', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const d = await r.json().catch(() => ({}));
-      if (d.ok) slashReplyMd(`Built the graph: **${d.triples_added}** new facts from ${d.processed} memories (total ${d.total}). Try \`/graph <term>\`.`);
-      else slashReplyMd('Build failed: ' + (d.error || 'unknown'));
-      return true;
-    }
-    if (sub === 'stats' || !args.length) {
-      const d = await (await fetch('/api/graph/stats', { credentials: 'same-origin' })).json();
-      const ent = (d.entities || []).slice(0, 8).map(e => `\`${e.name}\` (${e.count})`).join(', ');
-      slashReplyMd(`**Knowledge graph** — ${d.total || 0} facts${ent ? '\n\nTop entities: ' + ent : ''}` +
-                 (d.total ? '\n\nRecall with `/graph <term>`.' : '\n\nEmpty — run `/graph build` to extract from your memories.'));
-      return true;
-    }
-    const term = args.join(' ');
-    const d = await (await fetch('/api/graph/query?q=' + encodeURIComponent(term), { credentials: 'same-origin' })).json();
-    const facts = d.facts || [];
-    if (!facts.length) { slashReplyMd(`No graph facts about \`${term}\`. (Run \`/graph build\` if you haven't.)`); return true; }
-    const lines = [`**Knowledge graph — ${term}**`];
-    facts.slice(0, 20).forEach(f => lines.push(`• ${f.subject} — *${f.relation}* — ${f.object}`));
-    slashReplyMd(lines.join('\n'));
-  } catch (e) {
-    slashReplyMd('Graph memory error: ' + e.message);
   }
   return true;
 }
@@ -2864,6 +2841,503 @@ async function _cmdRagRemove(args, ctx) {
   return true;
 }
 
+// -----------------------------------------------------------------------
+// Offline reference library (/lib) and photo identification (/identify)
+// -----------------------------------------------------------------------
+
+/** An "Aegis" bubble that is NOT persisted — for live status that will be
+ *  replaced by a result (slashReply would save the placeholder too). */
+function _quietBubble(html) {
+  const chatBox = document.getElementById('chat-history');
+  if (_hideWelcomeScreen) _hideWelcomeScreen();
+  const div = document.createElement('div');
+  div.className = 'msg msg-ai';
+  const role = document.createElement('div');
+  role.className = 'role';
+  role.textContent = 'Aegis';
+  div.appendChild(role);
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.innerHTML = html;
+  div.appendChild(body);
+  div.appendChild(_slashFooter(div));
+  chatBox.appendChild(div);
+  uiModule.scrollHistory();
+  return { el: div, body };
+}
+
+function _renderMd(text) {
+  return markdownModule.processWithThinking(markdownModule.squashOutsideCode(String(text ?? '')));
+}
+
+async function _cmdLib(args) {
+  const q = args.join(' ').trim();
+  const esc = uiModule.esc;
+  if (!q || q.toLowerCase() === 'status') {
+    let d = null;
+    try {
+      const r = await fetch(`${API_BASE}/api/reference/status`, { credentials: 'same-origin' });
+      d = r.ok ? await r.json() : null;
+    } catch (_) { d = null; }
+    if (!d) { slashReplyMd('Could not reach the offline library service.'); return true; }
+    if (!d.enabled) { slashReplyMd('The offline library is switched off (setting `library_enabled`).'); return true; }
+    if (!d.kiwix_up) {
+      slashReplyMd(`The offline library is not running — nothing answered at \`${d.kiwix_url}\`.`);
+      return true;
+    }
+    const m = d.manuals || {};
+    const top = (d.books || []).slice().sort((a, b) => (b.articles || 0) - (a.articles || 0)).slice(0, 8).map(b => b.title);
+    const num = (n) => Number(n || 0).toLocaleString();
+    slashReplyMd([
+      `**Offline library** — ${num(d.collections)} collections, ${num(d.articles)} articles`
+        + (m.built ? `, ${num(m.documents)} PDF manuals (${num(m.pages)} pages searchable)` : '') + '.',
+      '',
+      top.length ? `Largest: ${top.join(', ')}.` : '',
+      '',
+      `Browse it: [${d.kiwix_public_url}](${d.kiwix_public_url})`,
+      '',
+      '`/lib <words>` searches it. In agent mode the assistant consults it by itself, and web search falls back to it when the internet is down.',
+    ].join('\n'));
+    return true;
+  }
+
+  const rep = _quietBubble(`Searching the offline library for <b>${esc(q)}</b>…`);
+  let d = null;
+  let err = '';
+  try {
+    const r = await fetch(`${API_BASE}/api/reference/search?count=10&q=${encodeURIComponent(q)}`, { credentials: 'same-origin' });
+    d = await r.json().catch(() => null);
+    if (!r.ok) err = (d && (d.detail || d.error)) || `search failed (${r.status})`;
+  } catch (e) { err = e.message; }
+  let md;
+  if (err || !d) {
+    md = `✗ Offline library search failed: ${err || 'no response'}`;
+  } else if (!d.results || !d.results.length) {
+    md = d.available
+      ? `No matches in the offline library for **${q}**. It is a keyword search — try fewer or different words.`
+      : 'The offline library is not running.';
+  } else {
+    const lines = d.results.map((r, i) => {
+      const title = String(r.title || 'untitled').replace(/[\[\]]/g, '');
+      const snip = String(r.snippet || '').replace(/\s+/g, ' ').replace(/[*_`<>]/g, '').slice(0, 170);
+      return `${i + 1}. [${title}](${r.url}) — *${String(r.source || '').replace(/[*_]/g, '')}*${snip ? ' — ' + snip : ''}`;
+    });
+    md = `**Offline library: ${q.replace(/[*_`]/g, '')}**\n\n${lines.join('\n')}`;
+  }
+  rep.body.innerHTML = _renderMd(md);
+  rep.el.dataset.raw = md;
+  uiModule.scrollHistory();
+  _persistMsg('assistant', md, { source: 'slash' });
+  return true;
+}
+
+/** Open the OS photo chooser (camera or gallery on a phone). Resolves with a
+ *  File, or null if dismissed. Must be called from a user gesture. */
+function _pickPhoto() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    let settled = false;
+    const finish = (file) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(file || null);
+    };
+    input.addEventListener('change', () => finish(input.files && input.files[0]));
+    input.addEventListener('cancel', () => finish(null));
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+/** Shrink a phone photo before upload (12 MP over a tailnet is slow and the
+ *  server downsizes anyway). Falls back to the original on any failure. */
+async function _shrinkPhoto(file, maxSide = 2048) {
+  try {
+    if (!file || !/^image\/(jpeg|png|webp)$/i.test(file.type || '') || file.size < 900 * 1024) return file;
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    if (scale >= 1) { bmp.close && bmp.close(); return file; }
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close && bmp.close();
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.9));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch (_) {
+    return file;
+  }
+}
+
+let _identifyBusy = false;
+
+/** Upload a photo, run it through /api/reference/identify, and put the
+ *  question and the answer in the chat as ordinary messages — so follow-up
+ *  questions ("how do I cook it?", "what about the stem?") have the
+ *  identification as context. */
+async function identifyPhoto(file, hint = '') {
+  const esc = uiModule.esc;
+  if (!file) return;
+  if (_identifyBusy) { slashReply('One identification is already running — give it a moment.'); return; }
+  _identifyBusy = true;
+  try {
+    try {
+      if (sessionModule.hasPendingChat && sessionModule.hasPendingChat()) await sessionModule.materializePendingSession();
+    } catch (_) { /* shown but not saved */ }
+    const sid = sessionModule.getCurrentSessionId();
+
+    const photo = await _shrinkPhoto(file);
+    const fd = new FormData();
+    fd.append('files', photo, photo.name || 'photo.jpg');
+    if (sid) fd.append('session_id', sid);
+    let meta = null;
+    try {
+      const r = await fetch(`${API_BASE}/api/upload`, { method: 'POST', credentials: 'same-origin', body: fd });
+      const j = await r.json().catch(() => ({}));
+      meta = j && j.files && j.files[0];
+      if (!r.ok || !meta || !meta.id) throw new Error((j && (j.detail || j.error)) || `upload failed (${r.status})`);
+    } catch (e) {
+      slashReply('✗ Could not upload the photo: ' + esc(e.message));
+      return;
+    }
+
+    const userText = hint ? `Identify this photo. ${hint}` : 'Identify this photo.';
+    const attachments = [{ id: meta.id, name: meta.name, mime: meta.mime, size: meta.size }];
+    _addMessage('user', userText, null, { attachments });
+    _persistMsg('user', userText, { attachments, source: 'identify' });
+
+    const rep = _quietBubble('');
+    const status = document.createElement('div');
+    status.className = 'generated-image-caption';
+    rep.body.appendChild(status);
+    const t0 = Date.now();
+    const stage = (s) => (s < 4 ? 'Checking the species classifier' : s < 20 ? 'Looking at the photo' : s < 45 ? 'Reading the library and writing it up' : 'Still working — the vision model had to load first');
+    const tick = () => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      status.textContent = `${stage(s)}… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    };
+    tick();
+    const timer = setInterval(() => { if (!document.contains(rep.el)) { clearInterval(timer); return; } tick(); }, 1000);
+
+    let d = null;
+    let err = '';
+    try {
+      const r = await fetch(`${API_BASE}/api/reference/identify`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: meta.id, hint, session_id: sid || '' }),
+      });
+      d = await r.json().catch(() => null);
+      if (!r.ok) err = (d && (d.detail || d.error)) || `identification failed (${r.status})`;
+    } catch (e) { err = e.message; }
+    clearInterval(timer);
+
+    if (err || !d || !d.markdown) {
+      status.textContent = '✗ ' + (err || 'identification failed');
+      return;
+    }
+    const sources = Array.isArray(d.sources) ? d.sources : [];
+    rep.body.innerHTML = _renderMd(d.markdown) + (sources.length ? chatRenderer.buildSourcesBox(sources, 'web') : '');
+    rep.el.dataset.raw = d.markdown;
+    uiModule.scrollHistory();
+    const metadata = { source: 'identify' };
+    if (sources.length) metadata.web_sources = sources;
+    if (d.vision_model) metadata.model = d.vision_model;
+    _persistMsg('assistant', d.markdown, metadata);
+  } finally {
+    _identifyBusy = false;
+  }
+}
+
+/** Camera / gallery chooser → identifyPhoto. Call from a click or key handler. */
+async function pickAndIdentify(hint = '') {
+  const file = await _pickPhoto();
+  if (file) await identifyPhoto(file, hint);
+}
+
+function _cmdIdentify(args) {
+  const first = (args[0] || '').toLowerCase();
+  if (first === 'help') {
+    slashReplyMd([
+      '**Identify a photo** — plant, mushroom, insect, spider, snake, animal sign, a label or page of text, an object.',
+      '',
+      '`/identify` — choose or take a photo',
+      '`/identify found under oaks in October, Ohio` — add what you know; it helps',
+      '',
+      'Attach a photo first and `/identify` uses that one. The answer names the most likely match, what to check in hand, lookalikes (dangerous ones flagged) and what the offline library says about edibility or hazards. Text in a photo is transcribed.',
+    ].join('\n'));
+    return true;
+  }
+  const hint = args.join(' ').trim();
+  // A photo already attached to the composer wins over opening the chooser.
+  let attached = null;
+  try {
+    const pending = fileHandlerModule.getPendingRaw ? fileHandlerModule.getPendingRaw() : [];
+    const index = pending.findIndex((f) => /^image\//i.test((f && f.type) || ''));
+    if (index >= 0) {
+      attached = pending[index];
+      if (fileHandlerModule.removePending) fileHandlerModule.removePending(index);
+    }
+  } catch (_) { attached = null; }
+  // Not awaited: the chooser waits on the user, and the composer must not
+  // stay locked while it does.
+  if (attached) identifyPhoto(attached, hint);
+  else pickAndIdentify(hint);
+  return true;
+}
+
+// -----------------------------------------------------------------------
+// Workbench: /project, /apps, /hosts, /remote
+// (the agent does the same things through its manage_* tools)
+// -----------------------------------------------------------------------
+
+async function _wbFetch(path, options) {
+  const r = await fetch(`${API_BASE}${path}`, Object.assign({ credentials: 'same-origin' }, options || {}));
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || d.error || `request failed (${r.status})`);
+  return d;
+}
+
+function _wbPost(path, body) {
+  return _wbFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+async function _wbSessionId() {
+  try {
+    if (sessionModule.hasPendingChat && sessionModule.hasPendingChat()) await sessionModule.materializePendingSession();
+  } catch (_) { /* fall through: handled by the caller */ }
+  return sessionModule.getCurrentSessionId() || '';
+}
+
+const _wbCode = (s) => '`' + String(s == null ? '' : s).replace(/`/g, "'") + '`';
+
+function _wbAppLine(a) {
+  const state = a.state === 'running' ? 'running' : `**${a.state || 'unknown'}**`;
+  const where = a.url ? `[${a.url}](${a.url})` : (a.local_url ? `${a.local_url} (this server only)` : 'no port');
+  const mem = a.memory_mb ? ` · ${a.memory_mb} MB` : '';
+  return `- **${a.name}** — ${state}${mem} — ${where}`;
+}
+
+async function _cmdApps(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const name = args[1] || '';
+  try {
+    if (['start', 'stop', 'restart', 'remove', 'expose', 'unexpose'].includes(sub)) {
+      if (!name) { slashReplyMd(`Usage: \`/apps ${sub} <name>\``); return true; }
+      const d = await _wbPost('/api/workbench/app', { action: sub, name });
+      slashReplyMd(sub === 'remove'
+        ? `Removed **${name}**. Its folder ${_wbCode(d.kept_folder)} was not touched.`
+        : _wbAppLine(d));
+      return true;
+    }
+    if (sub === 'logs' || sub === 'log') {
+      if (!name) { slashReplyMd('Usage: `/apps logs <name>`'); return true; }
+      const d = await _wbFetch(`/api/workbench/app/${encodeURIComponent(name)}/logs?lines=60`);
+      slashReplyMd(`**${name}** — last log lines\n\n\`\`\`\n${d.log || '(nothing yet)'}\n\`\`\``);
+      return true;
+    }
+    const d = await _wbFetch('/api/workbench/overview');
+    const lines = ['**Hosted apps**', ''];
+    if (d.apps && d.apps.length) d.apps.forEach((a) => lines.push(_wbAppLine(a)));
+    else lines.push('None yet. In agent mode: "build me a … and deploy it".');
+    lines.push('', '`/apps restart|stop|start|logs|remove <name>`');
+    slashReplyMd(lines.join('\n'));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+async function _cmdProject(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const rest = args.slice(1).join(' ').trim();
+  try {
+    if (['open', 'use', 'cd', 'new', 'create', 'clone', 'close', 'status'].includes(sub)) {
+      const sid = await _wbSessionId();
+      if (!sid && sub !== 'status') { slashReplyMd('Start a chat first, then open the project in it.'); return true; }
+      const action = { use: 'open', cd: 'open', new: 'create' }[sub] || sub;
+      const body = { action, session_id: sid };
+      if (action === 'clone') { body.url = args[1] || ''; body.name = args[2] || ''; }
+      else body.name = rest;
+      if ((action === 'open' || action === 'create') && !rest) { slashReplyMd(`Usage: \`/project ${sub} <name>\``); return true; }
+      if (action === 'clone' && !body.url) { slashReplyMd('Usage: `/project clone <git url | owner/repo> [name]`'); return true; }
+      const d = await _wbPost('/api/workbench/project', body);
+      if (action === 'close') { slashReplyMd(d.closed ? 'This chat is no longer tied to a project.' : 'No project was open in this chat.'); return true; }
+      const bits = [d.branch ? `branch ${_wbCode(d.branch)}` : '', d.uncommitted ? `${d.uncommitted} uncommitted change(s)` : '',
+        d.last_commit ? `last commit ${d.last_commit}` : ''].filter(Boolean).join(' · ');
+      const verb = { open: 'Opened', create: 'Created', clone: 'Cloned', status: 'Project' }[action];
+      slashReplyMd(`${verb} **${d.name}** — ${_wbCode(d.path)}${bits ? '\n\n' + bits : ''}`
+        + (action === 'status' ? (d.changes ? `\n\n\`\`\`\n${d.changes}\n\`\`\`` : '') : '\n\nThis chat now works in that folder (agent mode: files and shell).'));
+      return true;
+    }
+    const sid = sessionModule.getCurrentSessionId() || '';
+    const d = await _wbFetch(`/api/workbench/overview?session_id=${encodeURIComponent(sid)}`);
+    const lines = [`**Projects** in ${_wbCode(d.projects_folder)}`, ''];
+    (d.projects || []).forEach((p) => {
+      const open = d.open_project && d.open_project === p.path ? ' ← open in this chat' : '';
+      const git = p.git ? `${p.branch || 'git'}${p.uncommitted ? `, ${p.uncommitted} uncommitted` : ''}` : 'no git';
+      lines.push(`- **${p.name}**${p.protected ? ' (Aegis itself)' : ''} — ${git}${open}`);
+    });
+    if (!(d.projects || []).length) lines.push('None yet.');
+    lines.push('', '`/project open <name>` · `new <name>` · `clone <url>` · `status` · `close`');
+    slashReplyMd(lines.join('\n'));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+// ── /me: what Aegis knows about whoever is signed in ──
+
+function _meView(d) {
+  const p = d.profile || {};
+  const state = [];
+  if (!p.empty && p.updated) {
+    state.push(`from ${d.memories} memories, updated ${new Date(p.updated * 1000).toLocaleString()}`);
+  }
+  state.push(d.using ? 'used in every chat except Nobody mode' : 'not in use — `/me on` turns it back on');
+  if (d.using && !d.learning) state.push('not learning new things (auto-memory is off)');
+  return [
+    '**What I know about you**', '', d.markdown || '', '', `_${state.join(' · ')}_`, '',
+    '`/me add …` tells me something · `/me refresh` rewrites this now · `/me off` pauses · `/me forget` deletes · [see everything, where it came from and every change](/mind)',
+  ].join('\n');
+}
+
+async function _cmdMe(args) {
+  const sub = (args[0] || '').toLowerCase();
+  const rest = args.slice(1).join(' ').trim();
+  try {
+    if (sub === 'add' || sub === 'remember') {
+      if (!rest) { slashReplyMd('Usage: `/me add <something about you>` — e.g. `/me add I keep bees and want a third hive`.'); return true; }
+      const d = await _wbPost('/api/memory/add', { text: rest, category: 'fact', source: 'user' });
+      slashReplyMd(d.duplicate ? 'I already had that.' : 'Noted. It joins your profile at the next rewrite (`/me refresh` does it now).');
+      return true;
+    }
+    if (sub === 'refresh' || sub === 'rebuild' || sub === 'update') {
+      const rep = _quietBubble('Rewriting your profile from your memories…');
+      let md;
+      try {
+        const fd = new FormData();
+        const sid = sessionModule.getCurrentSessionId ? sessionModule.getCurrentSessionId() : '';
+        if (sid) fd.append('session', sid);
+        const d = await _wbFetch('/api/memory/profile/rebuild', { method: 'POST', body: fd });
+        md = _meView(d) + (d.written_by_model || d.profile.empty ? ''
+          : '\n\n_No model answered, so this is a plain list of your memories for now._');
+      } catch (e) {
+        md = '✗ ' + e.message;
+      }
+      rep.body.innerHTML = _renderMd(md);
+      uiModule.scrollHistory();
+      return true;
+    }
+    if (sub === 'on' || sub === 'off') {
+      const value = sub === 'on';
+      for (const key of ['memory_enabled', 'auto_memory']) {
+        await _wbFetch(`/api/prefs/${key}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+        });
+      }
+      slashReplyMd(value
+        ? 'Memory is **on**: I use what I know about you and keep learning — never in Nobody mode.'
+        : 'Memory is **off**: I will not use or add to what I know about you until `/me on`. Nothing was deleted.');
+      return true;
+    }
+    if (sub === 'forget') {
+      if ((args[1] || '').toLowerCase() !== 'everything') {
+        const d = await _wbFetch('/api/memory/profile');
+        slashReplyMd(`This deletes your profile **and all ${d.memories} of your saved memories**, and cannot be undone. `
+          + 'To go ahead: `/me forget everything`.\n\nTo stop without deleting anything use `/me off`; '
+          + 'for a single chat, start it in **Nobody** mode.');
+        return true;
+      }
+      const d = await _wbFetch('/api/memory/profile?memories=true', { method: 'DELETE' });
+      slashReplyMd(`Forgotten: your profile and ${d.memories_removed} memories are deleted.`);
+      return true;
+    }
+    if (sub && sub !== 'show') {
+      slashReplyMd('Usage: `/me` · `/me add <fact>` · `/me refresh` · `/me off` · `/me on` · `/me forget`');
+      return true;
+    }
+    slashReplyMd(_meView(await _wbFetch('/api/memory/profile')));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+// /codemode — Code mode from the keyboard (the mode switch is hidden on a
+// narrow phone): /codemode, /codemode <machine>, /codemode off.
+// (/code is the older command that hands a task to the local coding agent.)
+async function _cmdCodeMode(args) {
+  const mode = window.aegisCodeMode;
+  const setMode = window.__aegisSetChatMode;
+  if (!mode || typeof setMode !== 'function' || !mode.isAvailable()) {
+    slashReplyMd('Code mode is for administrators: it runs commands and changes files on the server and other machines.');
+    return true;
+  }
+  const wanted = String(args || '').trim();
+  if (/^(off|stop|exit|quit|agent)$/i.test(wanted)) {
+    setMode('agent');
+    slashReplyMd('Code mode is off. Back in Auto mode.');
+    return true;
+  }
+  try {
+    setMode('code');
+    const label = await mode.setHost(wanted);
+    slashReplyMd(`**Code mode is on** — working on **${label}**.\n\nSay what to build or change. `
+      + '`/codemode <machine>` works on another computer (`/hosts` lists them), `/codemode off` leaves Code mode.');
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+async function _cmdHosts() {
+  try {
+    const d = await _wbFetch('/api/workbench/overview');
+    const lines = ['**Machines I can run commands on**', ''];
+    (d.hosts || []).forEach((h) => {
+      lines.push(h.builtin ? '- **local** — this server (bash)'
+        : `- **${h.name}** — ${h.user}@${h.address} · ${h.os} · ${h.shell}${h.description ? ' · ' + h.description : ''}`);
+    });
+    const others = (d.peers || []).filter((p) => !p.registered_as);
+    if (others.length) {
+      lines.push('', '**Also on the tailnet** (not set up for commands)', '');
+      others.forEach((p) => lines.push(`- ${p.name || p.dns} — ${p.os}${p.online ? '' : ' · offline'}`));
+    }
+    lines.push('', '`/remote <host> <command>` runs one command. In agent mode just ask ("on my Windows PC, …").');
+    slashReplyMd(lines.join('\n'));
+  } catch (e) {
+    slashReplyMd('✗ ' + e.message);
+  }
+  return true;
+}
+
+async function _cmdRemote(args) {
+  const host = args[0] || '';
+  const command = args.slice(1).join(' ').trim();
+  if (!host || !command) { slashReplyMd('Usage: `/remote <host> <command>` — e.g. `/remote desktop Get-Date`. Hosts: `/hosts`.'); return true; }
+  const rep = _quietBubble(`Running on <b>${uiModule.esc(host)}</b>…`);
+  let md;
+  try {
+    const d = await _wbPost('/api/workbench/run', { host, command });
+    const out = [d.output, d.stderr].filter((s) => s && String(s).trim()).join('\n') || '(no output)';
+    md = `**${d.host}** · exit ${d.exit_code}\n\n\`\`\`\n${out}\n\`\`\``;
+  } catch (e) {
+    md = '✗ ' + e.message;
+  }
+  rep.body.innerHTML = _renderMd(md);
+  rep.el.dataset.raw = md;
+  uiModule.scrollHistory();
+  _persistMsg('assistant', md, { source: 'slash' });
+  return true;
+}
+
 // ── Web Search ──
 
 async function _cmdWebSearch(args, ctx) {
@@ -3425,7 +3899,7 @@ async function _cmdDemo(args, ctx) {
     { sel: '#sidebar-new-chat-btn', text: 'Start a new chat here. <b>Click it.</b> You can do it!', mode: 'click',
       before() { if (sidebar?.classList.contains('hidden')) sidebar.classList.remove('hidden'); } },
     { sel: '#model-picker-btn',   text: 'Pick your LLM, Local or API.', advanceOnClick: true },
-    { sel: '#mode-agent-btn',     text: '<b>Agent mode</b> gives Aegis more control of the app when your model supports tools: create a theme, download a model, make a daily task, organize things, and more.', mode: 'click' },
+    { sel: '#mode-agent-btn',     text: '<b>Auto</b> (agent mode) uses tools when your message calls for them and answers directly when it is plain conversation. Tools give Aegis more control of the app when your model supports them: create a theme, download a model, make a daily task, organize things, and more.', mode: 'click' },
     { sel: '#web-toggle-btn',     text: 'Toggle tools like <b>web search</b>. Aegis comes with private built-in <b>SearXNG</b> search.', mode: 'click' },
     { sel: '#overflow-plus-btn',  text: 'More tools can be found here, or in your sidebar. <b>Click to peek.</b>',
       advanceOnClick: true, pulseNext: true, afterDelay: 2200 },
@@ -3788,7 +4262,7 @@ async function _cmdTourCookbook(args, ctx) {
     }
   }
   if (!modal || modal.classList.contains('hidden')) {
-    slashReply('Could not open Cookbook. Try clicking the Cookbook tool first.');
+    slashReply('Could not open Model Shopper. Try clicking the Model Shopper tool first.');
     return true;
   }
 
@@ -3915,7 +4389,7 @@ async function _cmdTourCookbook(args, ctx) {
   // without having to navigate manually. Keep copy tight — no walls of text.
   const steps = [
     { sel: '#cookbook-modal .modal-content',
-      text: '<b>Welcome to Cookbook!</b> Download / Cook / Serve models here!',
+      text: '<b>Welcome to the Model Shopper!</b> Find, download and serve models here.',
       placement: 'center-above' },
     { sel: '#cookbook-modal .cookbook-tab[data-backend="Settings"]',
       text: 'Hosting on another machine? Configure it under <b>Settings</b>.' },
@@ -3965,7 +4439,7 @@ async function _cmdTourCookbook(args, ctx) {
   // Leave Cookbook on the Download tab so the user can start downloading immediately.
   _clickTab('Search');
   _clear();
-  await typewriterReply('That’s Cookbook. Pick a model that catches your eye and let it cook.');
+  await typewriterReply('That’s the Model Shopper. Pick a model that catches your eye and try it out.');
   return true;
 }
 
@@ -6046,8 +6520,8 @@ async function _setupEasyChoice(choice) {
     '<div class="setup-guide-no-censor" style="display:grid;gap:8px;">' +
       '<div style="font-weight:700;">No running model servers found</div>' +
       '<div>Three easy ways to get one:</div>' +
-      '<div class="setup-easy-cookbook" style="' + _SETUP_EASY_CARD + '" title="Open Cookbook">' +
-        '<div style="font-weight:600;">&#128218; Open the Cookbook</div>' +
+      '<div class="setup-easy-cookbook" style="' + _SETUP_EASY_CARD + '" title="Open Model Shopper">' +
+        '<div style="font-weight:600;">&#128218; Open the Model Shopper</div>' +
         '<div style="opacity:.75;font-size:.92em;">Aegis reads your hardware, recommends models that fit, and downloads + serves them for you.</div>' +
       '</div>' +
       '<div>&#8226; Install <a href="https://ollama.com/download" target="_blank" rel="noopener">Ollama</a> or <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a>, start a model, then run <code>/setup easy</code> again.</div>' +
@@ -6838,6 +7312,13 @@ const COMMANDS = {
       'search': { handler: _cmdMemorySearch, alias: ['grep'],        help: 'Search memories',     usage: '/memory search q' }
     }
   },
+  me: {
+    alias: ['whoami', 'profile', 'aboutme'],
+    category: 'Memory',
+    help: 'What Aegis knows about you — who you are and what you are into: /me, /me add <fact>, /me refresh, /me off|on, /me forget',
+    handler: (args) => _cmdMe(args),
+    usage: '/me [add <fact> | refresh | off | on | forget]'
+  },
   skills: {
     alias: ['skill'],
     category: 'Memory',
@@ -6929,12 +7410,14 @@ const COMMANDS = {
     handler: _cmdTourCompare,
     usage: '/tour-compare'
   },
-  'tour-cookbook': {
-    alias: ['cookbook-tour'],
+  // Was /tour-cookbook; that name still works (tourAutoplay.js fires it, and
+  // its "already seen" marker is stored under the old name).
+  'tour-shopper': {
+    alias: ['shopper-tour', 'tour-cookbook', 'cookbook-tour'],
     category: 'Tours',
-    help: 'Cookbook tour: hardware, downloads, serving',
+    help: 'Model Shopper tour: hardware, downloads, serving',
     handler: _cmdTourCookbook,
-    usage: '/tour-cookbook'
+    usage: '/tour-shopper'
   },
   'tour-research': {
     alias: ['research-tour'],
@@ -7019,14 +7502,51 @@ const COMMANDS = {
     hidden: true,
     help: 'Open a tool panel',
     handler: _cmdOpen,
-    usage: '/open Cookbook'
+    usage: '/open Shopper'
   },
-  cookbook: {
-    alias: ['cook'],
+  shopper: {
+    alias: ['model-shopper', 'modelshopper'],
     category: 'Tools',
-    help: 'Open Cookbook; use "serve" to jump to model serving',
+    help: 'Open the Model Shopper: find, download and serve models; use "serve" to jump to model serving',
     handler: (args, ctx) => _cmdToolPanel('cookbook', args, ctx),
-    usage: '/cookbook  ·  /cookbook serve qwen'
+    usage: '/shopper  ·  /shopper serve qwen'
+  },
+  // The Model Shopper's old name. Kept so the habit still works — and says where things went.
+  cookbook: {
+    hidden: true,
+    category: 'Tools',
+    help: 'Old name for the Model Shopper (/shopper). Food recipes are in the Kitchen (/kitchen)',
+    handler: (args, ctx) => { _renamed('Cookbook', 'Model Shopper', '/shopper'); return _cmdToolPanel('cookbook', args, ctx); },
+    usage: '/shopper'
+  },
+  kitchen: {
+    alias: ['cooking', 'cook'],
+    category: 'Tools',
+    help: 'Open the Kitchen: food recipes set out for cooking, one step at a time',
+    handler: () => { window.location.href = '/kitchen'; return true; },
+    usage: '/kitchen'
+  },
+  translate: {
+    alias: ['translator', 'tr'],
+    category: 'Tools',
+    help: 'Open Translate: type, speak or photograph something and read it in another language (give words to translate them straight away)',
+    handler: (args) => {
+      const words = (Array.isArray(args) ? args.join(' ') : String(args || '')).trim();
+      window.location.href = words ? `/translate?text=${encodeURIComponent(words)}` : '/translate';
+      return true;
+    },
+    usage: '/translate [words]'
+  },
+  almanac: {
+    alias: ['convert', 'units'],
+    category: 'Tools',
+    help: 'Open the Almanac: unit conversion, map positions (lat/long, UTM, MGRS), sun and moon times, date arithmetic (give an amount to convert it straight away)',
+    handler: (args) => {
+      const words = (Array.isArray(args) ? args.join(' ') : String(args || '')).trim();
+      window.location.href = words ? `/almanac?convert=${encodeURIComponent(words)}` : '/almanac';
+      return true;
+    },
+    usage: '/almanac [5 ft 10 in to cm]'
   },
   email: {
     alias: ['mail', 'inbox'],
@@ -7059,6 +7579,7 @@ const COMMANDS = {
   bonzi: {
     alias: ['buddy'],
     category: 'Tools',
+    hidden: true,                 // an easter egg: it works when typed and is offered nowhere
     help: 'Summon or dismiss Bonzi Buddy (/bonzi, /bonzi off, /bonzi fact)',
     handler: (args) => _cmdBonzi(args),
     usage: '/bonzi'
@@ -7066,6 +7587,7 @@ const COMMANDS = {
   winamp: {
     alias: ['amp'],
     category: 'Tools',
+    hidden: true,                 // an easter egg: it works when typed and is offered nowhere
     help: 'Toggle the Aegis Amp — a Y2K-skinned floating player for Studio songs (/winamp, /winamp off)',
     handler: (args) => _cmdWinamp(args),
     usage: '/winamp'
@@ -7073,6 +7595,7 @@ const COMMANDS = {
   win98: {
     alias: ['98', 'desktop', 'windows98'],
     category: 'Tools',
+    hidden: true,                 // an easter egg: it works when typed and is offered nowhere
     help: 'Boot Aegis 98 — the full Windows 98 desktop mode (/win98, /win98 off)',
     handler: (args) => _cmdWin98(args),
     usage: '/win98'
@@ -7084,16 +7607,10 @@ const COMMANDS = {
     handler: (args) => _cmdTraces(args),
     usage: '/traces'
   },
-  graph: {
-    alias: ['kg', 'knowledge'],
-    category: 'Tools',
-    help: 'Knowledge-graph memory: /graph <term>, /graph build, /graph stats',
-    handler: (args) => _cmdGraph(args),
-    usage: '/graph build'
-  },
   code: {
     alias: ['aider'],
     category: 'Tools',
+    hidden: true,                 // Code mode (/codemode) is the one door to code; this still works when typed
     help: 'Local coding agent: /code ws <path>, /code <task>, /code status',
     handler: (args) => _cmdCode(args),
     usage: '/code <task>'
@@ -7101,6 +7618,7 @@ const COMMANDS = {
   wiki: {
     alias: ['deepwiki', 'repowiki'],
     category: 'Tools',
+    hidden: true,
     help: 'Repo → wiki: /wiki <path>, /wiki list, /wiki show <name>',
     handler: (args) => _cmdWiki(args),
     usage: '/wiki <path>'
@@ -7133,6 +7651,56 @@ const COMMANDS = {
     handler: (args) => _cmdImage(args),
     usage: '/image <prompt>'
   },
+  identify: {
+    alias: ['id', 'whatis', 'ocr'],
+    category: 'Tools',
+    help: 'Identify a photo: plant, mushroom, insect, animal sign, object, or read its text. /identify [what you know about it]',
+    handler: (args) => _cmdIdentify(args),
+    noUserBubble: true,
+    usage: '/identify [where/when you found it]'
+  },
+  project: {
+    alias: ['projects', 'proj'],
+    category: 'Tools',
+    help: 'Code projects: list, or /project open|new|clone|status|close — the open project is where agent mode works',
+    handler: (args) => _cmdProject(args),
+    usage: '/project [open <name> | new <name> | clone <url> | status | close]'
+  },
+  apps: {
+    alias: ['app', 'hosted', 'deployed'],
+    category: 'Tools',
+    help: 'Apps hosted on this server, with their addresses: /apps, /apps restart|stop|start|logs|remove <name>',
+    handler: (args) => _cmdApps(args),
+    usage: '/apps [restart|stop|start|logs|remove <name>]'
+  },
+  codemode: {
+    alias: ['coding', 'dev'],
+    category: 'Tools',
+    help: 'Code mode — a coding agent on this server or another machine: /codemode, /codemode <machine>, /codemode off',
+    handler: (args) => _cmdCodeMode(args),
+    usage: '/codemode [machine | off]'
+  },
+  hosts: {
+    alias: ['machines', 'pcs'],
+    category: 'Tools',
+    help: 'Other machines this server can run commands on',
+    handler: () => _cmdHosts(),
+    usage: '/hosts'
+  },
+  remote: {
+    alias: ['rc', 'onhost'],
+    category: 'Tools',
+    help: 'Run one command on another machine: /remote <host> <command>',
+    handler: (args) => _cmdRemote(args),
+    usage: '/remote <host> <command>'
+  },
+  lib: {
+    alias: ['kiwix', 'lookup', 'ref', 'offline'],
+    category: 'Tools',
+    help: 'Search the offline library (Wikipedia, medical, manuals): /lib <words>. No words = what is installed',
+    handler: (args) => _cmdLib(args),
+    usage: '/lib <words>'
+  },
   style: {
     alias: ['styles', 'preset'],
     category: 'Tools',
@@ -7150,6 +7718,7 @@ const COMMANDS = {
   canvas: {
     alias: ['editor'],
     category: 'Tools',
+    hidden: true,
     help: 'Code Canvas — write/edit code with AI: /canvas, /canvas <what to build>',
     handler: (args) => {
       try {
@@ -7203,16 +7772,25 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('compare', args, ctx),
     usage: '/compare'
   },
+  automations: {
+    alias: ['automation'],
+    category: 'Tools',
+    help: 'Open Automations: ready-made and build-your-own workflows of tools and models, to run or to schedule',
+    handler: (args, ctx) => _cmdToolPanel('recipes', args, ctx),
+    usage: '/automations'
+  },
+  // Their old name. Kept so the habit still works — and says where food recipes are.
   recipes: {
+    hidden: true,
     alias: ['recipe'],
     category: 'Tools',
-    help: 'Open Recipes (visual tool + model workflows)',
-    handler: (args, ctx) => _cmdToolPanel('recipes', args, ctx),
-    usage: '/recipes'
+    help: 'Old name for Automations (/automations). Food recipes are in the Kitchen (/kitchen)',
+    handler: (args, ctx) => { _renamed('Recipes', 'Automations', '/automations'); return _cmdToolPanel('recipes', args, ctx); },
+    usage: '/automations'
   },
   // Toolbox opt-in: `/osint <query>` scopes ONE chat message to a toolbox's
   // tools (handled in chat.js before dispatch — these entries are for
-  // autocomplete + a usage hint when typed bare). Toolboxes are also in Recipes.
+  // autocomplete + a usage hint when typed bare). Toolboxes are also in Automations.
   osint: {
     alias: ['recon', 'intel'],
     category: 'Toolboxes',
@@ -7346,6 +7924,8 @@ const COMMANDS = {
 // ── Legacy aliases ────────────────────────────────────────────────
 // Maps old flat command names to { parent, sub } so `/new` still works.
 
+// Older names for some commands. They still work for whoever types them, and
+// are offered nowhere: the list is the current commands only.
 export const LEGACY_ALIASES = {
   'new':         { parent: 'chats', sub: 'new' },
   'create':      { parent: 'chats', sub: 'new' },
@@ -7386,6 +7966,24 @@ export const LEGACY_ALIASES = {
   'mkdir':       { parent: 'chats', sub: 'new' },
   'status':      { parent: 'toggle', sub: '_show' }
 };
+
+// Commands that belong to whoever runs the server: engines and models, the
+// workshop's tools, tours of them. Everyone else is not offered them, and is
+// told so on typing one. (The server enforces the real permissions; this keeps
+// the list honest about what a person can do.)
+export const ADMIN_COMMANDS = new Set([
+  'toggle', 'workspace', 'skills', 'reload-skills', 'rag', 'setup', 'model', 'models', 'theme', 'sh', 'stats',
+  'shopper', 'cookbook', 'email', 'tasks', 'doctor', 'traces', 'code', 'wiki', 'engine', 'project', 'apps',
+  'codemode', 'hosts', 'remote', 'style', 'control', 'canvas', 'brain', 'library', 'research', 'compare',
+  'automations', 'recipes', 'mcp', 'osint', 'market', 'troubleshoot',
+  'demo', 'tour-compare', 'tour-shopper', 'tour-research', 'tour-library', 'tour-theme', 'tour-settings',
+  'tour-gallery', 'tour-brain', 'tour-task-1', 'tour-task-2',
+]);
+
+/** Whether the person looking at this page runs the server (app.py puts it on <html>). */
+export function viewerIsAdmin() {
+  return typeof document === 'undefined' || document.documentElement.dataset.admin === '1';
+}
 
 // ── Dispatch helpers ──────────────────────────────────────────────
 
@@ -7476,6 +8074,14 @@ async function handleSlashCommand(input) {
     // --- 1. Try direct command resolution ---
     let cmdKey = _resolveCommand(rawCmd);
     let cmdDef = cmdKey ? COMMANDS[cmdKey] : null;
+
+    // An administrator's command typed by someone else: say so, plainly, and do nothing.
+    const _adminKey = cmdKey || (LEGACY_ALIASES[rawCmd] && LEGACY_ALIASES[rawCmd].parent);
+    if (_adminKey && ADMIN_COMMANDS.has(_adminKey) && !viewerIsAdmin()) {
+      _showUser();
+      slashReply('That command is for whoever runs this server.');
+      return true;
+    }
 
     // --- 2. Try legacy alias ---
     if (!cmdDef && LEGACY_ALIASES[rawCmd]) {
@@ -7620,6 +8226,19 @@ export function initSlashCommands(deps) {
     _helpBtn.addEventListener('click', () => { try { _cmdHelp([], {}); } catch (_e) {} });
   }
 
+  // Composer menu → "Identify photo". Wired to the click itself so the photo
+  // chooser opens inside the user gesture (iOS refuses it otherwise).
+  const _identifyBtn = document.getElementById('overflow-identify-btn');
+  if (_identifyBtn && !_identifyBtn._wired) {
+    _identifyBtn._wired = true;
+    _identifyBtn.addEventListener('click', () => {
+      const box = document.getElementById('message');
+      const hint = box && !box.value.trim().startsWith('/') ? box.value.trim() : '';
+      if (hint && box) { box.value = ''; if (uiModule.autoResize) uiModule.autoResize(box); }
+      pickAndIdentify(hint).catch(() => {});
+    });
+  }
+
   // Global delegation for onboarding and setup clicks
   document.addEventListener('click', (e) => {
     // 1. Check for clicking the "/setup" trigger link on the welcome screen
@@ -7730,7 +8349,8 @@ export function clearSetupMode(preservePendingState = false) {
   }
 }
 
-export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS };
+export { handleSlashCommand, handleSetupInput, handleSetupWizard, slashReply, typewriterReply, COMMANDS,
+         identifyPhoto, pickAndIdentify };
 
 const slashCommands = {
   initSlashCommands,
@@ -7743,6 +8363,8 @@ const slashCommands = {
   slashReply,
   typewriterReply,
   typewriterInto,
+  identifyPhoto,
+  pickAndIdentify,
 };
 
 export default slashCommands;

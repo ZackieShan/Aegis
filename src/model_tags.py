@@ -68,8 +68,15 @@ def classify(name: str, *, is_lora: bool = False) -> Dict[str, List[str]]:
     # Comfy-Org single-file TE repacks: gemma_3_12B_it_fp4_mixed, qwen_3_8b_fp8mixed
     if re.search(r"(?:gemma|qwen)_\d[\w.]*fp[48]", n):
         return {"capabilities": ["companion"], "best_for": ["text encoder — pairs with a diffusion model"]}
+    # ...and their full-precision siblings. The repacks spell the family with
+    # an underscore before the version (qwen_2.5_vl_7b, qwen_3_4b,
+    # mistral_3_small_flux2, qwen3vl_4b_...), where real chat GGUFs use a
+    # hyphen or nothing (Qwen3.6-35B, gemma-3-12b-it, Mistral-Small-4).
+    if re.match(r"(?:gemma|qwen|mistral)_\d", n) or re.match(r"qwen\d*vl_\d+b", n):
+        return {"capabilities": ["companion"], "best_for": ["text encoder — pairs with a diffusion model"]}
 
-    uncensored = _has(n, "uncensored", "nsfw", "abliterated", "unfiltered")
+    uncensored = _has(n, "uncensored", "nsfw", "abliterated", "unfiltered",
+                      "heretic", "decensored", "derestricted")
 
     # ── video pipelines ──────────────────────────────────────────────────────
     if _word(n, "wan", "wan2", "wan2.1", "wan2.2") or re.search(r"wan[\d.]*[-_]", n):
@@ -139,6 +146,11 @@ def classify(name: str, *, is_lora: bool = False) -> Dict[str, List[str]]:
         cap("chat")
         bf("coding & agent tool use")
         bf("charts & data analysis (via code)")
+    elif _has(n, "minimax"):
+        # MiniMax-M2.x: an agentic-coding family whose name says nothing of it.
+        cap("coding")
+        cap("chat")
+        bf("coding & agent tool use")
     if _has(n, "whisper"):
         cap("speech-to-text")
     if _word(n, "tts") or _has(n, "kokoro", "bark", "piper"):
@@ -155,15 +167,21 @@ def classify(name: str, *, is_lora: bool = False) -> Dict[str, List[str]]:
     if not caps or (not diffusion_or_av and "chat" not in caps):
         cap("chat")
     if "chat" in caps and not diffusion_or_av:
-        # Qwen/Gemma/GLM instruct families are strong multilingual models.
-        if _word(n, "qwen", "qwen2", "qwen3", "gemma", "glm") or n.startswith(("qwen", "gemma", "glm", "supergemma")):
+        # Finetunes built for prose (TheDrummer's GLM-Steam) lead with that.
+        if _has(n, "glm-steam", "glm_steam"):
+            bf("creative writing & roleplay")
+        # Qwen/Gemma/GLM/Mistral instruct families are strong multilingual models.
+        if _word(n, "qwen", "qwen2", "qwen3", "gemma", "glm", "mistral") \
+                or n.startswith(("qwen", "gemma", "glm", "supergemma", "mistral")) \
+                or _has(n, "mistral-small", "mistral_small"):
             bf("translation & multilingual chat")
-        if _has(n, "distill", "r1", "qwq") or _word(n, "thinking", "think"):
+        if _has(n, "distill", "r1", "qwq", "gpt-oss") or _word(n, "thinking", "think"):
             bf("step-by-step reasoning")
 
     if uncensored:
         cap("uncensored")
-    if _word(n, "a3b", "moe") or _has(n, "mixtral"):
+    # "A3B" / "A10B" = billions of parameters active per token in an MoE.
+    if _word(n, "moe") or re.search(r"(?:^|[/\-_. ])a\d+b(?:$|[/\-_. ])", n) or _has(n, "mixtral"):
         cap("moe")
 
     return {"capabilities": caps, "best_for": best}

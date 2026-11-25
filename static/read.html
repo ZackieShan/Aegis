@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-theme="auto" data-paper="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121016" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Reader — Aegis</title>
+<link rel="icon" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<script nonce="{{CSP_NONCE}}">
+// Put the reader's chosen paper and type in place before the first paint.
+(function () {
+  try {
+    var look = JSON.parse(localStorage.getItem('aegis-reader-look') || '{}');
+    var root = document.documentElement;
+    if (/^(auto|light|sepia|dark)$/.test(look.paper || '')) root.setAttribute('data-paper', look.paper);
+    if (look.size >= 14 && look.size <= 30) root.style.setProperty('--read-size', look.size + 'px');
+    if (look.font === 'sans') root.setAttribute('data-font', 'sans');
+    if (look.width === 'wide') root.setAttribute('data-width', 'wide');
+  } catch (e) { /* defaults */ }
+})();
+</script>
+<link rel="stylesheet" href="/static/lite/lite.css?v=1">
+<link rel="stylesheet" href="/static/lite/read.css?v=1">
+</head>
+<body>
+<div class="page" id="app"><div class="loading"><span class="spinner"></span></div></div>
+<script type="module" src="/static/lite/read.js?v=1"></script>
+</body>
+</html>

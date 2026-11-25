@@ -102,13 +102,16 @@ def setup_movie_routes() -> APIRouter:
             raise HTTPException(403, "That job belongs to someone else")
 
         # Ask the owning subsystem to actually stop, not just relabel it.
+        # Videos, songs and picture edits all sit in the same job registry;
+        # its cancel is a coroutine — without the await it never ran, the
+        # render carried on and the queue said the GPU was free.
         external = entry.get("external_id")
-        if entry.get("kind") == "video" and external:
+        if external:
             try:
                 from src import video_generation
-                video_generation.cancel_job(external)
+                await video_generation.cancel_job(external)
             except Exception:
-                logger.debug("Underlying video cancel failed for %s", qid, exc_info=True)
+                logger.debug("Underlying cancel failed for %s", qid, exc_info=True)
 
         if not job_queue.cancel(qid):
             return {"ok": False, "reason": "already finished"}

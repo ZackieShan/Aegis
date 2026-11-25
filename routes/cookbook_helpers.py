@@ -979,7 +979,7 @@ def _append_llama_cpp_linux_accel_build_lines(runner_lines: list[str]) -> None:
     runner_lines.append('        local _dnfpkgs="$(echo "$_missing" | sed -e \'s/build-essential/gcc gcc-c++ make/g\')"')
     runner_lines.append('        sudo -n dnf install -y $_dnfpkgs 2>&1 | tail -5 || true')
     runner_lines.append('      else')
-    runner_lines.append('        echo "[aegis] WARNING: missing build deps ($_missing) — passwordless sudo is unavailable, cannot auto-install. Cookbook Diagnosis will explain the fix after the build fails."')
+    runner_lines.append('        echo "[aegis] WARNING: missing build deps ($_missing) — passwordless sudo is unavailable, cannot auto-install. Model Shopper Diagnosis will explain the fix after the build fails."')
     runner_lines.append('      fi')
     runner_lines.append('    }')
     runner_lines.append('    _aegis_apt_bootstrap')
@@ -1325,7 +1325,7 @@ def _diagnose_serve_output(text: str) -> dict | None:
         (
             r"No CUDA GPUs are available|no GPU.*found|CUDA_VISIBLE_DEVICES.*invalid",
             "No GPUs are visible to the serve process.",
-            [{"label": "clear Cookbook GPU selection or choose available GPUs", "op": "settings", "field": "gpus", "value": ""}],
+            [{"label": "clear Model Shopper GPU selection or choose available GPUs", "op": "settings", "field": "gpus", "value": ""}],
         ),
         (
             r"Failed to infer device type|NVML Shared Library Not Found|No module named 'amdsmi'|platform is not available",
@@ -1339,7 +1339,7 @@ def _diagnose_serve_output(text: str) -> dict | None:
         (
             r"vllm.*command not found|No module named vllm|ERROR: vLLM is not installed",
             "vLLM is not installed or not in PATH on this server.",
-            [{"label": "install vLLM in Cookbook Dependencies", "op": "dependency", "package": "vllm"}],
+            [{"label": "install vLLM in Model Shopper Dependencies", "op": "dependency", "package": "vllm"}],
         ),
         (
             r"sgl_kernel[\s\S]*(Python\.h|libnuma\.so\.1|common_ops|libnvrtc\.so)|"
@@ -1356,12 +1356,12 @@ def _diagnose_serve_output(text: str) -> dict | None:
         (
             r"sglang.*command not found|No module named sglang|SGLang is not installed",
             "SGLang is not installed or not in PATH on this server.",
-            [{"label": "install SGLang in Cookbook Dependencies", "op": "dependency", "package": "sglang[all]"}],
+            [{"label": "install SGLang in Model Shopper Dependencies", "op": "dependency", "package": "sglang[all]"}],
         ),
         (
             r"No module named ['\"]?mlx_lm|mlx_lm.*command not found|MLX is not installed|MLX LM is not installed",
             "MLX LM is not installed on this server.",
-            [{"label": "install mlx-lm in Cookbook Dependencies", "op": "dependency", "package": "mlx-lm"}],
+            [{"label": "install mlx-lm in Model Shopper Dependencies", "op": "dependency", "package": "mlx-lm"}],
         ),
         (
             r"Unable to quantize model of type <class ['\"]mlx_lm\.models\.switch_layers\.QuantizedSwitchLinear['\"]>|QuantizedSwitchLinear",
@@ -1403,7 +1403,7 @@ def _diagnose_serve_output(text: str) -> dict | None:
         (
             r"No module named 'torch'|No module named torch|No module named 'diffusers'|No module named diffusers",
             "Diffusion serving requires PyTorch and diffusers.",
-            [{"label": "install diffusers[torch] in Cookbook Dependencies", "op": "dependency", "package": "diffusers[torch]"}],
+            [{"label": "install diffusers[torch] in Model Shopper Dependencies", "op": "dependency", "package": "diffusers[torch]"}],
         ),
         (
             r"403 Forbidden|401 Unauthorized|Access to model.*is restricted|gated repo|not in the authorized list|awaiting a review",

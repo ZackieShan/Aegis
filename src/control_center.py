@@ -255,17 +255,6 @@ def _knowledge_group(doc: Dict) -> Dict[str, Any]:
     items.append(_item("rag", "Documents & RAG", "ok" if fe.get("ok") else "off",
                        "semantic search over your files" if fe.get("ok") else fe.get("detail", ""),
                        _panel("rail-archive")))
-    # Graph memory
-    try:
-        from src import graph_memory
-        st = graph_memory.stats()
-        on = graph_memory.is_enabled()
-        items.append(_item("graph", "Knowledge graph memory",
-                           "ok" if (on and st.get("total")) else "off",
-                           f"{st.get('total', 0)} facts" if on else "off — enable in Settings, then /graph build",
-                           _cmd("/graph stats")))
-    except Exception:
-        pass
     return {"title": "Knowledge", "items": items}
 
 
@@ -294,7 +283,7 @@ def _workflow_group(doc: Dict) -> Dict[str, Any]:
     try:
         from src import recipes
         n = len(recipes.list_recipes() or [])
-        items.append(_item("recipes", "Recipes (visual workflows)", "ok",
+        items.append(_item("recipes", "Automations (visual workflows)", "ok",
                            f"{n} saved" if n else "chain tools + models on a canvas", _panel("rail-recipes")))
     except Exception:
         pass

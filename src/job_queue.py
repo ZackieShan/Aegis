@@ -143,6 +143,7 @@ def finish(
         e = _ENTRIES.get(qid)
         if not e:
             return
+        already_over = e.get("status") in DONE_STATES
         e["status"] = str(status)
         e["finished"] = time.time()
         if result_url:
@@ -151,6 +152,38 @@ def finish(
             e["error"] = str(error)[:500]
         if status == "done" and e.get("progress") is not None:
             e["progress"] = 1.0
+        told = None if already_over else dict(e)
+    if told is not None:
+        _tell_the_owner(told)
+
+
+# What a kind of work is called when it is somebody's: "Your video is ready".
+_MADE = {"image": "picture", "image_edit": "picture", "video": "video", "movie": "movie", "audio": "song"}
+# Quicker than this and the person is still looking at it being made: nothing is said.
+TELL_AFTER_SECONDS = 40.0
+
+
+def _tell_the_owner(entry: Dict[str, Any]) -> None:
+    """A picture, a video or a song that took a while has finished (or failed):
+    tell the person who asked — their phone, and any screen they have open.
+    Never raises: the work is done either way."""
+    try:
+        owner, word = entry.get("owner"), _MADE.get(str(entry.get("kind")))
+        if not owner or not word or entry.get("status") not in ("done", "error"):
+            return
+        began = entry.get("started") or entry.get("created") or entry.get("finished") or 0
+        if float(entry.get("finished") or 0) - float(began) < TELL_AFTER_SECONDS:
+            return
+        from services import notify
+        asked = " ".join(str(entry.get("title") or "").split())[:110]
+        link = str(entry.get("result_url") or "")
+        if entry["status"] == "done":
+            notify.tell_soon(owner, f"Your {word} is ready", asked, url=link if link.startswith("/") else "/home", tag=f"made-{entry.get('id')}")
+        else:
+            notify.tell_soon(owner, f"Your {word} did not finish", asked or "It stopped part-way.", url="/home",
+                             tag=f"made-{entry.get('id')}", status="error")
+    except Exception:
+        pass
 
 
 def cancel(qid: str) -> bool:

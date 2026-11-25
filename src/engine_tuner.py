@@ -31,6 +31,15 @@ _SAFETY_MB = 1000
 _GRANULARITY = 4096      # round contexts down to a clean multiple
 _FLOOR = 8192            # never recommend below this
 _HARD_CAP = 131072       # practical ceiling regardless of what the math allows
+# On a unified-memory APU (Strix Halo) the "GPU pool" is GTT — ordinary system
+# RAM the kernel lets the GPU page in, and the ttm limit is usually set to
+# nearly all of it (120GiB of 128). Planning weights + KV against that full
+# figure leaves nothing for the OS, Aegis itself and the other engines, and
+# the machine goes into swap long before llama.cpp reports an allocation
+# failure. Hold this much system RAM back when sizing contexts there
+# (override: AEGIS_UMA_HOST_RESERVE_MB).
+_UMA_HOST_RESERVE_MB = 16384
+_UMA_FREE_CUSHION_MB = 4096    # kept free when measuring live headroom (gpu_free_mb)
 
 
 def _engine_dir() -> str:
@@ -62,15 +71,78 @@ def gpu_vram_mb() -> Optional[int]:
     return _amd_vram_mb()
 
 
-def _amd_vram_mb(sysfs_root: str = "/sys/class/drm") -> Optional[int]:
-    """AMD GPU memory in MiB straight from the kernel — no rocm-smi needed.
+def _uma_host_reserve_mb() -> int:
+    try:
+        return max(0, int(os.getenv("AEGIS_UMA_HOST_RESERVE_MB", "") or _UMA_HOST_RESERVE_MB))
+    except ValueError:
+        return _UMA_HOST_RESERVE_MB
 
-    Mirrors services/hwfit/hardware._detect_amd: a discrete card reports its
-    real pool in mem_info_vram_total, while an APU like Strix Halo carves out
-    a tiny BIOS VRAM slice and pages GPU allocations from GTT, so there the
-    usable budget is max(vis_vram, gtt). Returns the max across cards, None
-    when no AMD card is found.
+
+def gpu_budget_mb() -> Optional[int]:
+    """Memory a model's weights + KV cache may plan to occupy, in MiB.
+
+    gpu_vram_mb() for a card with its own VRAM. On a unified-memory AMD APU
+    the pool is system RAM, so the budget is additionally capped at
+    (system RAM - host reserve): see _UMA_HOST_RESERVE_MB.
     """
+    total = gpu_vram_mb()
+    if not total:
+        return total
+    pool = _amd_pool()
+    if pool and pool[1] and pool[0] == total:
+        ram = system_ram_mb()
+        if ram:
+            total = min(total, max(ram - _uma_host_reserve_mb(), 0))
+    return total
+
+
+def gpu_free_mb() -> Optional[int]:
+    """GPU memory a NEW workload could claim right now, in MiB (None when
+    unknown). NVIDIA: nvidia-smi memory.free. AMD discrete: VRAM total - used.
+    AMD unified-memory APU: the smaller of (GTT limit - GTT in use) and
+    (MemAvailable - host reserve) — the pool is system RAM, so RAM that other
+    processes hold is just as unavailable as GTT another engine holds.
+    """
+    exe = _which("nvidia-smi")
+    if exe:
+        try:
+            out = subprocess.run([exe, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=10)
+            line = (out.stdout or "").strip().splitlines()
+            if line:
+                return int(line[0].strip())
+        except Exception:
+            pass
+    usage = _amd_usage()
+    if not usage:
+        return None
+    total, used, unified = usage
+    free = max(total - used, 0)
+    if unified:
+        avail = _mem_available_mb()
+        if avail is not None:
+            # MemAvailable already excludes what every other process holds, so
+            # only a small cushion is kept here — not the planning-time host
+            # reserve gpu_budget_mb() uses for a machine with nothing loaded.
+            free = min(free, max(avail - _UMA_FREE_CUSHION_MB, 0))
+    return free
+
+
+def _mem_available_mb(meminfo: str = "/proc/meminfo") -> Optional[int]:
+    """MemAvailable from /proc/meminfo in MiB (counts reclaimable page cache
+    as available, which is what matters before a model load)."""
+    try:
+        with open(meminfo, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _amd_usage(sysfs_root: str = "/sys/class/drm") -> Optional[tuple]:
+    """(pool MiB, in-use MiB, unified) for the AMD GPU _amd_pool picks."""
     import glob
     mib = 1024 * 1024
 
@@ -85,6 +157,58 @@ def _amd_vram_mb(sysfs_root: str = "/sys/class/drm") -> Optional[int]:
     best = None
     for dev in glob.glob(os.path.join(sysfs_root, "card*", "device")):
         if "-" in os.path.basename(os.path.dirname(dev)):
+            continue
+        try:
+            with open(os.path.join(dev, "vendor"), "r", encoding="utf-8", errors="replace") as f:
+                if f.read().strip() != "0x1002":
+                    continue
+        except OSError:
+            continue
+        vram = _read_int(os.path.join(dev, "mem_info_vram_total"))
+        vram_used = _read_int(os.path.join(dev, "mem_info_vram_used"))
+        if vram >= 4 * 1024 * mib:
+            total, used, unified = vram // mib, vram_used // mib, False
+        else:
+            total = max(_read_int(os.path.join(dev, "mem_info_vis_vram_total")),
+                        _read_int(os.path.join(dev, "mem_info_gtt_total"))) // mib
+            used = (_read_int(os.path.join(dev, "mem_info_gtt_used")) + vram_used) // mib
+            unified = True
+        if total > 0 and (best is None or total > best[0]):
+            best = (total, used, unified)
+    return best
+
+
+def _amd_vram_mb(sysfs_root: str = "/sys/class/drm") -> Optional[int]:
+    """AMD GPU memory in MiB straight from the kernel — no rocm-smi needed.
+
+    Mirrors services/hwfit/hardware._detect_amd: a discrete card reports its
+    real pool in mem_info_vram_total, while an APU like Strix Halo carves out
+    a tiny BIOS VRAM slice and pages GPU allocations from GTT, so there the
+    usable budget is max(vis_vram, gtt). Returns the max across cards, None
+    when no AMD card is found.
+    """
+    pool = _amd_pool(sysfs_root)
+    return pool[0] if pool else None
+
+
+def _amd_pool(sysfs_root: str = "/sys/class/drm") -> Optional[tuple]:
+    """(pool MiB, unified) for the largest AMD GPU: `unified` is True when
+    the pool is GTT system RAM (an APU), False for a discrete card's VRAM."""
+    import glob
+    mib = 1024 * 1024
+
+    def _read_int(path: str) -> int:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                raw = f.read().strip()
+            return int(raw) if raw.isdigit() else 0
+        except OSError:
+            return 0
+
+    best = None
+    best_unified = False
+    for dev in glob.glob(os.path.join(sysfs_root, "card*", "device")):
+        if "-" in os.path.basename(os.path.dirname(dev)):
             continue  # cardN-DP-1 etc. are connectors, not GPUs
         try:
             with open(os.path.join(dev, "vendor"), "r", encoding="utf-8", errors="replace") as f:
@@ -96,13 +220,15 @@ def _amd_vram_mb(sysfs_root: str = "/sys/class/drm") -> Optional[int]:
         vram = _read_int(os.path.join(dev, "mem_info_vram_total"))
         if vram >= 4 * 1024 * mib:
             total = vram // mib  # discrete card — VRAM is the real pool
+            unified = False
         else:
             # APU with a small carveout: GTT (or vis_vram) is the real pool.
             total = max(_read_int(os.path.join(dev, "mem_info_vis_vram_total")),
                         _read_int(os.path.join(dev, "mem_info_gtt_total"))) // mib
+            unified = True
         if total > 0 and (best is None or total > best):
-            best = total
-    return best
+            best, best_unified = total, unified
+    return (best, best_unified) if best is not None else None
 
 
 def system_ram_mb() -> Optional[int]:
@@ -110,6 +236,12 @@ def system_ram_mb() -> Optional[int]:
         import psutil
         return int(psutil.virtual_memory().total / (1024 * 1024))
     except Exception:
+        pass
+    # psutil is optional (and absent from the Linux venv) — POSIX can answer
+    # from sysconf alone.
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 * 1024))
+    except (AttributeError, ValueError, OSError):
         return None
 
 
@@ -192,6 +324,53 @@ def gguf_meta(path: str) -> Dict[str, Any]:
 
 
 def _gguf_meta_uncached(path: str) -> Dict[str, Any]:
+    """Parse the header: the built-in key/value reader first, the `gguf`
+    package as the fallback.
+
+    GGUFReader indexes every tensor — seconds per file even from a warm page
+    cache — and raises on a tensor type it does not know, so a model
+    quantized with a scheme newer than the installed package (which llama.cpp
+    itself loads fine) is unreadable through it. The header reader stops
+    before the tensor index: ~0.1s, and independent of quant types."""
+    return _gguf_meta_via_header(path) or _gguf_meta_via_reader(path)
+
+
+def _meta_from_lookup(val) -> Dict[str, Any]:
+    """Build the tuner's metadata dict from a `val(key) -> value|None`."""
+    arch = val("general.architecture")
+    if not arch or not isinstance(arch, str):
+        return {}
+
+    def a(suffix: str):
+        return val(f"{arch}.{suffix}")
+
+    n_layers = a("block_count")
+    n_head = a("attention.head_count")
+    n_kv = a("attention.head_count_kv")
+    # head_count(_kv) can be a per-layer array on some arches — take the max.
+    if isinstance(n_head, (list, tuple)):
+        n_head = max(int(x) for x in n_head) if n_head else None
+    if isinstance(n_kv, (list, tuple)):
+        n_kv = max(int(x) for x in n_kv) if n_kv else None
+    k_len = a("attention.key_length")
+    v_len = a("attention.value_length")
+    n_embd = a("embedding_length")
+    # Fall back to embedding_length / head_count for head dim when absent.
+    if not k_len and n_embd and n_head:
+        k_len = int(n_embd) // int(n_head)
+    if not v_len:
+        v_len = k_len
+    return {
+        "arch": arch,
+        "n_layers": int(n_layers) if n_layers else None,
+        "n_kv_heads": int(n_kv) if n_kv else None,
+        "key_length": int(k_len) if k_len else None,
+        "value_length": int(v_len) if v_len else None,
+        "n_ctx_train": int(a("context_length")) if a("context_length") else None,
+    }
+
+
+def _gguf_meta_via_reader(path: str) -> Dict[str, Any]:
     try:
         import gguf
     except Exception:
@@ -208,38 +387,123 @@ def _gguf_meta_uncached(path: str) -> Dict[str, Any]:
             except Exception:
                 return None
 
-        arch = val("general.architecture")
-        if not arch:
-            return {}
-
-        def a(suffix: str):
-            return val(f"{arch}.{suffix}")
-
-        n_layers = a("block_count")
-        n_head = a("attention.head_count")
-        n_kv = a("attention.head_count_kv")
-        # head_count_kv can be a per-layer array on some arches — take the max.
-        if isinstance(n_kv, (list, tuple)):
-            n_kv = max(int(x) for x in n_kv) if n_kv else None
-        k_len = a("attention.key_length")
-        v_len = a("attention.value_length")
-        n_embd = a("embedding_length")
-        # Fall back to embedding_length / head_count for head dim when absent.
-        if not k_len and n_embd and n_head:
-            k_len = int(n_embd) // int(n_head)
-        if not v_len:
-            v_len = k_len
-        return {
-            "arch": arch,
-            "n_layers": int(n_layers) if n_layers else None,
-            "n_kv_heads": int(n_kv) if n_kv else None,
-            "key_length": int(k_len) if k_len else None,
-            "value_length": int(v_len) if v_len else None,
-            "n_ctx_train": int(a("context_length")) if a("context_length") else None,
-        }
+        return _meta_from_lookup(val)
     except Exception as e:
-        logger.debug(f"gguf_meta failed for {path}: {e}")
+        logger.debug(f"gguf_meta (GGUFReader) failed for {path}: {e}")
         return {}
+
+
+def _gguf_meta_via_header(path: str) -> Dict[str, Any]:
+    try:
+        kv = gguf_header_kv(path)
+    except Exception as e:
+        logger.debug(f"gguf_meta (header) failed for {path}: {e}")
+        return {}
+    return _meta_from_lookup(kv.get)
+
+
+# GGUF metadata value types (gguf-py GGUFValueType) → struct codes.
+_GGUF_SCALARS = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f",
+                 7: "?", 10: "Q", 11: "q", 12: "d"}
+_GGUF_STRING, _GGUF_ARRAY = 8, 9
+_GGUF_MAX_KV = 100_000          # sanity bound on the key/value count
+_GGUF_MAX_STRING = 64 << 20     # sanity bound on one string (64 MiB)
+_GGUF_KEEP_STRING = 4096        # longer strings (chat templates) are skipped
+_GGUF_KEEP_ARRAY = 4096         # longer arrays (vocab, merges) are skipped
+
+
+def gguf_header_kv(path: str) -> Dict[str, Any]:
+    """Metadata key/values read straight from a GGUF (v2/v3) header.
+
+    Stops before the tensor index, so it is independent of which tensor /
+    quantization types the installed `gguf` package knows, and fast on any
+    file size. Scalars, short strings and short numeric arrays are returned;
+    long strings and big arrays (tokenizer vocab) are stepped over. Raises
+    ValueError on anything that is not a well-formed GGUF header.
+    """
+    import struct
+
+    out: Dict[str, Any] = {}
+    with open(path, "rb") as f:
+        def take(n: int) -> bytes:
+            b = f.read(n)
+            if len(b) != n:
+                raise ValueError("truncated GGUF header")
+            return b
+
+        def num(code: str):
+            return struct.unpack("<" + code, take(struct.calcsize("<" + code)))[0]
+
+        def string(keep_up_to: int) -> Optional[str]:
+            n = num("Q")
+            if n > _GGUF_MAX_STRING:
+                raise ValueError("implausible GGUF string length")
+            if n > keep_up_to:
+                f.seek(n, os.SEEK_CUR)
+                return None
+            return take(n).decode("utf-8", "replace")
+
+        def value(vtype: int):
+            if vtype in _GGUF_SCALARS:
+                return num(_GGUF_SCALARS[vtype])
+            if vtype == _GGUF_STRING:
+                return string(_GGUF_KEEP_STRING)
+            if vtype == _GGUF_ARRAY:
+                etype, count = num("I"), num("Q")
+                if etype in _GGUF_SCALARS:
+                    code = _GGUF_SCALARS[etype]
+                    size = struct.calcsize("<" + code)
+                    if count <= _GGUF_KEEP_ARRAY:
+                        return list(struct.unpack(f"<{count}{code}", take(count * size)))
+                    f.seek(count * size, os.SEEK_CUR)
+                    return None
+                if etype == _GGUF_STRING:
+                    for _ in range(count):
+                        string(0)
+                    return None
+                raise ValueError(f"unsupported GGUF array element type {etype}")
+            raise ValueError(f"unknown GGUF value type {vtype}")
+
+        if take(4) != b"GGUF":
+            raise ValueError("not a GGUF file")
+        version = num("I")
+        if version not in (2, 3):
+            raise ValueError(f"unsupported GGUF version {version}")
+        num("Q")                      # tensor count — not needed
+        n_kv = num("Q")
+        if n_kv > _GGUF_MAX_KV:
+            raise ValueError("implausible GGUF metadata count")
+        for _ in range(n_kv):
+            key = string(_GGUF_MAX_STRING)
+            v = value(num("I"))
+            if key is not None and v is not None:
+                out[key] = v
+    return out
+
+
+# llama.cpp split naming: <stem>-00001-of-00003.gguf
+_SPLIT_RE = re.compile(r"^(?P<stem>.+)-(?P<idx>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
+
+
+def gguf_total_bytes(path: str) -> int:
+    """On-disk size of a GGUF model, counting every shard of a split one.
+
+    llama-swap's `-m` names only the first shard of a split model
+    (…-00001-of-00002.gguf); sizing the weights from that file alone
+    undercounts a 63GB model as 40GB and the recommended context then
+    overshoots the GPU by the difference. Raises OSError when the file — or
+    any sibling shard — is missing.
+    """
+    m = _SPLIT_RE.match(os.path.basename(path))
+    if not m:
+        return os.path.getsize(path)
+    folder = os.path.dirname(path)
+    width = len(m.group("total"))
+    return sum(
+        os.path.getsize(os.path.join(
+            folder, f"{m.group('stem')}-{i:0{width}d}-of-{m.group('total')}.gguf"))
+        for i in range(1, int(m.group("total")) + 1)
+    )
 
 
 def kv_bytes_per_token(meta: Dict[str, Any], cache_bits: int = 16) -> Optional[float]:
@@ -260,10 +524,10 @@ def recommend_context(model_path: str, mmproj_path: Optional[str] = None,
                       vram_mb: Optional[int] = None, cache_bits: int = 16) -> Dict[str, Any]:
     """Largest safe context for a fully-offloaded model on this GPU."""
     if vram_mb is None:
-        vram_mb = gpu_vram_mb()
+        vram_mb = gpu_budget_mb()
     meta = gguf_meta(model_path)
     try:
-        weights_mb = os.path.getsize(model_path) / (1024 * 1024)
+        weights_mb = gguf_total_bytes(model_path) / (1024 * 1024)
         if mmproj_path and os.path.exists(mmproj_path):
             weights_mb += os.path.getsize(mmproj_path) / (1024 * 1024)
     except OSError:
@@ -331,8 +595,20 @@ def _read_config() -> Optional[str]:
 def _model_blocks(text: str) -> List[Dict[str, Any]]:
     """Split the `models:` map into per-model text spans (name, start, end)."""
     keys = list(_MODEL_KEY_RE.finditer(text))
+
+    def _key_indent(m) -> int:
+        # group(1) is `\s*`, which also swallows blank lines above the key —
+        # only the spaces on the key's own line are its indentation.
+        return len(m.group(1).rsplit("\n", 1)[-1])
+
     # Only keys indented under models: (indent > 0) — skip top-level keys.
-    keys = [m for m in keys if len(m.group(1)) >= 2]
+    keys = [m for m in keys if _key_indent(m) >= 2]
+    # Model ids all sit at ONE indent. Quoted keys nested deeper belong to a
+    # model (e.g. its filters.setParamsByID variants) and must not start a
+    # block of their own — that would cut the real block in two.
+    if keys:
+        base = min(_key_indent(m) for m in keys)
+        keys = [m for m in keys if _key_indent(m) == base]
     blocks = []
     for i, m in enumerate(keys):
         start = m.start()
@@ -342,18 +618,77 @@ def _model_blocks(text: str) -> List[Dict[str, Any]]:
     return blocks
 
 
+def _strip_yaml_comments(block: str) -> str:
+    """A model block without its whole-line `#` comments."""
+    return "\n".join(ln for ln in block.splitlines() if not ln.lstrip().startswith("#"))
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _block_alias_ids(block: Dict[str, Any]) -> List[str]:
+    """Other model ids that are served by this block's process: its
+    `aliases:` entries and the keys of `filters.setParamsByID` (llama-swap
+    creates an alias per key; `${MODEL_ID}` expands to the block's own id).
+    They share the block's llama-server, so they share its `-c`."""
+    ids: List[str] = []
+    lines = _strip_yaml_comments(block["text"]).splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("aliases:"):
+            inline = stripped[len("aliases:"):].strip()
+            if inline.startswith("["):
+                ids += [x.strip().strip("\"'") for x in inline.strip("[]").split(",") if x.strip()]
+                continue
+            for nxt in lines[i + 1:]:
+                item = nxt.strip()
+                if not item:
+                    continue
+                if not item.startswith("- "):
+                    break
+                ids.append(item[2:].strip().strip("\"'"))
+        elif stripped == "setParamsByID:":
+            key_indent = None
+            for nxt in lines[i + 1:]:
+                if not nxt.strip():
+                    continue
+                ind = _indent(nxt)
+                if ind <= _indent(line):
+                    break
+                if key_indent is None:
+                    key_indent = ind
+                if ind == key_indent and nxt.rstrip().endswith(":"):
+                    ids.append(nxt.strip()[:-1].strip().strip("\"'"))
+    name = block["name"]
+    return [i.replace("${MODEL_ID}", name) for i in ids if i and i.replace("${MODEL_ID}", name) != name]
+
+
+def _block_for(model: str, blocks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The config block that serves `model` — by its own id, else as one of
+    another model's alias / setParamsByID ids."""
+    for b in blocks:
+        if b["name"] == model:
+            return b
+    for b in blocks:
+        if model in _block_alias_ids(b):
+            return b
+    return None
+
+
 def configured_context(model: str) -> Optional[int]:
     """The `-c` a model is actually served with (llama-swap doesn't expose /slots,
     so this is how Aegis learns the real window for context trimming). None if the
-    model isn't in the config or has no -c."""
+    model isn't in the config or has no -c. Alias ids and setParamsByID variants
+    resolve to the model whose process serves them."""
     text = _read_config()
     if not text:
         return None
-    for b in _model_blocks(text):
-        if b["name"] == model:
-            m = _CTX_RE.search(b["text"])
-            return int(m.group(2)) if m else None
-    return None
+    b = _block_for(model, _model_blocks(text))
+    if not b:
+        return None
+    m = _CTX_RE.search(_strip_yaml_comments(b["text"]))
+    return int(m.group(2)) if m else None
 
 
 def list_models(recommend: bool = True) -> List[Dict[str, Any]]:
@@ -366,7 +701,7 @@ def list_models(recommend: bool = True) -> List[Dict[str, Any]]:
     text = _read_config()
     if not text:
         return []
-    vram = gpu_vram_mb() if recommend else None
+    vram = gpu_budget_mb() if recommend else None
     out = []
     for b in _model_blocks(text):
         body = b["text"]
@@ -384,7 +719,12 @@ def list_models(recommend: bool = True) -> List[Dict[str, Any]]:
         # file from VRAM) would wrongly conclude "weights fill VRAM". Treat these
         # as manually-tuned: the KV cache is the only real VRAM cost, so there's
         # usually lots of room to raise the context.
-        cpu_moe = ("--cpu-moe" in body) or ("--n-cpu-moe" in body)
+        # Flags only: a block's text runs to the next model's key, so it also
+        # holds that model's leading comments — and a comment that merely
+        # mentions the flag ("# --cpu-moe removed: unified memory") must not
+        # mark this model as CPU-offloaded.
+        flags = _strip_yaml_comments(body)
+        cpu_moe = ("--cpu-moe" in flags) or ("--n-cpu-moe" in flags)
         entry = {
             "model": b["name"],
             "current_ctx": int(cur.group(2)),

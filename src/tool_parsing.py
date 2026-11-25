@@ -367,7 +367,8 @@ _RAW_WEB_JSON_ALLOWED_KEYS = {"query", "queries", "time_filter", "freshness", "m
 _PLAIN_UI_OPEN_PANEL_RE = re.compile(
     r"(?im)^\s*(?:`{1,3})?\s*ui_control\s+open_panel\s+"
     r"(documents?|library|gallery|images?|email|inbox|mail|sessions?|chats?|history|"
-    r"notes?|brain|memor(?:y|ies)|skills?|settings|preferences|cookbook|models?)"
+    r"notes?|brain|memor(?:y|ies)|skills?|settings|preferences|cookbook|kitchen|recipes?|"
+    r"model[ _-]?shopper|shopper|automations?|models?)"
     r"\s*(?:`{1,3})?\s*$"
 )
 

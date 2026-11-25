@@ -84,3 +84,26 @@ def untrusted_context_message(label: str, content: Any) -> Dict[str, Any]:
         ),
         "metadata": {"trusted": False, "source": label},
     }
+
+
+def for_this_turn(message: Dict[str, Any]) -> Dict[str, Any]:
+    """Mark a context message as belonging to the one message being answered.
+
+    What was looked up for this message — recalled facts, a web page, search
+    results — is different on the next one. Placed ahead of the conversation it
+    would change the top of the prompt on every turn, and a local model would
+    read the whole chat again each time. Marked this way, the chat builder puts
+    it straight before the message it is for, behind the conversation, where a
+    change costs nothing (see routes/chat_helpers.build_chat_context).
+    """
+    if isinstance(message, dict):
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            message["metadata"] = metadata
+        metadata["per_turn"] = True
+    return message
+
+
+def is_for_this_turn(message: Any) -> bool:
+    return isinstance(message, dict) and bool((message.get("metadata") or {}).get("per_turn"))

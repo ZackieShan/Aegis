@@ -62,3 +62,15 @@ def test_find_info_online_forces_web_search_tools():
     tools = ti.get_tools_for_query("find info online about crow box designs")
     assert "web_search" in tools
     assert "web_fetch" in tools
+
+
+def test_a_list_with_a_name_brings_in_the_lists_tool():
+    """"add oat milk to my test list": the literal hints need "my list" side by
+    side, so a list with a name was offered no list tool at all (and a small
+    model wrote it to memory instead, then said it was on the list)."""
+    ti = _index()
+    for q in ("add oat milk to my test list", "what's on the packing list?", "cross eggs off our camping trip list",
+              "put it on my weekend shopping list", "take bread off the grocery list", "is butter in my list"):
+        assert "manage_lists" in ti.get_tools_for_query(q), q
+    for q in ("list the files in the project", "give me a list of five names", "blacklist that sender", "listen to this"):
+        assert "manage_lists" not in ti.get_tools_for_query(q), q

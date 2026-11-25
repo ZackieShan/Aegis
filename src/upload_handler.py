@@ -418,6 +418,44 @@ class UploadHandler:
                 return candidate
             index += 1
 
+    def remove_owner(self, owner: str) -> int:
+        """Delete every upload that belongs to ``owner`` — its row in the
+        index and its file. Used when a deleted account's data is erased.
+        Each upload has a file of its own (duplicates are only shared within
+        one owner), so nobody else's attachment can go with it."""
+        owner_normalized = str(owner or "").strip().lower()
+        if not owner_normalized:
+            return 0                      # ownerless rows are shared: never match them
+        uploads_db_path = os.path.join(self.upload_dir, "uploads.json")
+        root = os.path.realpath(self.upload_dir)
+        with self._index_lock:
+            current = self._load_upload_index()
+            if not current:
+                return 0
+            kept, gone = {}, []
+            for key, info in current.items():
+                if isinstance(info, dict) and str(info.get("owner", "")).strip().lower() == owner_normalized:
+                    gone.append(info)
+                else:
+                    kept[key] = info
+            if not gone:
+                return 0
+            self._atomic_write_json(uploads_db_path, kept)
+            still_used = {os.path.realpath(str(info.get("path"))) for info in kept.values()
+                          if isinstance(info, dict) and info.get("path")}
+        for info in gone:
+            path = os.path.realpath(str(info.get("path") or ""))
+            try:
+                inside = bool(info.get("path")) and os.path.commonpath([root, path]) == root and path != root
+            except ValueError:
+                inside = False
+            if inside and path not in still_used and os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    logger.warning("Could not remove upload file %s: %s", path, e)
+        return len(gone)
+
     def rename_owner(self, old_owner: str, new_owner: str) -> int:
         """Rename upload metadata ownership from old_owner to new_owner.
 

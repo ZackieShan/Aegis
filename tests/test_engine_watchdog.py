@@ -370,3 +370,57 @@ def test_spawn_reports_immediate_child_death(monkeypatch):
     monkeypatch.setattr(wd.subprocess, "Popen", lambda argv, **kw: DeadProc())
     monkeypatch.setattr(wd.time, "sleep", lambda s: None)
     assert wd._spawn("llama-swap", wd._engine_defs()["llama-swap"]) is False
+
+
+# ── per-machine ComfyUI launch flags (AEGIS_COMFYUI_ARGS / AEGIS_COMFYUI_ENV) ──
+
+def test_comfyui_argv_unchanged_without_env(monkeypatch):
+    monkeypatch.delenv("AEGIS_COMFYUI_ARGS", raising=False)
+    monkeypatch.delenv("AEGIS_COMFYUI_ENV", raising=False)
+    spec = wd._engine_defs()["comfyui"]
+    assert spec["argv"][2:] == ["--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"]
+    assert spec["env"] == {}
+
+
+def test_comfyui_extra_args_appended_after_the_fixed_flags(monkeypatch):
+    """Strix Halo wants --disable-mmap --bf16-vae --cache-none; a 4090 wants
+    none of them — so the flags come from the environment, not the code."""
+    monkeypatch.setenv("AEGIS_COMFYUI_ARGS", "--disable-mmap --bf16-vae  --cache-none")
+    argv = wd._engine_defs()["comfyui"]["argv"]
+    assert argv[-3:] == ["--disable-mmap", "--bf16-vae", "--cache-none"]
+    # the flags Aegis depends on (loopback bind, port, no browser) stay first
+    assert argv[2:7] == ["--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"]
+    # other engines are untouched
+    assert "--cache-none" not in wd._engine_defs()["llama-swap"]["argv"]
+
+
+def test_comfyui_extra_args_unparseable_is_ignored(monkeypatch, caplog):
+    monkeypatch.setenv("AEGIS_COMFYUI_ARGS", '--reserve-vram "2')   # unbalanced quote
+    with caplog.at_level("WARNING"):
+        argv = wd._engine_defs()["comfyui"]["argv"]
+    assert argv[-1] == "--disable-auto-launch"      # engine still launches, without extras
+    assert "AEGIS_COMFYUI_ARGS" in caplog.text
+
+
+def test_comfyui_extra_env_reaches_only_the_comfyui_child(monkeypatch):
+    monkeypatch.setenv("AEGIS_COMFYUI_ENV", "HSA_USE_SVM=0 FOO=a=b notapair")
+    monkeypatch.setenv("AEGIS_WD_TEST_INHERITED", "yes")
+    calls = {}
+
+    def fake_popen(argv, **kwargs):
+        calls[argv[1] if len(argv) > 1 else argv[0]] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(wd.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(wd.time, "sleep", lambda s: None)
+    defs = wd._engine_defs()
+    assert defs["comfyui"]["env"] == {"HSA_USE_SVM": "0", "FOO": "a=b"}
+    assert wd._spawn("comfyui", defs["comfyui"]) is True
+    assert wd._spawn("llama-swap", defs["llama-swap"]) is True
+
+    comfy_kwargs = next(kw for key, kw in calls.items() if key.endswith("main.py"))
+    assert comfy_kwargs["env"]["HSA_USE_SVM"] == "0"
+    assert comfy_kwargs["env"]["FOO"] == "a=b"
+    assert comfy_kwargs["env"]["AEGIS_WD_TEST_INHERITED"] == "yes"   # additions, not a replacement
+    swap_kwargs = next(kw for key, kw in calls.items() if not key.endswith("main.py"))
+    assert "env" not in swap_kwargs          # llama-swap inherits the plain environment

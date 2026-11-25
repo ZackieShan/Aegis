@@ -120,7 +120,7 @@ try { (function () {
           </svg>
           <span class="hwfit-schedule-title-text">Schedule serve: <strong>${esc(cfg.title)}</strong></span>
           <span class="hwfit-schedule-title-spacer"></span>
-          <label class="hwfit-schedule-mirror-toggle" title="Also create a calendar event on the Cookbook calendar">
+          <label class="hwfit-schedule-mirror-toggle" title="Also create a calendar event on the Model Shopper calendar">
             <span class="hwfit-schedule-mirror-label">Create event in calendar</span>
             <span class="admin-switch hwfit-schedule-mirror-switch">
               <input type="checkbox" class="hwfit-sched-calendar-mirror" />
@@ -288,16 +288,19 @@ try { (function () {
           return;
         }
         if (mirrorToCalendar) {
-          // Mirror onto a dedicated "Cookbook" calendar so the user can
-          // toggle the whole set on/off as a unit in the calendar UI.
+          // Mirror onto a dedicated "Model Shopper" calendar so the user can
+          // toggle the whole set on/off as a unit in the calendar UI. (The
+          // feature was called Cookbook; a calendar made under that name is
+          // still found and used.)
           // Best-effort: if anything here fails, we still consider the
           // task creation a success (the task itself works regardless).
           try {
             const calsRes = await fetch("/api/calendar/calendars", { credentials: "same-origin" });
             const calsBody = calsRes.ok ? await calsRes.json() : {};
-            let cookbookCal = (calsBody.calendars || []).find(c => (c.name || "").toLowerCase() === "cookbook");
+            const _calNames = ["model shopper", "cookbook"];
+            let cookbookCal = (calsBody.calendars || []).find(c => _calNames.includes((c.name || "").toLowerCase()));
             if (!cookbookCal) {
-              const mk = await fetch("/api/calendar/calendars?name=Cookbook&color=%233b82f6", {
+              const mk = await fetch("/api/calendar/calendars?name=Model%20Shopper&color=%233b82f6", {
                 method: "POST", credentials: "same-origin",
               });
               if (mk.ok) {
@@ -318,7 +321,7 @@ try { (function () {
               dtstart: new Date().toISOString(),
               dtend: new Date(Date.now() + dur * 60 * 1000).toISOString(),
               all_day: false,
-              description: `Auto-mirrored from Cookbook schedule task ${data.id || ""}.\n`
+              description: `Auto-mirrored from Model Shopper schedule task ${data.id || ""}.\n`
                 + `Edit/delete the task in the Tasks tab — this event will follow.\n`
                 + `cookbook_task_id: ${data.id || ""}`,
               rrule: weekdaysOnly

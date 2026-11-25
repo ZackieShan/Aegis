@@ -432,7 +432,10 @@ class TTSService:
         cache_files = list(self.cache_dir.glob("*.wav")) + list(self.cache_dir.glob("*.mp3"))
         cache_size = sum(f.stat().st_size for f in cache_files)
 
-        is_available = self.available and tts_enabled
+        # A recorded voice is spoken by the cloning engine whatever the saved provider is, so the
+        # house can speak even when that provider cannot (Kokoro is not installed on every server).
+        # Without this the read-aloud button was never drawn here although the voice worked.
+        is_available = (self.available or self.is_routable_cloned_voice(settings["tts_voice"])) and tts_enabled
         stats = {
             "available": is_available,
             "ready": is_available,

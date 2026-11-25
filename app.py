@@ -588,6 +588,7 @@ memory_manager    = components["memory_manager"]
 memory_vector     = components.get("memory_vector")
 upload_handler    = components["upload_handler"]
 app.state.upload_handler = upload_handler
+app.state.memory_manager = memory_manager      # account deletion and renaming reach a person's memory through it
 personal_docs_mgr = components["personal_docs_manager"]
 app.state.personal_docs_manager = personal_docs_mgr
 api_key_manager   = components["api_key_manager"]
@@ -631,7 +632,18 @@ webhook_manager = WebhookManager(api_key_manager=api_key_manager)
 
 # Auth
 auth_router = setup_auth_routes(auth_manager)
+# Accounts: /api/me for the signed-in person, /api/admin/* for the
+# administrator's console (people, roles, experience, activity).
+from routes.account_routes import setup_account_routes
 app.include_router(auth_router)
+app.include_router(setup_account_routes(auth_manager, session_manager, memory_manager, memory_vector=memory_vector))
+# Home: lists and plans, reminders, trackers, boards (the simple home screen
+# and the assistant's home tools share services/home).
+from routes.home_routes import setup_home_routes
+app.include_router(setup_home_routes(auth_manager))
+# Notifications on a person's own phone with the app closed (Web Push).
+from routes.push_routes import setup_push_routes
+app.include_router(setup_push_routes())
 
 
 @app.post("/api/activity/heartbeat")
@@ -671,6 +683,10 @@ app.include_router(setup_admin_wipe_routes(session_manager))
 from routes.memory.memory_routes import setup_memory_routes
 memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)
 app.include_router(memory_router)
+# Memory inspector: see, trace, change and remove everything kept about you.
+from routes.mind_routes import setup_mind_routes
+app.include_router(setup_mind_routes(memory_manager, session_manager, memory_vector=memory_vector,
+                                     chat_processor=chat_processor))
 from routes.skills_routes import setup_skills_routes
 app.include_router(setup_skills_routes(skills_manager))
 
@@ -719,6 +735,8 @@ app.include_router(setup_embedding_routes())
 # Models
 from routes.model_routes import setup_model_routes
 app.include_router(setup_model_routes(model_discovery))
+from routes.model_notes_routes import setup_model_notes_routes
+app.include_router(setup_model_notes_routes())       # what each model is and what to use it for (the picker)
 
 # GitHub Copilot device-flow login
 from routes.copilot_routes import setup_copilot_routes
@@ -799,7 +817,7 @@ app.include_router(setup_recipes_routes())
 from routes.jobs_routes import setup_jobs_routes
 app.include_router(setup_jobs_routes())
 logger.info("Automations (jobs) routes initialized")
-logger.info("Recipes routes initialized")
+logger.info("Automations (recipes) routes initialized")
 
 # Doctor — capability self-check + guarded (permission-gated) self-heal
 from routes.doctor_routes import setup_doctor_routes
@@ -810,11 +828,6 @@ logger.info("Doctor routes initialized")
 from routes.observability_routes import setup_observability_routes
 app.include_router(setup_observability_routes())
 logger.info("Observability routes initialized")
-
-# Knowledge graph memory — local (subject, relation, object) store
-from routes.graph_routes import setup_graph_routes
-app.include_router(setup_graph_routes())
-logger.info("Graph memory routes initialized")
 
 # Coding agent — local Aider driver (workspace-scoped, git-aware, traced)
 from routes.code_routes import setup_code_routes
@@ -857,6 +870,30 @@ logger.info("Style preset routes initialized")
 from routes.image_gen_routes import setup_image_gen_routes
 app.include_router(setup_image_gen_routes())
 logger.info("Image generation routes initialized")
+
+# Offline reference library (Kiwix + PDF manuals) and photo identification
+from routes.reference_routes import setup_reference_routes
+app.include_router(setup_reference_routes(upload_handler))
+
+# The reader (library documents with a shelf, highlights and notes) and the kitchen (recipes set out for cooking)
+from routes.reader_routes import setup_reader_routes
+app.include_router(setup_reader_routes(memory_manager))
+
+# Translation between languages, on this machine (text, long text, photos)
+from routes.translate_routes import setup_translate_routes
+app.include_router(setup_translate_routes())
+from routes.almanac_routes import setup_almanac_routes
+app.include_router(setup_almanac_routes())
+from routes.connections_routes import setup_connections_routes
+app.include_router(setup_connections_routes())
+from routes.review_routes import setup_review_routes
+app.include_router(setup_review_routes())
+logger.info("Reference library routes initialized")
+
+# Workbench: projects, hosted apps, remote hosts (admin only)
+from routes.workbench_routes import setup_workbench_routes
+app.include_router(setup_workbench_routes())
+logger.info("Workbench routes initialized")
 
 # Model registry — tagged inventory of served aliases + the models/ folder
 from routes.model_registry_routes import setup_model_registry_routes
@@ -942,17 +979,73 @@ app.include_router(setup_companion_routes())
 
 # ========= ROUTES (kept in app.py) =========
 
+from core import landing as _landing
+
+
+def _viewer(request: Request):
+    """``(experience, is_admin, known)`` for whoever is asking; with sign-in switched off there is one
+    person and they run the server."""
+    user = getattr(request.state, "current_user", None)
+    if not user or user not in auth_manager.users:
+        return {}, True, False
+    return auth_manager.get_experience(user), bool(auth_manager.is_admin(user)), True
+
+
+def _is_admin_viewer(request: Request) -> bool:
+    try:
+        return _viewer(request)[1]
+    except Exception:
+        return False
+
+
+def _lands_on_home(request: Request) -> bool:
+    """True when "/" should show the family screen (core/landing.py has the rule)."""
+    try:
+        experience, is_admin, known = _viewer(request)
+        if not known:
+            return False
+        return _landing.lands_on_home(experience, is_admin, "full" in request.query_params,
+                                      request.cookies.get(_landing.VIEW_COOKIE) or "")
+    except Exception:
+        return False
+
+
+@app.get("/switch/{view}")
+async def switch_view(request: Request, view: str):
+    """The switch between the family screen and the full app (the workshop), remembered per browser: a
+    phone can stay in family mode while a desk stays in the workshop."""
+    try:
+        experience, is_admin, _known = _viewer(request)
+    except Exception:
+        experience, is_admin = {"mode": "simple"}, False
+    target = _landing.switch_target(view, _landing.may_open_full_app(experience, is_admin))
+    if target is None:
+        raise HTTPException(404, "Not found")
+    response = RedirectResponse(url=target, status_code=302)
+    if view == _landing.FAMILY:
+        response.set_cookie(_landing.VIEW_COOKIE, _landing.FAMILY, max_age=400 * 86400, httponly=True, samesite="lax", path="/")
+    else:
+        response.delete_cookie(_landing.VIEW_COOKIE, path="/")
+    return response
+
+
 @app.get("/")
 async def serve_index(request: Request):
+    if _lands_on_home(request):
+        return RedirectResponse(url="/home", status_code=302)
+    # The shell says in its <html> tag whether the viewer is an administrator,
+    # so the server's controls (models, engine, connections, readouts) are
+    # never drawn for anyone else — not drawn and then hidden.
+    marks = ' data-admin="1"' if _is_admin_viewer(request) else ' data-admin="0"'
     static_path = abs_join(BASE_DIR, "static/index.html")
     if os.path.exists(static_path):
-        return serve_html_with_nonce(request, static_path)
+        return serve_html_with_nonce(request, static_path, root_attrs=marks)
     # No static bundle — fall back to a root-level index.html if one is shipped.
     # If neither exists, serve_html_with_nonce logs it and returns a generic 500:
     # a missing index.html is a broken deployment (server fault), not a client
     # "not found". This keeps the app-shell route consistent with the other
     # bundled-template routes instead of mislabelling the fault as a 404.
-    return serve_html_with_nonce(request, abs_join(BASE_DIR, "index.html"))
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "index.html"), root_attrs=marks)
 
 @app.get("/notes")
 async def serve_notes(request: Request):
@@ -968,6 +1061,16 @@ async def serve_calendar(request: Request):
 # bookmarks render with tool-specific icons.
 @app.get("/cookbook")
 async def serve_cookbook(request: Request):
+    return await serve_index(request)
+
+# The Model Shopper was called "Cookbook" and Automations "Recipes" until the
+# Kitchen (real food recipes) arrived. /cookbook stays for old bookmarks.
+@app.get("/model-shopper")
+async def serve_model_shopper(request: Request):
+    return await serve_index(request)
+
+@app.get("/automations")
+async def serve_automations(request: Request):
     return await serve_index(request)
 
 @app.get("/email")
@@ -994,6 +1097,66 @@ async def serve_library(request: Request):
 async def serve_backgrounds(request: Request):
     """Sandbox page for prototyping background effects. No auth required."""
     return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/backgrounds.html"))
+
+@app.get("/home")
+async def serve_home(request: Request):
+    """The simple home screen: chat, lists, reminders, trackers and boards
+    for people who do not want the full app."""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/home.html"))
+
+
+@app.get("/home-sw.js")
+async def serve_home_worker():
+    """The notification service worker. Served from the root so that its
+    scope can cover /home (a worker under /static/ could not)."""
+    from fastapi.responses import FileResponse
+    return FileResponse(abs_join(BASE_DIR, "static/lite/home-sw.js"), media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
+@app.get("/admin")
+async def serve_admin(request: Request):
+    """The administrator's console: people, roles, experience, activity."""
+    user = getattr(request.state, "current_user", None)
+    if AUTH_ENABLED and not (user and auth_manager.is_admin(user)):
+        return RedirectResponse(url="/", status_code=302)
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/admin.html"))
+
+
+@app.get("/read")
+async def serve_reader(request: Request):
+    """The reader: something from the offline library opened for reading,
+    with a shelf, highlights and notes."""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/read.html"))
+
+
+@app.get("/kitchen")
+async def serve_kitchen(request: Request):
+    """The kitchen: recipes set out for cooking from, one step at a time."""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/kitchen.html"))
+
+
+@app.get("/translate")
+async def serve_translate(request: Request):
+    """The translator: type, speak or photograph something and read (or
+    hear) it in another language."""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/translate.html"))
+
+
+@app.get("/almanac")
+async def serve_almanac(request: Request):
+    """The almanac: unit conversion, map positions, sun and moon, dates —
+    exact answers worked out on this machine."""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/almanac.html"))
+
+
+@app.get("/mind")
+async def serve_mind(request: Request):
+    """The memory inspector: everything Aegis keeps about the signed-in
+    person, where it came from, and the means to change or remove it.
+    (AuthMiddleware sends anyone not signed in to /login.)"""
+    return serve_html_with_nonce(request, abs_join(BASE_DIR, "static/mind.html"))
+
 
 @app.get("/login")
 async def serve_login(request: Request):
@@ -1087,6 +1250,11 @@ async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
     webhook_manager.set_loop(asyncio.get_running_loop())
+    try:
+        from services import notify as _notify
+        _notify.bind_loop(asyncio.get_running_loop())          # finished work tells the person from any thread
+    except Exception:
+        logger.debug("notify loop not bound", exc_info=True)
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
     try:
@@ -1328,6 +1496,44 @@ async def _startup_event():
                 logger.warning(f"Nightly skill audit failed: {e}")
 
     _startup_tasks.append(asyncio.create_task(_skill_audit_nightly_loop()))
+
+    # Nightly self-check (services/selfcheck.py) — at ~03:30 local, look at
+    # whether the model server and the library answer, the drives have room,
+    # and nothing scheduled failed; tell the administrators when something
+    # needs a look, and say nothing when all is well. Setting
+    # `selfcheck_nightly` (default on), hour via `selfcheck_hour` (default 3).
+    async def _selfcheck_nightly_loop():
+        from datetime import timedelta
+        while True:
+            try:
+                from src.settings import get_setting
+                hour = int(get_setting("selfcheck_hour", 3) or 3)
+            except Exception:
+                hour = 3
+            now = datetime.now()
+            nxt = now.replace(hour=hour % 24, minute=30, second=0, microsecond=0)
+            if nxt <= now:
+                nxt += timedelta(days=1)
+            await asyncio.sleep(max(60, (nxt - now).total_seconds()))
+            try:
+                from src.settings import get_setting
+                if not get_setting("selfcheck_nightly", True):
+                    continue
+                from services import selfcheck
+                await selfcheck.nightly()
+            except Exception as e:
+                logger.warning(f"Nightly self-check failed: {e}")
+
+    _startup_tasks.append(asyncio.create_task(_selfcheck_nightly_loop()))
+
+    # The daily review (services/review) — each night the day's chats are rated by the
+    # house's own model and a report is kept for the administrators. Off until an
+    # administrator turns it on (Admin, Review); gives way the moment anyone uses the app.
+    try:
+        from services.review import run as _review_run
+        _startup_tasks.append(asyncio.create_task(_review_run.keep_time()))
+    except Exception as e:
+        logger.warning(f"Daily review loop not started: {e}")
 
     # Cookbook serve lifecycle — kills scheduler-launched serves whose
     # window-end has passed. Paired with the cookbook_serve builtin

@@ -1,6 +1,7 @@
 """
-recipes_routes.py — the Recipes API: a browsable library of one-click canned
-workflows, plus the admin authoring surface behind it.
+recipes_routes.py — the Automations API (the feature was called "Recipes", and
+the code and paths keep that name; people see "Automations"): a browsable
+library of one-click canned workflows, plus the admin authoring surface behind it.
 
 Run access (the library + running canned recipes) needs the `can_use_recipes`
 privilege — on by default, so any signed-in user can run a vetted recipe.
@@ -156,9 +157,9 @@ def setup_recipes_routes() -> APIRouter:
         from src import recipe_templates
         meta = recipe_templates.get_template(template_id)
         if not meta:
-            raise HTTPException(404, "unknown recipe")
+            raise HTTPException(404, "unknown automation")
         if meta.get("preview"):
-            raise HTTPException(409, "This recipe arrives with Automations — it isn't runnable yet.")
+            raise HTTPException(409, "This one arrives with scheduling — it isn't runnable yet.")
         needs = meta.get("needs_toolbox")
         if needs and needs not in _connected_toolboxes():
             from src.recipe_templates import TOOLBOX_LABELS
@@ -166,7 +167,7 @@ def setup_recipes_routes() -> APIRouter:
                 "error": "toolbox_disabled",
                 "toolbox": needs,
                 "label": TOOLBOX_LABELS.get(needs, needs),
-                "message": f"Enable the {TOOLBOX_LABELS.get(needs, needs)} tools to run this recipe.",
+                "message": f"Enable the {TOOLBOX_LABELS.get(needs, needs)} tools to run this automation.",
             })
         blocks = _building_blocks()
         from src.recipe_templates import best_model
@@ -237,7 +238,7 @@ def setup_recipes_routes() -> APIRouter:
         require_admin(request)
         r = recipes_engine.get_recipe(recipe_id)
         if not r:
-            raise HTTPException(404, "recipe not found")
+            raise HTTPException(404, "automation not found")
         return r
 
     @router.post("")
@@ -253,7 +254,7 @@ def setup_recipes_routes() -> APIRouter:
     def delete_recipe(recipe_id: str, request: Request):
         require_admin(request)
         if not recipes_engine.delete_recipe(recipe_id):
-            raise HTTPException(404, "recipe not found")
+            raise HTTPException(404, "automation not found")
         return {"ok": True}
 
     @router.post("/generate")
@@ -290,7 +291,7 @@ def setup_recipes_routes() -> APIRouter:
         require_admin(request)
         r = recipes_engine.get_recipe(recipe_id)
         if not r:
-            raise HTTPException(404, "recipe not found")
+            raise HTTPException(404, "automation not found")
         body = await request.json() if await _has_body(request) else {}
         run_input = (body or {}).get("input", "")
         return await recipes_engine.run_recipe(r, run_input, owner=_owner(request))

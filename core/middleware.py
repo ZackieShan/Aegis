@@ -86,6 +86,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         is_document_pdf_preview = path.startswith("/api/document/") and path.endswith("/render-pdf")
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
+        # Pictures out of the offline library, SVG among them. An SVG opened
+        # by itself is a document that could run script on this origin, so
+        # this path gets a policy that allows nothing and a sandbox.
+        is_library_asset = path == "/api/reference/asset"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
@@ -109,6 +113,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "sandbox allow-scripts allow-pointer-lock; "
                 "frame-ancestors 'self'"
             )
+        elif is_library_asset:
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"   # = reference_routes.ASSET_POLICY
         elif is_report:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "

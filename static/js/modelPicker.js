@@ -369,6 +369,84 @@ function _initModelPickerDropdown() {
   const _collapsedProviders = new Set(_loadList('aegis-model-collapsed'));
   let _justExpandedProvider = null;
 
+  // ── A sentence on each model: what it is, what to use it for ──
+  // From /api/model-notes/lookup: the administrator's note where one was
+  // written, otherwise what the model's name says. Fetched when the set of
+  // models changes; the list is redrawn when they arrive.
+  let _notes = {};
+  let _notesKey = '';
+  let _notesLoading = false;
+  async function _refreshNotes(force) {
+    const ids = _getAllModels().map(m => m.mid);
+    const key = ids.join('|');
+    if (!ids.length || _notesLoading || (!force && key === _notesKey)) return;
+    _notesLoading = true;
+    try {
+      const r = await fetch('/api/model-notes/lookup', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ models: ids }),
+      });
+      if (r.ok) {
+        _notes = (await r.json()).notes || {};
+        _notesKey = key;
+        if (!menu.classList.contains('hidden')) {
+          const st = listEl.scrollTop;
+          _populate(search.value || '');
+          listEl.scrollTop = st;
+        }
+      }
+    } catch (_) { /* the picker works without notes */ } finally { _notesLoading = false; }
+  }
+
+  // Administrators can write the note themselves (the pencil on a row).
+  function _editNote(m) {
+    const current = _notes[m.mid] || {};
+    const box = document.createElement('div');
+    box.className = 'mp-note-editor';
+    box.addEventListener('click', (e) => e.stopPropagation());
+    const title = document.createElement('div');
+    title.className = 'mp-note-editor-title';
+    title.textContent = m.display;
+    const what = document.createElement('input');
+    what.type = 'text'; what.maxLength = 220; what.placeholder = 'What it is (one sentence)';
+    what.value = current.summary || '';
+    const use = document.createElement('input');
+    use.type = 'text'; use.maxLength = 220; use.placeholder = 'Best for…';
+    use.value = current.use || '';
+    const actions = document.createElement('div');
+    actions.className = 'mp-note-editor-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button'; cancel.textContent = 'Cancel';
+    const reset = document.createElement('button');
+    reset.type = 'button'; reset.textContent = 'Use the automatic note';
+    const save = document.createElement('button');
+    save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
+    const send = async (summary, useText) => {
+      try {
+        const r = await fetch('/api/model-notes', {
+          method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: m.mid, summary, use: useText }),
+        });
+        if (!r.ok) throw new Error(String(r.status));
+        await _refreshNotes(true);
+        _populate(search.value || '');
+      } catch (_) { if (uiModule && uiModule.showToast) uiModule.showToast('Could not save the note'); }
+    };
+    cancel.addEventListener('click', () => _populate(search.value || ''));
+    reset.addEventListener('click', () => send('', ''));
+    save.addEventListener('click', () => send(what.value, use.value));
+    [what, use].forEach((input) => input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') save.click();
+      if (e.key === 'Escape') cancel.click();
+    }));
+    actions.append(cancel, reset, save);
+    box.append(title, what, use, actions);
+    listEl.innerHTML = '';
+    listEl.appendChild(box);
+    what.focus();
+  }
+
   function _populate(filter) {
     listEl.innerHTML = '';
     const all = _getAllModels();
@@ -410,7 +488,7 @@ function _initModelPickerDropdown() {
       if (m.stale) {
         row.classList.add('model-switch-stale');
         row.style.opacity = '0.45';
-        row.title = `Local server appears offline: ${m.staleReason}. Click to try anyway, or relaunch in Cookbook.`;
+        row.title = `Local server appears offline: ${m.staleReason}. Click to try anyway, or relaunch in Model Shopper.`;
       }
       const _mlogo = providerLogo(m.mid);
       if (_mlogo) {
@@ -426,7 +504,27 @@ function _initModelPickerDropdown() {
       // Long model names are clipped with ellipsis — expose the full name on
       // hover so the suffix/variant tag is still discoverable (#1982).
       nameSpan.title = m.display;
-      row.appendChild(nameSpan);
+      // Name on top, and under it what the model is and what to use it for.
+      const textCol = document.createElement('span');
+      textCol.className = 'mp-model-text';
+      textCol.appendChild(nameSpan);
+      const _note = _notes[m.mid];
+      if (_note && (_note.summary || _note.use)) {
+        row.classList.add('has-note');
+        if (_note.summary) {
+          const what = document.createElement('span');
+          what.className = 'mp-model-note';
+          what.textContent = _note.summary;
+          textCol.appendChild(what);
+        }
+        if (_note.use) {
+          const use = document.createElement('span');
+          use.className = 'mp-model-note mp-model-use';
+          use.textContent = 'Best for: ' + _note.use.replace(/[.\s]+$/, '') + '.';
+          textCol.appendChild(use);
+        }
+      }
+      row.appendChild(textCol);
       // Offline state is already conveyed by the row's reduced opacity —
       // a redundant "offline" pill on top of that just added clutter.
       // (Class kept on `row` so the opacity rule still applies; the text
@@ -471,6 +569,16 @@ function _initModelPickerDropdown() {
           listEl.scrollTop = st;
         }
       });
+      if (window._isAdmin) {
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'mp-note-edit';
+        edit.title = 'Write what this model is and what to use it for';
+        edit.setAttribute('aria-label', 'Edit the description of ' + m.display);
+        edit.textContent = '✎';
+        edit.addEventListener('click', (e) => { e.stopPropagation(); _editNote(m); });
+        row.appendChild(edit);
+      }
       row.appendChild(favDot);
 
       row.addEventListener('click', () => _pick(m));
@@ -481,7 +589,8 @@ function _initModelPickerDropdown() {
     if (q) {
       const matches = all.filter(m => {
         const provName = _providerDisplayName(_providerSlug(m.mid)).toLowerCase();
-        return [m.mid, m.display, m.epName, m.providerText, provName]
+        const note = _notes[m.mid] || {};
+        return [m.mid, m.display, m.epName, m.providerText, provName, note.summary, note.use]
           .filter(Boolean).join(' ').toLowerCase().includes(q);
       });
       if (matches.length === 0) _addEmpty('No matching models');
@@ -686,10 +795,12 @@ function _initModelPickerDropdown() {
       menu.classList.remove('closing', 'hidden');
       _refreshLoadedModel();
       _populate('');
+      _refreshNotes(false);
       if (window.modelsModule && window.modelsModule.refreshModels) {
         window.modelsModule.refreshModels().then(() => {
           if (!menu.classList.contains('hidden')) _populate(search.value || '');
           updateModelPicker();
+          _refreshNotes(false);
         }).catch(() => {});
       }
       if (window.innerWidth >= 768) search.focus();

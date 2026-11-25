@@ -35,7 +35,7 @@ The full license texts are kept in [`licenses/`](licenses/).
   opencode authors. **MIT License.** Adapted for agent-loop / tool-execution
   patterns and UI concepts.
 - **[llmfit](https://github.com/AlexsJones/llmfit)** by **Alex Jones** — the
-  engine behind the Cookbook's model download / serve / "What Fits?" feature.
+  engine behind the Model Shopper's model download / serve / "What Fits?" feature.
   Copyright © Alex Jones. **MIT License.** Adapted in `services/hwfit/`
   (hardware detection, quant-aware fit scoring, model catalog),
   `routes/cookbook_*.py`, `routes/hwfit_routes.py`, `static/js/cookbook*.js`,
@@ -43,7 +43,7 @@ The full license texts are kept in [`licenses/`](licenses/).
 - **[Tongyi DeepResearch](https://github.com/Alibaba-NLP/DeepResearch)** by
   **Alibaba-NLP / Tongyi Lab** — the multi-step deep-research agent pipeline.
   Copyright © Alibaba-NLP / Tongyi Lab. **Apache-2.0.** Adapted for Aegis's
-  Deep Research feature (`services/research/`, `src/research_handler.py`,
+  Deep Research feature (`src/research_handler.py`,
   `routes/research_routes.py`, `services/search/`). Full text in
   [`licenses/DeepResearch-Apache-2.0.txt`](licenses/DeepResearch-Apache-2.0.txt).
 - **[clippy.js](https://github.com/smore-inc/clippy.js)** by **Smore
@@ -149,8 +149,8 @@ credit:
 - [Radicale](https://github.com/Kozea/Radicale) — CardDAV/CalDAV server (GPL-3.0)
 - [Dovecot](https://www.dovecot.org/) — IMAP server
 - [isync / mbsync](https://isync.sourceforge.io/) — IMAP mailbox sync (GPL-2.0)
-- [tmux](https://github.com/tmux/tmux) — terminal multiplexer; Cookbook shells out to it on Linux/macOS for background model downloads and serves (ISC)
-- [OpenSSH](https://www.openssh.com/) (`ssh`, `ssh-keygen`, `ssh-copy-id`) — Cookbook shells out to it to manage remote model servers and provision keys (BSD-style permissive)
+- [tmux](https://github.com/tmux/tmux) — terminal multiplexer; Model Shopper shells out to it on Linux/macOS for background model downloads and serves (ISC)
+- [OpenSSH](https://www.openssh.com/) (`ssh`, `ssh-keygen`, `ssh-copy-id`) — Model Shopper shells out to it to manage remote model servers and provision keys (BSD-style permissive)
 - Model/API providers: Anthropic, OpenAI, Google (Gemini), DuckDuckGo
 
 ---

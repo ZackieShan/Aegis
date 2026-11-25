@@ -1289,7 +1289,7 @@ def setup_gallery_routes() -> APIRouter:
             try:
                 ep = _first_visible_image_endpoint(db, user)
                 if not ep:
-                    raise HTTPException(400, "No image generation endpoint configured. Serve a diffusion model via Cookbook first.")
+                    raise HTTPException(400, "No image generation endpoint configured. Serve a diffusion model via Model Shopper first.")
                 base = ep.base_url.rstrip("/")
                 api_key = ep.api_key
             finally:
@@ -1550,7 +1550,7 @@ def setup_gallery_routes() -> APIRouter:
             raise HTTPException(400,
                 "Harmonize needs a diffusion server that supports img2img "
                 "(SD WebUI / Forge / Comfy). OpenAI's API doesn't expose "
-                "one. Cookbook → Models can serve an SD-compatible model "
+                "one. Model Shopper → Models can serve an SD-compatible model "
                 "locally in a few clicks.")
 
         # Try img2img-shaped routes in order. Most self-hosted servers
@@ -1711,7 +1711,7 @@ def setup_gallery_routes() -> APIRouter:
             patch_realesrgan_torchvision_compat()
             from realesrgan import RealESRGANer
         except ImportError:
-            return {"error": "realesrgan not installed. Install it from Cookbook → Dependencies (search 'realesrgan')."}
+            return {"error": "realesrgan not installed. Install it from Model Shopper → Dependencies (search 'realesrgan')."}
         try:
             # General-purpose lightweight model with denoise control.
             from realesrgan.archs.srvgg_arch import SRVGGNetCompact
@@ -1762,7 +1762,7 @@ def setup_gallery_routes() -> APIRouter:
             from basicsr.archs.rrdbnet_arch import RRDBNet
             from realesrgan import RealESRGANer
         except ImportError:
-            return {"error": "realesrgan not installed. Install it from Cookbook → Dependencies (search 'realesrgan')."}
+            return {"error": "realesrgan not installed. Install it from Model Shopper → Dependencies (search 'realesrgan')."}
         try:
             model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
                             num_block=23, num_grow_ch=32, scale=4)

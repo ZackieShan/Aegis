@@ -223,6 +223,14 @@ class MemoryManager:
         # PermissionError on Windows), serialized by the process-wide lock,
         # with a short retry for transient Windows locks (AV scans, indexers).
         with self._lock:
+            # The audit trail is taken here, at the one place every writer
+            # goes through: whatever is added, changed or removed relative to
+            # the file on disk gets a line in its owner's journal.
+            try:
+                from services.memory import journal as _journal
+                _journal.record_memory_diff(self, self._read_current(), entries)
+            except Exception as _journal_error:
+                logger.debug("memory journal skipped: %s", _journal_error)
             fd, tmp_file = tempfile.mkstemp(
                 dir=os.path.dirname(self.memory_file) or ".",
                 prefix=".memory-", suffix=".tmp",
@@ -246,6 +254,15 @@ class MemoryManager:
                     except OSError:
                         pass
     
+    def _read_current(self) -> List[Dict]:
+        """The list as it is on disk right now (no validation, no migration)."""
+        try:
+            with open(self.memory_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except (OSError, ValueError):
+            return []
+
     def add_entry(self, text: str, source: str = "user", category: str = "fact", owner: str = None) -> Dict:
         """Add a new memory entry."""
         if not text.strip():

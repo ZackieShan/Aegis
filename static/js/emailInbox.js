@@ -9,7 +9,7 @@ import { initEmailLibrary, openEmailLibrary, closeEmailLibrary, isOpen as isLibO
 import * as Modals from './modalManager.js';
 import { applyEdgeDock } from './modalSnap.js';
 import { buildReplyAllCc, extractEmail } from './emailLibrary/replyRecipients.js';
-import { emailApiUrl, emailAccountQuery } from './emailShared.js';
+import { emailApiUrl, emailAccountQuery, reportMissingEmailAccount } from './emailShared.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
@@ -333,6 +333,10 @@ async function _refreshUnreadCount() {
       fetch(emailApiUrl('/api/email/unread-state', { folder: 'INBOX' })),
       fetch(`${API_BASE}/api/email/urgency-state`, { credentials: 'same-origin' }).catch(() => null),
     ]);
+    if (stateRes && stateRes.status === 404 && window.__aegisActiveEmailAccount) {
+      reportMissingEmailAccount(window.__aegisActiveEmailAccount);      // the selected account was deleted
+      return;
+    }
     if (!stateRes || !stateRes.ok) return;
     const data = await stateRes.json();
     if (!dot) return;

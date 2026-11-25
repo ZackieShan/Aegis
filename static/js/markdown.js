@@ -332,17 +332,32 @@ export function extractThinkingBlocks(text) {
 /**
  * Create a collapsible thinking section
  */
+/**
+ * What a finished stretch of thinking is called: "Thought for 6 s", "Thought for 1 min 5 s".
+ * '' when it is not known how long it took (an older message): the header then says
+ * "View thinking process" as before.
+ */
+export function thoughtLabel(secondsTaken) {
+  const s = Math.round(Number(secondsTaken));
+  if (!Number.isFinite(s) || s <= 0) return '';
+  if (s < 60) return `Thought for ${s} s`;
+  const rest = s % 60;
+  return rest ? `Thought for ${Math.floor(s / 60)} min ${rest} s` : `Thought for ${Math.floor(s / 60)} min`;
+}
+
 function createThinkingSection(thinkingContent, index = 0, thinkingTime = null) {
   const id = `thinking-${Date.now()}-${index}`;
-  const timeHtml = thinkingTime ? `<span style="font-size:11px;opacity:0.4;font-variant-numeric:tabular-nums;">${thinkingTime}s</span>` : '';
+  // When the time is known the header says it in words and keeps saying it open or shut
+  // (data-fixed); the chevron shows which. Otherwise "View / Hide thinking process".
+  const label = thoughtLabel(thinkingTime);
+  const labelHtml = label ? `<span data-fixed="1">${label}</span>` : '<span>View thinking process</span>';
   return `
     <div class="thinking-section">
       <div class="thinking-header" data-thinking-id="${id}">
         <div class="thinking-header-left">
-          <span>View thinking process</span>
+          ${labelHtml}
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          ${timeHtml}
           <span class="thinking-toggle" id="${id}-toggle"></span>
         </div>
       </div>
@@ -539,6 +554,12 @@ export function mdToHtml(src, opts) {
     inlineCodeBlocks.push(`<code>${escapeHtml(code)}</code>`);
     return placeholder;
   });
+
+  // Some models scatter their own source marks through an answer (【3†L1-L4】). They point at
+  // nothing a person can open — the sources are listed under the answer — so they are dropped.
+  // Only that exact shape (a number, then a dagger) goes: the brackets alone are ordinary
+  // punctuation in Chinese and Japanese. Code was lifted out above and is left as written.
+  s = s.replace(/[ \t]*【\d{1,3}†[^】\n]{0,30}】/g, '');
 
   // Repair common ways the agent mangles the entity-anchor convention
   // (`[Name](#kind-<id>)`). Models reliably get the single-link case
@@ -839,6 +860,7 @@ const markdownModule = {
   squashOutsideCode,
   renderContent,
   processWithThinking,
+  thoughtLabel,
   createCollapsible,
   hasUnclosedThinkTag,
   extractThinkingBlocks,
@@ -890,8 +912,8 @@ function _setThinkingExpanded(content, toggle, header, expanded) {
   if (!content || !toggle) return;
   content.classList.toggle('expanded', expanded);
   toggle.classList.toggle('expanded', expanded);
-  const label_el = header?.querySelector('.thinking-header-left span');
-  if (label_el) {
+  const label_el = header?.querySelector('.thinking-header-left span:not(.working-mark)');
+  if (label_el && !label_el.dataset.fixed && !header.closest('.thinking-section.is-live')) {
     const label = label_el.dataset.label || 'thinking process';
     label_el.textContent = expanded ? `Hide ${label}` : `View ${label}`;
   }

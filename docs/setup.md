@@ -30,7 +30,7 @@ binds the web UI to `127.0.0.1` by default. If the port is taken, set
 only when you intentionally want LAN/reverse-proxy access.
 
 > **On Apple Silicon (M-series) Macs:** Docker can't reach the Metal GPU, so
-> Cookbook serves local models on CPU only. For GPU-accelerated model serving,
+> Model Shopper serves local models on CPU only. For GPU-accelerated model serving,
 > run natively instead — see [Apple Silicon](#apple-silicon) below.
 
 ### Native Linux / macOS
@@ -53,13 +53,13 @@ pip install -r requirements.txt
 python setup.py
 python -m uvicorn app:app --host 127.0.0.1 --port 7000
 ```
-Requirements: Python 3.11+. Cookbook also needs `tmux` for background model
+Requirements: Python 3.11+. Model Shopper also needs `tmux` for background model
 downloads and serves. The app itself is lightweight; local model serving is the
 heavy part and depends on the model, runtime, GPU, and VRAM, so small hosts can
 connect to API or remote model servers instead. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
 
 ### Apple Silicon
-Docker on macOS cannot use the Metal GPU. For GPU-accelerated Cookbook on an
+Docker on macOS cannot use the Metal GPU. For GPU-accelerated Model Shopper on an
 M-series Mac, run Aegis natively:
 
 ```bash
@@ -85,19 +85,19 @@ expose this port directly to the public internet. To build a clickable app wrapp
 ```
 
 <details>
-<summary>Cookbook, GPU, Ollama, and troubleshooting notes</summary>
+<summary>Model Shopper, GPU, Ollama, and troubleshooting notes</summary>
 
 **Docker bundled services.** Compose starts Aegis, ChromaDB, SearXNG, and
 ntfy. Aegis and the bundled service ports bind to `127.0.0.1` by default, so
 they are reachable from the host but not exposed to your LAN/public internet
 unless you opt in.
 
-**Cookbook storage in Docker.** Downloads live in `./data/huggingface`
-(`~/.cache/huggingface` in the container). Cookbook-installed Python CLIs and
+**Model Shopper storage in Docker.** Downloads live in `./data/huggingface`
+(`~/.cache/huggingface` in the container). Python CLIs installed by the Model Shopper and
 serve engines live in `./data/local` (`~/.local` in the container), so they
 survive container recreation.
 
-**Remote servers.** In **Cookbook -> Settings -> Servers**, generate the
+**Remote servers.** In **Model Shopper -> Settings -> Servers**, generate the
 Aegis SSH key and add the public key to the remote server's
 `~/.ssh/authorized_keys`. From the host you can also run:
 
@@ -110,7 +110,7 @@ does not mount `/var/run/docker.sock`. You can still connect Aegis to
 existing Ollama, vLLM, and other OpenAI-compatible endpoints without Docker
 socket access.
 
-Cookbook/local Docker-daemon management requires the opt-in overlay below. Raw
+Model Shopper/local Docker-daemon management requires the opt-in overlay below. Raw
 Docker socket access is high-trust because it can effectively grant broad
 control over the host Docker daemon. Remote server Docker workflows over SSH
 remain preferred.
@@ -132,9 +132,9 @@ COMPOSE_FILE=docker-compose.yml:docker/gpu.nvidia.yml:docker/host-docker.yml
 COMPOSE_FILE=docker-compose.yml:docker/gpu.amd.yml:docker/host-docker.yml
 ```
 
-**Docker GPU overlays.** CPU-only users can skip this section. Cookbook can
+**Docker GPU overlays.** CPU-only users can skip this section. Model Shopper can
 only detect GPUs that Docker exposes to the container — if the host runtime or
-device passthrough is not configured, Cookbook sees the iGPU, another card, or
+device passthrough is not configured, Model Shopper sees the iGPU, another card, or
 CPU instead of your intended GPU.
 
 For NVIDIA, `scripts/check-docker-gpu.sh` diagnoses GPU passthrough and can
@@ -211,11 +211,11 @@ docker compose exec aegis sh -lc 'test -e /dev/kfd && test -d /dev/dri && ls -l 
 
 > **GPU passthrough ≠ llama.cpp CUDA.** `nvidia-smi` passing inside the
 > container confirms Docker GPU access, but llama.cpp also needs `cudart` and
-> the CUDA Toolkit at runtime. If Cookbook logs show `Unable to find cudart
+> the CUDA Toolkit at runtime. If Model Shopper logs show `Unable to find cudart
 > library`, `Could NOT find CUDAToolkit`, `CUDA Toolkit not found`, or
-> tensors/layers assigned to CPU, that is a Cookbook/llama.cpp build issue —
+> tensors/layers assigned to CPU, that is a Model Shopper/llama.cpp build issue —
 > not a Docker passthrough failure. Reinstall the serve engine via
-> **Cookbook → Dependencies** to get a CUDA-enabled build.
+> **Model Shopper → Dependencies** to get a CUDA-enabled build.
 >
 > The same split applies to AMD/ROCm: seeing `/dev/kfd` and `/dev/dri` inside
 > the container confirms device passthrough, not ROCm userspace or a
@@ -238,7 +238,7 @@ OLLAMA_HOST=0.0.0.0:11434 ollama serve
 This connects Aegis in Docker to an Ollama server that is already running on
 your host machine; it does not start Ollama inside the container.
 `host.docker.internal` is Docker's hostname for the host machine from inside the
-container. Cookbook **Serve** is a separate workflow for serving downloaded
+container. Model Shopper **Serve** is a separate workflow for serving downloaded
 models through Aegis/llama.cpp, so Windows users with an existing Ollama
 install usually only need to add the endpoint in Settings.
 
@@ -298,7 +298,7 @@ outside loopback only for a trusted LAN/VPN such as Tailscale: keep
 `AUTH_ENABLED=true` and do not expose the port directly to the public internet.
 
 **Requirements:** Python 3.11+. The core app (chat, agent, memory, documents,
-email, calendar, deep research) runs fully native. For full **Cookbook** background
+email, calendar, deep research) runs fully native. For full **Model Shopper** background
 model downloads and the agent shell tool, also install
 [Git for Windows](https://git-scm.com/download/win) (provides `bash.exe`).
 Local GPU *serving* of vLLM/SGLang needs Linux/WSL2; for a local model on Windows,
@@ -387,7 +387,7 @@ Aegis is a self-hosted workspace with powerful local tools: shell access, file u
 - Do not expose it directly to the public internet without HTTPS and a trusted reverse proxy or private access layer.
 - Keep `.env`, `data/`, `logs/`, databases, uploads, generated media, backups, auth/session files, API keys, and model/provider tokens out of Git and private shares. They are ignored by default.
 - Review `data/auth.json` after first boot: disable open signup unless you intentionally want it, make only your own account admin, and keep demo/test accounts non-admin.
-- Non-admin users do not get shell/Python/file read/write by default, and admin-only routes/tools such as MCP management, API tokens, webhooks, model/cookbook serving, backup/vault, and app settings are admin-gated. Other features are controlled by per-user privileges, so review each user's privileges before exposing a deployment.
+- Non-admin users do not get shell/Python/file read/write by default, and admin-only routes/tools such as MCP management, API tokens, webhooks, model serving (the Model Shopper), backup/vault, and app settings are admin-gated. Other features are controlled by per-user privileges, so review each user's privileges before exposing a deployment.
 - Rotate any API keys or tokens that were ever pasted into a shared chat, demo, screenshot, or log.
 - If you enable API tokens or webhooks, create separate tokens per integration and delete unused ones.
 - Prefer binding manual development runs to `127.0.0.1`; bind to `0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
@@ -469,7 +469,7 @@ app.py                   # FastAPI entry point
 core/      auth, database, middleware, constants
 src/       llm_core, agent_loop, agent_tools, chat_processor, search/
 routes/    chat, session, document, memory, model … endpoints
-services/  docs, memory, search, hwfit (Cookbook) …
+services/  docs, memory, search, hwfit (Model Shopper) …
 static/    index.html + app.js + style.css + js/ (modular front-end)
 docs/      landing page (index.html) + preview clips
 ```

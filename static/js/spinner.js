@@ -1,8 +1,16 @@
 // static/js/spinner.js
 
 /**
- * ASCII Spinner Module for AI thinking/processing status
+ * Spinner Module for AI thinking/processing status.
+ *
+ * The chat's own waiting line (animation "wave": "Reading your message", "Thinking",
+ * "Generating response") is drawn with the moving mark from working.js, the words
+ * with a light passing over them, and — once a step has taken a few seconds — how
+ * long it has been. `setProgress(percent)` adds a thin bar under it for a wait that
+ * can be measured (the model reading the conversation).
  */
+
+import { ensureStyles, mark as workingMark, seconds as workingSeconds, bar as workingBar } from './working.js';
 
 class Spinner {
   constructor(message = "AI is processing", style = "right", animation = "spinner") {
@@ -33,12 +41,60 @@ class Spinner {
     if (this.animation === 'whirlpool') {
       return this._createWhirlpoolElement();
     }
+    if (this.animation === 'wave') {
+      return this._createWorkingElement();
+    }
     const span = document.createElement('span');
     span.className = 'ai-spinner';
     span.style.cssText = 'font-family: monospace; white-space: pre;';
     this.element = span;
     this.updateDisplay();
     return span;
+  }
+
+  /** The waiting line: the moving mark, what is going on, and for how long. */
+  _createWorkingElement() {
+    ensureStyles();
+    const wrapper = document.createElement('span');
+    wrapper.className = 'ai-spinner ai-working';
+    wrapper.setAttribute('role', 'status');
+    const line = document.createElement('span');
+    line.className = 'ai-working-line';
+    const label = document.createElement('span');
+    label.className = 'working-label ai-working-label';
+    label.textContent = this.message;
+    const secs = document.createElement('span');
+    secs.className = 'working-secs';
+    this._msgSpan = label;
+    this._secsSpan = secs;
+    // The mark leads, as it does in the thinking header and on a running step ("clean" has none).
+    if (this.style === 'clean') line.append(label, secs);
+    else line.append(workingMark(), label, secs);
+    wrapper.appendChild(line);
+    this._since = Date.now();
+    this.element = wrapper;
+    return wrapper;
+  }
+
+  /** Show how far along a measurable wait is (0-100), or take the bar away with null. */
+  setProgress(percent) {
+    if (!this.element || this.animation !== 'wave') return;
+    if (percent === null || percent === undefined) {
+      if (this._bar) { this._bar.el.remove(); this._bar = null; }
+      return;
+    }
+    if (!this._bar) {
+      this._bar = workingBar();
+      this._bar.el.classList.add('ai-working-bar');
+      this.element.appendChild(this._bar.el);
+    }
+    this._bar.set(percent);
+  }
+
+  _tickWorking() {
+    if (!this._secsSpan) return;
+    const ms = Date.now() - (this._since || Date.now());
+    this._secsSpan.textContent = ms >= 3000 ? workingSeconds(ms) : '';
   }
 
   _createSineWaveElement() {
@@ -264,6 +320,10 @@ class Spinner {
    */
   updateDisplay() {
     if (!this.element) return;
+    if (this.animation === 'wave' && this._msgSpan) {
+      this._msgSpan.textContent = this.message;
+      return;
+    }
 
     const frame = this.frames[this.currentFrame % this.frames.length];
 
@@ -298,6 +358,13 @@ class Spinner {
       return;
     }
 
+    if (this.animation === 'wave' && this._secsSpan) {
+      // The mark and the light over the words are CSS; only the seconds need a clock.
+      this._since = Date.now();
+      this.intervalId = setInterval(() => this._tickWorking(), 500);
+      return;
+    }
+
     this.currentFrame = 0;
     this.intervalId = setInterval(() => {
       this.currentFrame++;
@@ -324,6 +391,11 @@ class Spinner {
    * Update the message while spinner is running
    */
   updateMessage(newMessage) {
+    if (this.animation === 'wave' && this._msgSpan && newMessage !== this.message) {
+      // A new step: its seconds start again.
+      this._since = Date.now();
+      this._tickWorking();
+    }
     this.message = newMessage;
     if ((this.animation === 'sinewave' || this.animation === 'whirlpool') && this._msgSpan) {
       this._msgSpan.textContent = newMessage;

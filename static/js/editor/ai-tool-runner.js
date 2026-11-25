@@ -129,7 +129,7 @@ export function createApplyImageTool({
         } else if (needsImg2Img && uiModule.showToast.length >= 2) {
           uiModule.showToast(layerName + ' failed: ' + e.message, {
             duration: 9000,
-            action: 'Open Cookbook',
+            action: 'Open Model Shopper',
             onAction: () => openCookbookForImg2img(),
           });
         } else {

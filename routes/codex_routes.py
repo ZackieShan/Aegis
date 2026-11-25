@@ -885,7 +885,7 @@ def setup_codex_routes(
             "type": "serve", "status": "running",
             "output": f"Adopted externally-launched session {sess!r} on {host or 'local'}.",
             "ts": int(_t.time() * 1000),
-            "payload": {"repo_id": model, "remote_host": host, "_cmd": "(adopted — launched outside cookbook)", "port": int(port)},
+            "payload": {"repo_id": model, "remote_host": host, "_cmd": "(adopted — launched outside the Model Shopper)", "port": int(port)},
             "remoteHost": host, "sshPort": "", "platform": "linux",
             "_serveReady": False, "_endpointAdded": False, "_adoptedExternally": True,
         })

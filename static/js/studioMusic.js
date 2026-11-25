@@ -15,6 +15,7 @@
  */
 
 import { renderCreateTab } from './studioCreate.js';
+import readAloud from './readAloud.js';
 
 let _tracks = [];
 let _current = -1;            // index into _tracks of the loaded track
@@ -471,41 +472,57 @@ async function _renderVoices(section) {
         const name = typeof v === 'string' ? v : (v.name || v.id || '');
         if (!name) return;
         const row = _el('div', 'voice-row');
-        row.appendChild(_el('span', 'music-meta', `🎙 ${name} (cloned · ready)`));
+        // A recorded voice is its maker's: it reads only to them until they share it with the household.
+        const mine = typeof v === 'object' ? v.mine !== false : true;
+        const shared = typeof v === 'object' && !!v.shared;
+        const canChange = typeof v === 'object' ? v.can_change !== false : true;
+        const whose = mine ? (shared ? 'yours · shared with everyone at home' : 'yours · only you can use it')
+          : `shared by ${(typeof v === 'object' && v.owner) || 'someone at home'}`;
+        row.appendChild(_el('span', 'music-meta', `🎙 ${name} (${whose})`));
         // Test synthesizes with this voice — the backend auto-routes cloned
         // voices to the Chatterbox endpoint, whatever the saved provider is.
         const test = _el('button', '', '▶ Test'); test.type = 'button';
         test.title = 'Hear this voice (the first playback takes ~20s while the voice engine warms up)';
         test.addEventListener('click', () => _previewVoice(section, name));
         row.appendChild(test);
-        const use = _el('button', '', 'Use this voice'); use.type = 'button';
-        use.title = 'Make this the voice for read-aloud and Voice Mode replies';
+        const use = _el('button', '', 'Read to me in this voice'); use.type = 'button';
+        use.title = 'Answers are read aloud to you in this voice (the speaker under an answer, or "Read answers aloud")';
         use.addEventListener('click', async () => {
           try {
-            const cur = await _json('/api/auth/settings');
-            cur.tts_voice = name;
-            await _json('/api/auth/settings', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cur),
-            });
-            _voiceStatus(section, `Aegis now speaks as "${name}".`);
+            await readAloud.chooseReading({ voice: name });
+            if (window.aiTTSManager) window.aiTTSManager.checkAvailability();
+            document.dispatchEvent(new CustomEvent('aegis-voices-changed'));
+            _voiceStatus(section, `Answers are now read to you in "${name}". Tap the speaker under any answer, or switch on "Read answers aloud" in the + menu.`);
           } catch (e) {
-            const msg = /admin/i.test(e.message)
-              ? 'Setting the default voice needs an admin account — an admin can pick it in Settings → Text to Speech.'
-              : 'Could not save: ' + e.message;
-            _voiceStatus(section, msg, true);
+            _voiceStatus(section, 'Could not save: ' + e.message, true);
           }
         });
         row.appendChild(use);
-        const del = _el('button', '', 'Delete'); del.type = 'button';
-        del.addEventListener('click', async () => {
-          try {
-            await _json('/api/tts/my-voices/' + encodeURIComponent(name), { method: 'DELETE' });
-            refreshCloned();
-            // Keep the Settings → TTS panel's list and catalog in sync.
-            document.dispatchEvent(new CustomEvent('aegis-voices-changed'));
-          } catch (e) { _voiceStatus(section, 'Delete failed: ' + e.message, true); }
-        });
-        row.appendChild(del);
+        if (canChange) {
+          const share = _el('button', '', shared ? 'Stop sharing' : 'Share with everyone at home'); share.type = 'button';
+          share.title = shared ? 'Only you will be able to use this voice' : 'Everyone in the household will be able to have answers read in this voice';
+          share.addEventListener('click', async () => {
+            try {
+              await _json('/api/tts/my-voices/' + encodeURIComponent(name), {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shared: !shared }),
+              });
+              _voiceStatus(section, shared ? `"${name}" is yours alone again.` : `Everyone at home can now be read to in "${name}".`);
+              refreshCloned();
+              document.dispatchEvent(new CustomEvent('aegis-voices-changed'));
+            } catch (e) { _voiceStatus(section, 'Could not change that: ' + e.message, true); }
+          });
+          row.appendChild(share);
+          const del = _el('button', '', 'Delete'); del.type = 'button';
+          del.addEventListener('click', async () => {
+            try {
+              await _json('/api/tts/my-voices/' + encodeURIComponent(name), { method: 'DELETE' });
+              refreshCloned();
+              // Keep the Settings → TTS panel's list and catalog in sync.
+              document.dispatchEvent(new CustomEvent('aegis-voices-changed'));
+            } catch (e) { _voiceStatus(section, 'Delete failed: ' + e.message, true); }
+          });
+          row.appendChild(del);
+        }
         clonedWrap.appendChild(row);
       });
     } catch (_) { /* cloning engine may not be set up — fine */ }
@@ -551,9 +568,9 @@ async function _renderVoices(section) {
         if (!r.ok) throw new Error(d.detail?.message || d.detail || `Save failed (${r.status})`);
         const secs = d.seconds ? ` (${d.seconds}s sample)` : '';
         _voiceStatus(section,
-          `✓ Voice "${name}" saved${secs} and ready — nothing else to do. `
-          + `Press its ▶ Test button to hear it (the very first playback takes ~20s while the voice engine warms up; after that it's fast), `
-          + `then "Use this voice" to make Aegis speak as you.`);
+          `✓ Voice "${name}" saved${secs} and ready. It is yours: only you can use it until you share it. `
+          + `Press its ▶ Test button to hear it (the very first playback takes ~20s while the voice engine warms up), `
+          + `then "Read to me in this voice" to have answers read back in it.`);
         nameIn.value = '';
         refreshCloned();
         // Keep the Settings → TTS panel's list and catalog in sync.

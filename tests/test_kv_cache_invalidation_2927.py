@@ -281,14 +281,16 @@ async def test_run_post_response_tasks_does_not_fire_extraction_concurrently(mon
     chat_helpers = _install_chat_helpers_stubs(monkeypatch)
 
     # Stub out the modules run_post_response_tasks lazily imports.
-    mem_extractor_mod = types.ModuleType("services.memory.memory_extractor")
+    # (Memory is learned by services.memory.learn.learn_from_session, which
+    # superseded memory_extractor.extract_and_store as the queued job.)
+    mem_extractor_mod = types.ModuleType("services.memory.learn")
     calls = {"memory": 0, "skill": 0}
 
     async def fake_extract_and_store(*a, **k):
         calls["memory"] += 1
 
-    mem_extractor_mod.extract_and_store = fake_extract_and_store
-    monkeypatch.setitem(sys.modules, "services.memory.memory_extractor", mem_extractor_mod)
+    mem_extractor_mod.learn_from_session = fake_extract_and_store
+    monkeypatch.setitem(sys.modules, "services.memory.learn", mem_extractor_mod)
 
     skill_extractor_mod = types.ModuleType("services.memory.skill_extractor")
 
@@ -336,7 +338,10 @@ async def test_run_post_response_tasks_does_not_fire_extraction_concurrently(mon
     # Both extractors were queued through the sequential gate — not fired
     # directly via asyncio.create_task — and both ultimately ran exactly once.
     assert captured_jobs.get("session_id") == "sess-Y"
-    assert captured_jobs.get("names") == ["memory", "skill"]
+    # (The "topics" and "profile" jobs between them bring the user's topic
+    # dossiers and profile up to date with what was just learned; they queue
+    # through the same gate.)
+    assert captured_jobs.get("names") == ["memory", "topics", "profile", "skill"]
     assert calls == {"memory": 1, "skill": 1}
 
 

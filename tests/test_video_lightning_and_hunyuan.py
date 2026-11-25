@@ -15,8 +15,14 @@ from src import comfyui_workflows, video_generation
 from src.video_generation import apply_wan_lightning
 
 
-def _force_lightning(monkeypatch, present: bool):
-    monkeypatch.setattr(comfyui_workflows, "wan_lightning_available", lambda: present)
+V11_PAIR = (comfyui_workflows.WAN_LIGHTNING_HIGH_LORA, comfyui_workflows.WAN_LIGHTNING_LOW_LORA)
+
+
+def _force_lightning(monkeypatch, present: bool, pair=V11_PAIR):
+    """Pin which Lightning pair is "on disk" (None = no LoRAs) so these tests
+    never depend on the real models/ folder of the machine running them."""
+    monkeypatch.setattr(comfyui_workflows, "wan_lightning_pair",
+                        lambda: pair if present else None)
 
 
 def test_wan_t2v_gets_lora_tags_and_default_negative(monkeypatch):
@@ -59,9 +65,6 @@ def test_existing_lightx2v_tag_not_duplicated(monkeypatch):
 
 def test_comfy_wan_graph_uses_shared_lora_constants(monkeypatch):
     _force_lightning(monkeypatch, True)
-    # Force the graph's own file check on, matching the helper.
-    monkeypatch.setattr(
-        comfyui_workflows.os.path, "exists", lambda p: True)
     graph = comfyui_workflows.wan22_t2v_graph("a cat")
     loras = {n["inputs"]["lora_name"] for n in graph.values()
              if n["class_type"] == "LoraLoaderModelOnly"}
@@ -69,9 +72,37 @@ def test_comfy_wan_graph_uses_shared_lora_constants(monkeypatch):
                      comfyui_workflows.WAN_LIGHTNING_LOW_LORA}
 
 
+def test_newest_lightning_pair_wins_on_both_engines(tmp_path, monkeypatch):
+    """With the v2.0 and v1.1 pairs both in models/loras, the ComfyUI graph
+    and the native sd-server prompt splice must both pick v2.0 — the two
+    engines may never disagree about which distillation they run."""
+    monkeypatch.setattr(comfyui_workflows, "_models_dir", lambda: str(tmp_path))
+    loras = tmp_path / "loras"
+    loras.mkdir()
+    for pair in comfyui_workflows.WAN_LIGHTNING_PAIRS:
+        for name in pair:
+            (loras / name).write_bytes(b"x")
+    v20_high, v20_low = comfyui_workflows.WAN_LIGHTNING_PAIRS[0]
+    assert "v2.0" in v20_high and "v2.0" in v20_low
+    assert comfyui_workflows.wan_lightning_pair() == (v20_high, v20_low)
+
+    graph = comfyui_workflows.wan22_t2v_graph("a cat")
+    assert graph["21"]["inputs"]["lora_name"] == v20_high   # high-noise expert
+    assert graph["22"]["inputs"]["lora_name"] == v20_low
+    prompt, _ = apply_wan_lightning("wan2.2-t2v", "a cat", "")
+    assert f"<lora:{v20_low.removesuffix('.safetensors')}:1>" in prompt
+    assert f"<lora:|high_noise|{v20_high.removesuffix('.safetensors')}:1>" in prompt
+
+    # an incomplete v2.0 pair must not be half-used: fall back to v1.1
+    (loras / v20_low).unlink()
+    assert comfyui_workflows.wan_lightning_pair() == V11_PAIR
+
+
 # ── HunyuanVideo 1.5 workflow ──
 
-def test_hunyuan_graph_shape():
+def test_hunyuan_graph_shape(tmp_path, monkeypatch):
+    monkeypatch.setattr(comfyui_workflows, "_models_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(comfyui_workflows, "_big_memory_gpu", lambda: False)
     g = comfyui_workflows.hunyuanvideo15_t2v_graph(
         "a cat", width=645, height=369, video_frames=33, fps=24, seed=7)
     latent = next(n for n in g.values() if n["class_type"] == "EmptyHunyuanVideo15Latent")
@@ -81,8 +112,35 @@ def test_hunyuan_graph_shape():
     assert clip["inputs"]["type"] == "hunyuan_video_15"
     unet = next(n for n in g.values() if n["class_type"] == "UNETLoader")
     assert unet["inputs"]["weight_dtype"] == "fp8_e4m3fn"
+    # no full-precision text encoder on disk → the fp8_scaled repack
+    assert clip["inputs"]["clip_name1"].endswith("qwen_2.5_vl_7b_fp8_scaled.safetensors")
     save = next(n for n in g.values() if n["class_type"] == "SaveVideo")
     assert save["inputs"]["codec"] == "h264"
+
+
+def test_hunyuan_big_memory_gpu_runs_full_precision(tmp_path, monkeypatch):
+    """A >=32GB GPU (Strix Halo's unified pool) skips the fp8 load-time cast
+    and prefers the full-precision Qwen2.5-VL text encoder when it exists."""
+    monkeypatch.setattr(comfyui_workflows, "_models_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(comfyui_workflows, "_big_memory_gpu", lambda: True)
+    (tmp_path / "video").mkdir()
+    (tmp_path / "video" / "qwen_2.5_vl_7b.safetensors").write_bytes(b"x")
+    (tmp_path / "video" / "qwen_2.5_vl_7b_fp8_scaled.safetensors").write_bytes(b"x")
+    for build in (comfyui_workflows.hunyuanvideo15_t2v_graph,
+                  lambda p: comfyui_workflows.hunyuanvideo15_i2v_graph(p, init_image="in.png")):
+        g = build("a cat")
+        clip = next(n for n in g.values() if n["class_type"] == "DualCLIPLoader")
+        assert clip["inputs"]["clip_name1"].endswith("qwen_2.5_vl_7b.safetensors")
+    g = comfyui_workflows.hunyuanvideo15_t2v_graph("a cat")
+    unet = next(n for n in g.values() if n["class_type"] == "UNETLoader")
+    assert unet["inputs"]["weight_dtype"] == "default"
+
+
+def test_big_memory_gpu_env_override(monkeypatch):
+    monkeypatch.setenv("AEGIS_COMFY_BIG_GPU", "1")
+    assert comfyui_workflows._big_memory_gpu() is True
+    monkeypatch.setenv("AEGIS_COMFY_BIG_GPU", "0")
+    assert comfyui_workflows._big_memory_gpu() is False
 
 
 def test_hunyuan_catalog_entry_gated_on_files(monkeypatch):

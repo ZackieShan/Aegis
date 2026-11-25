@@ -1836,6 +1836,16 @@ const TOOL_META = {
   read_file:         { name: 'Read File',        desc: 'Read files from disk',            cat: 'Code',       ctx: '~150' },
   write_file:        { name: 'Write File',       desc: 'Write/create files',              cat: 'Code',       ctx: '~150' },
   web_search:        { name: 'Web Search',       desc: 'Search the web via SearXNG',      cat: 'Search',     ctx: '~300' },
+  library_search:    { name: 'Offline Library',  desc: 'Search Kiwix + PDF manuals (no internet)', cat: 'Search', ctx: '~300' },
+  news_search:       { name: 'News',             desc: 'Recent articles with their dates',     cat: 'Search', ctx: '~200' },
+  find_places:       { name: 'Places Nearby',    desc: 'Address, phone and hours of real places', cat: 'Search', ctx: '~250' },
+  medicine_info:     { name: 'Medicine Labels',  desc: 'A medicine\'s official US label',      cat: 'Search', ctx: '~300' },
+  paper_search:      { name: 'Studies',          desc: 'Published papers on a question',       cat: 'Search', ctx: '~250' },
+  ask_wolfram:       { name: 'Wolfram|Alpha',    desc: 'Exact maths and curated facts',        cat: 'Search', ctx: '~200' },
+  manage_projects:   { name: 'Projects',         desc: 'Create, clone and open code projects', cat: 'Code',     ctx: '~250' },
+  manage_apps:       { name: 'Hosted Apps',      desc: 'Deploy apps as services with a URL',   cat: 'Code',     ctx: '~300' },
+  manage_hosts:      { name: 'Remote Hosts',     desc: 'Run commands on other machines (SSH)', cat: 'Code',     ctx: '~350' },
+  delegate_agent:    { name: 'Other Agents',     desc: 'Hand tasks to Claude Code, Kimi, Codex…', cat: 'Code',  ctx: '~300' },
   search_chats:      { name: 'Search Chats',     desc: 'Search conversation history',     cat: 'Search',     ctx: '~150' },
   create_document:   { name: 'Create Document',  desc: 'Create new documents',            cat: 'Documents',  ctx: '~200' },
   update_document:   { name: 'Update Document',  desc: 'Modify existing documents',       cat: 'Documents',  ctx: '~200' },
@@ -2453,8 +2463,8 @@ const _TOKEN_SCOPES = [
   { key: 'calendar:write',    label: 'Calendar write',    detail: 'Create and update calendar events' },
   { key: 'memory:read',       label: 'Memory read',       detail: 'Read memory when enabled' },
   { key: 'memory:write',      label: 'Memory write',      detail: 'Write memory when enabled' },
-  { key: 'cookbook:read',     label: 'Cookbook read',     detail: 'List cookbook tasks + tail their tmux output' },
-  { key: 'cookbook:launch',   label: 'Cookbook launch',   detail: 'Launch and stop cookbook serve tasks' },
+  { key: 'cookbook:read',     label: 'Model Shopper read',     detail: 'List Model Shopper tasks + tail their tmux output' },
+  { key: 'cookbook:launch',   label: 'Model Shopper launch',   detail: 'Launch and stop Model Shopper serve tasks' },
 ];
 
 function _renderTokenScopeRows(t) {

@@ -630,6 +630,17 @@ class ResearchHandler:
             }
             path.write_text(json.dumps(data), encoding="utf-8")
             logger.info(f"Research result saved to {path}")
+            try:                                        # finished work finds the person: their phone, and any open screen
+                from services import notify
+                asked = " ".join(str(entry.get("query") or "").split())[:140]
+                if entry.get("status") == "done":
+                    notify.tell_soon(entry.get("owner") or None, "Your report is ready", asked,
+                                     url=f"/api/research/report/{session_id}", tag=f"report-{session_id}")
+                elif entry.get("status") != "cancelled":      # they stopped it themselves: nothing to tell
+                    notify.tell_soon(entry.get("owner") or None, "Your report did not finish", asked or "It stopped part-way.",
+                                     url="/home", tag=f"report-{session_id}", status="error")
+            except Exception:
+                logger.debug("report notification not sent", exc_info=True)
             try:
                 from src.event_bus import fire_event
                 fire_event("research_completed", entry.get("owner") or None)

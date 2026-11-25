@@ -122,7 +122,7 @@ def setup_model_registry_routes() -> APIRouter:
                             aliases.append({"model": mid, "endpoint": "comfyui"})
                             alias_files[mid] = [
                                 os.path.basename(f).lower()
-                                for f in catalog[mid]["required_files"]
+                                for f in comfyui_workflows.spec_files(catalog[mid])
                             ]
         except Exception as e:
             logger.debug("comfyui registry probe failed: %s", e)

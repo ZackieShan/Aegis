@@ -1,521 +1,223 @@
 // static/js/tts-ai.js
-// AI Text-to-Speech Module — supports server TTS and browser Web Speech API
+// Reading answers aloud in the full app.
+//
+// The reading itself — which voice, cutting an answer into pieces, preparing a slow voice
+// ahead, the device's own voice — is static/js/readAloud.js, shared with the family screen.
+// This file is what the rest of the app talks to (window.aiTTSManager, addAITTSButton):
+//
+//   a speaker under every answer      tap to hear it, tap again to stop; while a recorded voice
+//                                      is being prepared it shows how far along it is
+//   "Read answers aloud"              (the + menu, and Settings) reads every answer as it is written
+//   the person's own voice             chosen in Settings → Appearance or in the Studio's Voice Lab;
+//                                      it is theirs, not the house's (services/tts/reading.py)
+
+import readAloud from './readAloud.js';
+import { MARK_HTML, ensureStyles } from './working.js';
+
+const ICON_SPEAKER = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
+const ICON_STOP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
 
 class AITTSManager {
     constructor() {
-        this.currentAudio = null;
+        this.available = false;        // there is some voice to read to this person with
+        this.autoPlay = false;         // read every answer without being asked
         this.isPlaying = false;
-        this.available = false;
-        this.useBrowserTTS = false;
-        this.browserVoice = '';
-        this.playbackSpeed = 1;
-        this._provider = 'disabled';
-        this.autoPlay = false;
-        this.cache = new Map(); // Client-side audio cache
-
-        // Queue for sequential auto-play
-        this._queue = [];       // Array of { text, button, resetFn }
-        this._processing = false;
-
-        // Streaming sentence-by-sentence TTS state
-        this._streamSentencesSent = 0;  // chars of plain text already queued
-        this._streamActive = false;
-        this._streamButton = null;
-        this._streamResetFn = null;
-        this._streamDebounceTimer = null;
-
-        // Check if TTS service is available
+        this._processing = false;      // a reading is being prepared or played
+        this._provider = 'disabled';   // kept for older callers: 'disabled' | 'device' | 'server'
+        this._reader = null;           // the reading going on now
+        this._button = null;           // the button showing it
+        this._streaming = false;
         this.checkAvailability();
     }
 
+    /** Ask what this person can be read to in. Sets `available`, `autoPlay` and the page's can-read-aloud mark. */
     async checkAvailability() {
         try {
-            // Check user setting first — if TTS is disabled in settings, don't show buttons
-            try {
-                const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-                const settings = await settingsRes.json();
-                if (settings.tts_enabled === false) {
-                    this.available = false;
-                    this._provider = 'disabled';
-                    return;
-                }
-            } catch {}
-
-            const response = await fetch('/api/tts/stats');
-            const stats = await response.json();
-            this.available = stats.available && stats.ready;
-            this.playbackSpeed = stats.speed || 1;
-            this._provider = stats.provider || 'disabled';
-
-            if (stats.provider === 'browser') {
-                this.useBrowserTTS = true;
-                this.browserVoice = stats.voice || '';
-                this.available = 'speechSynthesis' in window;
-                if (!this.available) {
-                    console.warn('TTS: browser mode selected but speechSynthesis not supported');
-                }
-            } else if (this.available) {
-                this.useBrowserTTS = false;
-            } else {
-                console.warn('TTS: not available');
-            }
+            const mine = await readAloud.reading(true);
+            const server = mine.reads_in && mine.reads_in !== 'device';
+            const device = await readAloud.deviceCanSpeak();
+            this.available = !!(server || device);
+            this._provider = server ? 'server' : (device ? 'device' : 'disabled');
+            this.autoPlay = !!mine.auto && this.available;
         } catch (error) {
-            console.error('Failed to check TTS availability:', error);
+            console.error('Failed to check what can read aloud:', error);
             this.available = false;
+            this._provider = 'disabled';
         }
+        if (typeof document !== 'undefined' && document.body) {
+            document.body.classList.toggle('can-read-aloud', this.available);
+            document.dispatchEvent(new CustomEvent('aegis-reading-changed', { detail: { available: this.available, auto: this.autoPlay } }));
+        }
+        return this.available;
     }
 
-    extractPlainText(content) {
-        // Strip <think>/<thinking> blocks (model reasoning)
-        let cleaned = content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
-
-        // Create a temporary div to parse HTML/markdown
-        const temp = document.createElement('div');
-        temp.innerHTML = cleaned;
-
-        // Remove code blocks
-        temp.querySelectorAll('pre, code').forEach(el => el.remove());
-
-        // Get text content
-        let text = temp.textContent || temp.innerText || '';
-
-        // Clean up markdown syntax
-        text = text
-            .replace(/#{1,6}\s/g, '') // Remove headers
-            .replace(/\*\*(.+?)\*\*/g, '$1') // Remove bold
-            .replace(/\*(.+?)\*/g, '$1') // Remove italic
-            .replace(/\[(.+?)\]\(.+?\)/g, '$1') // Remove links
-            .replace(/`(.+?)`/g, '$1') // Remove inline code
-            .replace(/\n{3,}/g, '\n\n') // Normalize line breaks
-            .trim();
-
-        return text;
+    /** Switch reading every answer aloud on or off, for this person, wherever they sign in. */
+    async setAuto(on) {
+        this.autoPlay = !!on && this.available;
+        if (on) readAloud.unlock();
+        try { await readAloud.chooseReading({ auto: !!on }); } catch (error) { console.warn('Could not save the reading choice:', error); }
+        document.dispatchEvent(new CustomEvent('aegis-reading-changed', { detail: { available: this.available, auto: this.autoPlay } }));
+        return this.autoPlay;
     }
 
-    getCacheKey(text) {
-        // Simple hash function for cache key
-        let hash = 0;
-        for (let i = 0; i < text.length; i++) {
-            const char = text.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-        }
-        return hash.toString(36);
-    }
+    /** Kept for callers that still pass rendered HTML or markdown: the words as they are said. */
+    extractPlainText(content) { return readAloud.sayable(content); }
 
-    async synthesize(text, onProgress = null) {
-        if (!this.available) {
-            throw new Error('AI TTS service not available');
-        }
-
-        const plainText = this.extractPlainText(text);
-
-        if (!plainText) {
-            throw new Error('No text to synthesize');
-        }
-
-        // Browser TTS doesn't use synthesize — handled directly in play()
-        if (this.useBrowserTTS) {
-            return '__browser_tts__';
-        }
-
-        const cacheKey = this.getCacheKey(plainText);
-
-        // Check cache first
-        if (this.cache.has(cacheKey)) {
-            return this.cache.get(cacheKey);
-        }
-
-        try {
-            if (onProgress) onProgress('synthesizing');
-
-            const response = await fetch('/api/tts/synthesize', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    text: plainText,
-                    format: 'audio'
-                })
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail?.message || 'Synthesis failed');
+    _show(button, state) {
+        const live = state.phase === 'preparing' || state.phase === 'playing' || state.phase === 'waiting';
+        this._processing = live;
+        this.isPlaying = state.phase === 'playing';
+        if (!button) return;
+        const status = button._status;
+        if (!live) {
+            button.innerHTML = ICON_SPEAKER;
+            button.classList.remove('playing', 'loading');
+            button.title = 'Read aloud';
+            button.setAttribute('aria-label', 'Read aloud');
+            if (status) { status.textContent = ''; status.hidden = true; }
+            if (state.phase === 'failed' && state.message) {
+                try { window.uiModule && window.uiModule.showToast ? window.uiModule.showToast(state.message) : console.warn(state.message); } catch (_) { /* no toast */ }
+                if (status) { status.textContent = state.message; status.hidden = false; setTimeout(() => { if (status.textContent === state.message) { status.textContent = ''; status.hidden = true; } }, 6000); }
             }
-
-            const audioBlob = await response.blob();
-            const audioUrl = URL.createObjectURL(audioBlob);
-
-            // Cache the result
-            this.cache.set(cacheKey, audioUrl);
-
-            if (onProgress) onProgress('complete');
-
-            return audioUrl;
-
-        } catch (error) {
-            if (onProgress) onProgress('error');
-            throw error;
+            return;
         }
+        const words = readAloud.describe(state);
+        button.classList.toggle('playing', state.phase === 'playing');
+        button.classList.toggle('loading', state.phase !== 'playing');
+        // Playing: a square to stop it. Preparing or catching up: the mark that moves.
+        const want = state.phase === 'playing' ? 'stop' : 'mark';
+        if (button.dataset.shows !== want) { button.innerHTML = want === 'stop' ? ICON_STOP : MARK_HTML; button.dataset.shows = want; }
+        button.title = state.phase === 'playing' ? 'Stop reading' : `${words}. Tap to stop`;
+        button.setAttribute('aria-label', button.title);
+        if (status) { const say = state.phase === 'playing' ? '' : words; status.textContent = say; status.hidden = !say; }
     }
 
-    _findBrowserVoice() {
-        if (!this.browserVoice) return null;
-        const voices = window.speechSynthesis.getVoices();
-        const target = this.browserVoice.toLowerCase();
-        // Try exact match first, then partial
-        return voices.find(v => v.name.toLowerCase() === target) ||
-               voices.find(v => v.name.toLowerCase().includes(target)) ||
-               null;
-    }
-
-    async play(text) {
-        // Stop current audio if playing
+    _begin(button, make) {
         this.stop();
-
-        const plainText = this.extractPlainText(text);
-        if (!plainText) return;
-
-        if (this.useBrowserTTS) {
-            return this._playBrowser(plainText);
-        }
-
-        try {
-            const audioUrl = await this.synthesize(text);
-
-            this.currentAudio = new Audio(audioUrl);
-            await this.currentAudio.play();
-            this.isPlaying = true;
-            // Note: onended should be set by the caller (addAITTSButton)
-            // to reset button state when audio finishes
-
-        } catch (error) {
-            console.error('Failed to play audio:', error);
-            throw error;
-        }
+        ensureStyles();
+        const mine = { button };
+        const reader = make((state) => {
+            if (this._current !== mine) return;
+            if (state.phase === 'done' || state.phase === 'stopped' || state.phase === 'failed') { this._current = null; this._reader = null; delete (mine.button || {}).dataset?.shows; }
+            this._show(mine.button, state);
+        });
+        this._current = mine;
+        this._reader = reader;
+        this._processing = true;
+        if (mine.button) this._show(mine.button, { phase: 'preparing', kind: this._provider === 'device' ? 'device' : 'server', ready: 0, total: 0, startsIn: 0 });
+        return reader;
     }
 
-    _playBrowser(plainText) {
-        return new Promise((resolve, reject) => {
-            const utterance = new SpeechSynthesisUtterance(plainText);
-            const voice = this._findBrowserVoice();
-            if (voice) utterance.voice = voice;
-            utterance.rate = this.playbackSpeed;
+    /** Read `text` aloud; `button` (when given) shows how it is going. */
+    enqueue(text, button) {
+        if (!this.available) return null;
+        return this._begin(button || null, (onState) => readAloud.read(text, { onState }));
+    }
 
-            utterance.onend = () => {
-                this.isPlaying = false;
-                resolve();
-            };
-            utterance.onerror = (e) => {
-                this.isPlaying = false;
-                reject(new Error('Browser TTS error: ' + e.error));
-            };
-
-            window.speechSynthesis.speak(utterance);
-            this.isPlaying = true;
+    /** Read text aloud with no button (Voice Mode's spoken replies). Resolves when it has been said or stopped. */
+    play(text) {
+        if (!this.available) return Promise.reject(new Error('There is no voice to read aloud with'));
+        return new Promise((resolve) => {
+            this._begin(null, (onState) => readAloud.read(text, { onState: (state) => { onState(state); if (state.phase === 'done' || state.phase === 'stopped' || state.phase === 'failed') resolve(); } }));
         });
     }
 
     stop() {
-        // Cancel streaming TTS
-        this._streamActive = false;
-        if (this._streamDebounceTimer) {
-            clearTimeout(this._streamDebounceTimer);
-            this._streamDebounceTimer = null;
-        }
-        this._streamSentencesSent = 0;
-
-        // Clear the entire queue and reset all queued buttons
-        for (const item of this._queue) {
-            if (item.resetFn) item.resetFn();
-        }
-        this._queue = [];
+        this._streaming = false;
+        const was = this._current;
+        this._current = null;
+        this._reader = null;
+        readAloud.stopAll();
         this._processing = false;
-
-        if (this.useBrowserTTS) {
-            window.speechSynthesis.cancel();
-            this.isPlaying = false;
-        }
-        if (this.currentAudio) {
-            this.currentAudio.pause();
-            this.currentAudio.currentTime = 0;
-            this.currentAudio = null;
-            this.isPlaying = false;
-        }
+        this.isPlaying = false;
+        if (was && was.button) { delete was.button.dataset.shows; this._show(was.button, { phase: 'stopped' }); }
     }
 
-    /**
-     * Enqueue a message for auto-play. Plays sequentially — each message
-     * finishes before the next starts. Stopping any message clears the queue.
-     */
-    enqueue(text, button, resetFn) {
-        this._queue.push({ text, button, resetFn });
-        if (!this._processing) {
-            this._processQueue();
-        }
-    }
-
-    async _processQueue() {
-        if (this._processing) return;
-        this._processing = true;
-
-        while (this._queue.length > 0) {
-            const item = this._queue[0];
-            try {
-                await this._playQueueItem(item);
-            } catch (err) {
-                console.error('TTS queue item error:', err);
-            }
-            if (this._queue.length > 0 && this._queue[0] === item) {
-                this._queue.shift();
-            }
-            if (!this._processing) return;
-        }
-
-        this._processing = false;
-    }
-
-    async _playQueueItem(item) {
-        const { text, button, resetFn } = item;
-        const ICON_LOADING = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg>';
-        var ICON_STOP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
-
-        button.innerHTML = ICON_LOADING;
-        button.classList.add('loading');
-        button.style.color = '#ccc';
-        button.title = 'Loading...';
-
-        try {
-            if (!this._processing) return;
-
-            const audioUrl = await this.synthesize(text);
-
-            if (!this._processing) return;
-
-            button.innerHTML = ICON_STOP;
-            button.classList.remove('loading');
-            button.classList.add('playing');
-            button.title = 'Stop';
-
-            if (this.useBrowserTTS) {
-                const plainText = this.extractPlainText(text);
-                await this._playBrowser(plainText);
-            } else {
-                if (this.currentAudio) {
-                    this.currentAudio.pause();
-                    this.currentAudio = null;
-                }
-
-                await new Promise((resolve, reject) => {
-                    const audio = new Audio(audioUrl);
-                    if (this._provider === 'local' && this.playbackSpeed !== 1) {
-                        audio.playbackRate = this.playbackSpeed;
-                    }
-                    this.currentAudio = audio;
-                    audio.onended = () => {
-                        this.isPlaying = false;
-                        if (this.currentAudio === audio) this.currentAudio = null;
-                        resolve();
-                    };
-                    audio.onerror = (e) => {
-                        this.isPlaying = false;
-                        if (this.currentAudio === audio) this.currentAudio = null;
-                        reject(new Error('Audio playback error'));
-                    };
-                    audio.onpause = () => {
-                        if (this.currentAudio !== audio) {
-                            resolve();
-                        }
-                    };
-                    audio.play().then(() => {
-                        this.isPlaying = true;
-                    }).catch(reject);
-                });
-            }
-        } finally {
-            if (resetFn) resetFn();
-        }
-    }
-
-    // ── Streaming TTS (sentence-by-sentence) ──
+    // ── an answer read while it is still being written ──
 
     streamingStart() {
-        this._streamSentencesSent = 0;
-        this._streamActive = true;
-        this._streamButton = null;
-        this._streamResetFn = null;
+        if (!this.available || !this.autoPlay) return;
+        readAloud.warm();                           // a recorded voice may have been put away: have it back by the first sentence
+        this._begin(null, (onState) => readAloud.open({ onState }));
+        this._streaming = true;                     // after _begin: starting a reading first stops whatever was going on
     }
 
-    streamingUpdate(accumulatedText) {
-        if (!this._streamActive || !this.available || !this.autoPlay) return;
-        if (this._streamDebounceTimer) return;
-        this._streamDebounceTimer = setTimeout(() => {
-            this._streamDebounceTimer = null;
-            this._processStreamingSentences(accumulatedText);
-        }, 150);
+    /** `text` is what the answer's current step has written so far (a step's text starts again from nothing). */
+    streamingUpdate(text) {
+        if (!this._streaming || !this._reader || !this._reader.feed) return;
+        this._reader.feed(text);
     }
 
-    _processStreamingSentences(accumulatedText) {
-        if (!this._streamActive) return;
-
-        var text = accumulatedText
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/```[\s\S]*$/g, '');
-
-        var plainText = this.extractPlainText(text);
-        if (!plainText || plainText.length <= this._streamSentencesSent) return;
-
-        var newRegion = plainText.substring(this._streamSentencesSent);
-
-        var sentences = [];
-        var current = '';
-        for (var i = 0; i < newRegion.length; i++) {
-            current += newRegion[i];
-            var ch = newRegion[i];
-            var next = newRegion[i + 1];
-            if ((ch === '.' || ch === '!' || ch === '?') && next && /\s/.test(next)) {
-                var lastWord = current.trim().split(/\s/).pop() || '';
-                if (/^\d+\.$/.test(lastWord)) continue;
-                if (/^[A-Z][a-z]?\.$/.test(lastWord)) continue;
-                sentences.push(current.trim());
-                current = '';
-            }
-        }
-
-        if (sentences.length === 0) return;
-
-        var advancedChars = 0;
-        for (var j = 0; j < sentences.length; j++) {
-            var sentence = sentences[j];
-            if (sentence.length < 15) {
-                advancedChars += sentence.length + 1;
-                continue;
-            }
-            var btn = this._streamButton || this._createPlaceholderButton();
-            var resetFn = this._streamResetFn || function() {};
-            this.enqueue(sentence, btn, resetFn);
-            advancedChars += sentence.length + 1;
-        }
-
-        this._streamSentencesSent += advancedChars;
+    /** A new step of the same answer begins (after a tool): its text starts from nothing again. */
+    streamingNewRound() {
+        if (this._streaming && this._reader) this._reader.consumed = 0;
     }
 
-    _createPlaceholderButton() {
-        var btn = document.createElement('button');
-        btn.style.display = 'none';
-        btn.className = 'ai-tts-button streaming-placeholder';
-        return btn;
-    }
-
-    streamingAttachButton(button, resetFn) {
-        this._streamButton = button;
-        this._streamResetFn = resetFn;
-        for (var i = 0; i < this._queue.length; i++) {
-            if (this._queue[i].button && this._queue[i].button.classList.contains('streaming-placeholder')) {
-                this._queue[i].button = button;
-                this._queue[i].resetFn = resetFn;
-            }
-        }
+    /** The answer's own speaker now exists: let it show the reading that is already going on. */
+    streamingAttachButton(button) {
+        if (!this._current) return;
+        this._current.button = button;
+        if (this._reader) this._show(button, { phase: this._reader.phase, kind: this._reader.kind || 'server',
+            ready: this._reader.queue.filter((p) => p.state === 'ready').length, total: this._reader.queue.length, startsIn: 0 });
     }
 
     streamingEnd(finalText) {
-        if (!this._streamActive) return;
-        this._streamActive = false;
-        if (this._streamDebounceTimer) {
-            clearTimeout(this._streamDebounceTimer);
-            this._streamDebounceTimer = null;
-        }
-
-        var text = finalText
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/```[\s\S]*$/g, '');
-
-        var plainText = this.extractPlainText(text);
-        if (!plainText) return;
-
-        var remaining = plainText.substring(this._streamSentencesSent).trim();
-        if (remaining.length >= 15) {
-            var btn = this._streamButton || this._createPlaceholderButton();
-            var resetFn = this._streamResetFn || function() {};
-            this.enqueue(remaining, btn, resetFn);
-        }
-        this._streamSentencesSent = 0;
+        if (!this._streaming) return;
+        this._streaming = false;
+        if (this._reader && this._reader.finish) this._reader.finish(finalText);
     }
 
-    clearCache() {
-        for (const url of this.cache.values()) {
-            URL.revokeObjectURL(url);
-        }
-        this.cache.clear();
-    }
+    clearCache() { /* what was made lives with the page and the server; nothing to clear here */ }
 }
 
 // Create global AI TTS manager instance
 window.aiTTSManager = new AITTSManager();
 
-// Function to add AI TTS button to a message element's action bar
-export function addAITTSButton(messageElement, text) {
-    if (!window.aiTTSManager.available || window.aiTTSManager._provider === 'disabled') {
-        return;
-    }
-
-    if (messageElement.querySelector('.ai-tts-button')) {
-        return;
-    }
-
-    // Find the msg-actions container in the footer
-    const actions = messageElement.querySelector('.msg-actions');
-    if (!actions) return;
-
-    var ICON_PLAY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
-    var ICON_STOP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
-    var ICON_LOADING = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg>';
-
-    const playButton = document.createElement('button');
-    playButton.className = 'ai-tts-button';
-    playButton.type = 'button';
-    playButton.title = 'Read aloud';
-    playButton.innerHTML = ICON_PLAY;
-    playButton.style.cssText = 'background:none;border:none;color:#6b7280;cursor:pointer;padding:2px 6px;border-radius:4px;transition:color .15s;line-height:1;display:inline-flex;align-items:center;';
-
-    playButton.addEventListener('mouseenter', () => { playButton.style.color = '#ccc'; });
-    playButton.addEventListener('mouseleave', () => {
-        if (!playButton.classList.contains('playing') && !playButton.classList.contains('loading')) playButton.style.color = '#6b7280';
+/**
+ * The speaker for one answer. `getText` gives the words when it is tapped (the answer may be edited meanwhile).
+ * Returns [button, status]: the status is the line beside it that says how a slow voice is getting on.
+ */
+export function readAloudButton(getText) {
+    const button = document.createElement('button');
+    button.className = 'ai-tts-button';
+    button.type = 'button';
+    button.title = 'Read aloud';
+    button.setAttribute('aria-label', 'Read aloud');
+    button.innerHTML = ICON_SPEAKER;
+    const status = document.createElement('span');
+    status.className = 'read-aloud-status';
+    status.setAttribute('role', 'status');
+    status.hidden = true;
+    button._status = status;
+    button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const manager = window.aiTTSManager;
+        const mine = manager._current && manager._current.button === button;
+        if (mine) { manager.stop(); return; }
+        readAloud.unlock();                                  // this tap is what lets the sound start when it is ready
+        const text = typeof getText === 'function' ? getText() : String(getText || '');
+        if (!text || !text.trim()) return;
+        manager.enqueue(text, button);
     });
-
-    function resetButton() {
-        playButton.innerHTML = ICON_PLAY;
-        playButton.classList.remove('playing', 'loading');
-        playButton.style.color = '#6b7280';
-        playButton.title = 'Read aloud';
-    }
-
-    playButton.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const mgr = window.aiTTSManager;
-
-        if (mgr.isPlaying || mgr._processing) {
-            mgr.stop();
-            resetButton();
-            return;
-        }
-
-        mgr.enqueue(text, playButton, resetButton);
-    });
-
-    actions.appendChild(playButton);
+    return [button, status];
 }
 
-// Stop audio when navigating away
+/** Put a speaker on an answer that has its row of buttons but no speaker yet (answers drawn by older code paths). */
+export function addAITTSButton(messageElement, text) {
+    if (!messageElement || messageElement.querySelector('.ai-tts-button')) return;
+    const actions = messageElement.querySelector('.msg-actions');
+    if (!actions) return;
+    const [button, status] = readAloudButton(() => messageElement.dataset.raw || text || '');
+    actions.insertBefore(status, actions.firstChild);
+    actions.insertBefore(button, actions.firstChild);
+}
+
+// Stop reading when the page goes away
 window.addEventListener('beforeunload', () => {
-    if (window.aiTTSManager) {
-        window.aiTTSManager.stop();
-    }
+    if (window.aiTTSManager) window.aiTTSManager.stop();
 });
 
 export { AITTSManager };
 
-const ttsModule = { AITTSManager, addAITTSButton };
+const ttsModule = { AITTSManager, addAITTSButton, readAloudButton };
 export default ttsModule;

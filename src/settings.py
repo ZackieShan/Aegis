@@ -90,6 +90,35 @@ DEFAULT_SETTINGS = {
     "google_pse_cx": "",
     "tavily_api_key": "",
     "serper_api_key": "",
+    # Offline reference library (services/library): Kiwix collections such as
+    # Wikipedia plus a page index of the PDF manuals inside them. It is the
+    # search provider "kiwix": tried last while the internet is up and FIRST
+    # when it is down, so web search keeps answering offline. Harmless when no
+    # kiwix-serve is running (one failed probe every few seconds).
+    "library_enabled": True,
+    # Where Aegis itself reaches kiwix-serve.
+    "kiwix_url": "http://127.0.0.1:8095",
+    # Base URL used in links shown to the user — an address a phone can open
+    # (e.g. the tailnet HTTPS URL of the library). Empty = kiwix_url.
+    "kiwix_public_url": "",
+    # Folder holding zim/ and index/manuals.db. Empty = $AEGIS_LIBRARY_DIR or ~/library.
+    "library_dir": "",
+    # Workbench (services/workbench): projects, hosted apps, remote hosts and
+    # hand-offs to other coding agents. Administrator-only tools.
+    "workbench_enabled": True,
+    # Where projects and hosted apps live. Empty = $AEGIS_PROJECTS_DIR or ~/apps.
+    "projects_dir": "",
+    # Default autonomy for delegate_agent: "edits" (may change files) or
+    # "full" (may also run any command without asking).
+    "delegate_autonomy": "edits",
+    # Photo identification (/identify, services/identify). The species
+    # classifier is the optional BioCLIP engine behind llama-swap; when it is
+    # absent the vision model works unaided.
+    "species_id_enabled": True,
+    "species_id_model": "species-id",
+    # Vision-capable model used for identification. Empty = vision_model.
+    # Worth setting when a faster vision model than the general one is served.
+    "identify_model": "",
     "research_endpoint_id": "",
     "research_model": "",
     "research_search_provider": "",

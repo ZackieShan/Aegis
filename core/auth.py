@@ -81,12 +81,51 @@ def normalize_known_username(users: Dict[str, Any], username: str | None) -> Opt
     return key
 
 
+# bcrypt reads the first 72 bytes of a password and nothing after them. Older
+# versions of the library dropped the rest silently; newer ones raise, which
+# turned a long password into a server error at sign-in and at every place a
+# password is set. Cut it here, the same way on both sides, so a password set
+# under either version still signs in.
+PASSWORD_MAX_BYTES = 72
+
+
+def _password_bytes(password: str) -> bytes:
+    return (password or "").encode("utf-8")[:PASSWORD_MAX_BYTES]
+
+
 def _hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def _verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    try:
+        return bcrypt.checkpw(_password_bytes(password), hashed.encode("utf-8"))
+    except ValueError:
+        return False              # not a hash this can check: treat as a wrong password
+
+
+_NOT_A_VALUE = object()
+
+
+def _privilege_value(key: str, value: Any) -> Any:
+    """``value`` as that privilege stores it, or ``_NOT_A_VALUE`` when it is
+    the wrong kind of thing (a word where a switch or a count belongs)."""
+    default = DEFAULT_PRIVILEGES.get(key)
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else _NOT_A_VALUE
+    if isinstance(default, int):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value < 0:
+            return _NOT_A_VALUE
+        return int(value)
+    if isinstance(default, list):
+        return [str(item) for item in value][:500] if isinstance(value, list) else _NOT_A_VALUE
+    return value
+
+
+def privilege_problems(privileges: Dict[str, Any]) -> List[str]:
+    """The keys in ``privileges`` whose value is not the kind that privilege takes."""
+    return [key for key, value in (privileges or {}).items()
+            if key in DEFAULT_PRIVILEGES and _privilege_value(key, value) is _NOT_A_VALUE]
 
 
 class SetAdminResult(enum.Enum):
@@ -165,7 +204,7 @@ class AuthManager:
         try:
             with self._sessions_lock:
                 snapshot = dict(self._sessions)
-            _atomic_write_json(self._sessions_path, snapshot)
+            _atomic_write_json(self._sessions_path, snapshot, mode=0o600)   # live session tokens
         except Exception as e:
             logger.error(f"Failed to save sessions: {e}")
 
@@ -230,7 +269,7 @@ class AuthManager:
             self._save()
 
     def _save(self):
-        _atomic_write_json(self.auth_path, self._config, indent=2)
+        _atomic_write_json(self.auth_path, self._config, indent=2, mode=0o600)   # password hashes
 
     @property
     def users(self) -> Dict[str, Any]:
@@ -281,6 +320,12 @@ class AuthManager:
         with self._config_lock:
             if username in self.users:
                 return False
+            if username in (self._config.get("removed_accounts") or {}):
+                # The account of that name was deleted and what it stored is
+                # still on the server: a new account must not pick it up by
+                # accident. An administrator erases it or frees the name first.
+                logger.warning("Refused to create '%s': the name of a deleted account whose data remains", username)
+                return False
             if "users" not in self._config:
                 self._config["users"] = {}
             self._config["users"][username] = {
@@ -326,6 +371,10 @@ class AuthManager:
                 logger.warning(f"Failed to revoke API tokens for deleted user '{username}'")
                 return False
             del self._config["users"][username]
+            # Everything the account stored is keyed by its name and is still
+            # there. Reserve the name until that is erased or handed on.
+            self._config.setdefault("removed_accounts", {})[username] = {
+                "at": time.time(), "by": requesting_user}
             self._save()
         # Purge all sessions belonging to this user. validate_token doesn't
         # cross-check `self.users`, so without this step a deleted user's
@@ -342,6 +391,39 @@ class AuthManager:
         logger.info(f"Deleted user '{username}' (by {requesting_user}); revoked {revoked} active session(s)")
         return True
 
+    # -- names of deleted accounts whose data is still on the server --------
+
+    def removed(self) -> Dict[str, Dict[str, Any]]:
+        """Deleted accounts whose name is still reserved: ``{name: {at, by, …}}``."""
+        with self._config_lock:
+            return {name: dict(record) for name, record in (self._config.get("removed_accounts") or {}).items()
+                    if isinstance(record, dict)}
+
+    def release_removed(self, username: str) -> bool:
+        """Free a deleted account's name: nothing is left under it, or an
+        administrator chose to let a new account have what is."""
+        username = (username or "").strip().lower()
+        with self._config_lock:
+            removed = self._config.get("removed_accounts") or {}
+            if username not in removed:
+                return False
+            del removed[username]
+            self._config["removed_accounts"] = removed
+            self._save()
+        return True
+
+    def note_removed(self, username: str, **facts: Any) -> bool:
+        """Add to what is known about a deleted account (e.g. that erasing
+        its data was tried and what could not be removed)."""
+        username = (username or "").strip().lower()
+        with self._config_lock:
+            removed = self._config.get("removed_accounts") or {}
+            if username not in removed:
+                return False
+            removed[username].update(facts)
+            self._save()
+        return True
+
     def rename_user(self, old_username: str, new_username: str, requesting_user: str) -> bool:
         """Rename a user in auth config and active sessions. Admin only."""
         old_username = old_username.strip().lower()
@@ -356,6 +438,10 @@ class AuthManager:
             if old_username not in self.users:
                 return False
             if new_username in self.users:
+                return False
+            if new_username in (self._config.get("removed_accounts") or {}):
+                logger.warning("Refused to rename '%s' into '%s': the name of a deleted account whose data remains",
+                               old_username, new_username)
                 return False
             if not self.users.get(requesting_user, {}).get("is_admin"):
                 return False
@@ -382,35 +468,188 @@ class AuthManager:
 
     def list_users(self) -> List[Dict[str, Any]]:
         return [
-            {"username": u, "is_admin": d.get("is_admin", False), "privileges": self.get_privileges(u)}
+            {"username": u, "is_admin": d.get("is_admin", False), "privileges": self.get_privileges(u),
+             "role": self.get_role(u), "disabled": bool(d.get("disabled"))}
             for u, d in self.users.items()
         ]
 
+    # ------------------------------------------------------------------
+    # Roles, privileges and experience (see core/access.py)
+    # ------------------------------------------------------------------
+
+    def get_role(self, username: str) -> str:
+        """The account's role: ``admin`` for administrators, otherwise the
+        one it was given (``member`` when none was)."""
+        user = self.users.get(username, {})
+        if user.get("is_admin"):
+            return "admin"
+        return user.get("access_role") or "member"
+
+    def set_role(self, username: str, role: str) -> bool:
+        """Give a non-administrator a role. (Administrators are made and
+        unmade with :meth:`set_admin`, which guards the last one.)"""
+        from core import access
+        username = username.strip().lower()
+        if role == "admin" or not access.role_exists(role):
+            return False
+        with self._config_lock:
+            if username not in self.users or self.users[username].get("is_admin"):
+                return False
+            user = self._config["users"][username]
+            # Pin down what was chosen for this account in particular before
+            # the role changes underneath it: otherwise the old role's values
+            # would be mistaken for the account's own choices and stick.
+            user["privilege_overrides"] = self._privilege_overrides(user)
+            user["access_role"] = role
+            user["privileges"] = self.get_privileges(username)
+            self._save()
+        logger.info(f"Role of '{username}' set to '{role}'")
+        return True
+
+    def _privilege_overrides(self, user: Dict[str, Any]) -> Dict[str, Any]:
+        """What was chosen for this account in particular, on top of its role."""
+        overrides = user.get("privilege_overrides")
+        if isinstance(overrides, dict):
+            return {k: v for k, v in overrides.items() if k in DEFAULT_PRIVILEGES}
+        # Accounts from before roles existed carry a full copy of the defaults;
+        # only what differs from them was ever a choice.
+        stored = user.get("privileges") or {}
+        return {k: v for k, v in stored.items() if k in DEFAULT_PRIVILEGES and v != DEFAULT_PRIVILEGES[k]}
+
     def get_privileges(self, username: str) -> Dict[str, Any]:
-        """Get privileges for a user. Admins get all privileges."""
+        """What this account may do: its role's privileges, with anything set
+        for the account in particular on top. Admins get all privileges."""
         user = self.users.get(username, {})
         if user.get("is_admin"):
             return dict(ADMIN_PRIVILEGES)
-        # Merge stored privileges with defaults (in case new privileges were added)
-        stored = user.get("privileges", {})
-        return {**DEFAULT_PRIVILEGES, **stored}
+        try:
+            from core import access
+            base = access.role_privileges(user.get("access_role") or "member")
+        except Exception as exc:                      # never lock people out over a bad roles file
+            logger.warning("roles unavailable, using default privileges: %s", exc)
+            base = dict(DEFAULT_PRIVILEGES)
+        return {**base, **self._privilege_overrides(user)}
 
     def set_privileges(self, username: str, privileges: Dict[str, Any]) -> bool:
-        """Update privileges for a user. Can't modify admin privileges."""
+        """Update privileges for a user. Can't modify admin privileges.
+
+        Values are kept as overrides of the account's role: setting one back
+        to what the role gives removes the override, so the account follows
+        its role again for that privilege.
+        """
         username = username.strip().lower()
         with self._config_lock:
             if username not in self.users:
                 return False
             if self.users[username].get("is_admin"):
                 return False  # admins always have full access
-            # Only allow known privilege keys
-            current = self.get_privileges(username)
+            user = self._config["users"][username]
+            try:
+                from core import access
+                base = access.role_privileges(user.get("access_role") or "member")
+            except Exception:
+                base = dict(DEFAULT_PRIVILEGES)
+            overrides = self._privilege_overrides(user)
+            # Only allow known privilege keys, with a value of the kind that
+            # privilege takes: "no" is a true-ish string, not a switch set to off.
             for k, v in privileges.items():
-                if k in DEFAULT_PRIVILEGES:
-                    current[k] = v
-            self._config["users"][username]["privileges"] = current
+                if k not in DEFAULT_PRIVILEGES:
+                    continue
+                v = _privilege_value(k, v)
+                if v is _NOT_A_VALUE:
+                    continue
+                if v == base.get(k):
+                    overrides.pop(k, None)
+                else:
+                    overrides[k] = v
+            user["privilege_overrides"] = overrides
+            current = {**base, **overrides}
+            user["privileges"] = current
             self._save()
         logger.info(f"Updated privileges for '{username}': {current}")
+        return True
+
+    def privilege_overrides(self, username: str) -> Dict[str, Any]:
+        return dict(self._privilege_overrides(self.users.get(username, {})))
+
+    def get_experience(self, username: str) -> Dict[str, Any]:
+        """How the app looks and sounds for this person: their role's
+        defaults with their own settings on top."""
+        from core import access
+        user = self.users.get(username, {})
+        return access.effective_experience(self.get_role(username), user.get("experience"))
+
+    def set_experience(self, username: str, patch: Dict[str, Any]) -> bool:
+        from core import access
+        username = username.strip().lower()
+        with self._config_lock:
+            if username not in self.users:
+                return False
+            user = self._config["users"][username]
+            patch = dict(patch or {})
+            # A setting sent as null goes back to following the role.
+            handed_back = {key for key, value in patch.items() if value is None}
+            patch = {key: value for key, value in patch.items() if value is not None}
+            merged = access.normalize_experience(patch, access.normalize_experience(user.get("experience")))
+            # Keep only what the caller has ever set, so role defaults still apply to the rest.
+            touched = (set((user.get("experience") or {}).keys()) | set(patch.keys())) - handed_back
+            user["experience"] = {k: v for k, v in merged.items() if k in touched and k in access.DEFAULT_EXPERIENCE}
+            self._save()
+        return True
+
+    def is_disabled(self, username: str) -> bool:
+        return bool(self.users.get((username or "").strip().lower(), {}).get("disabled"))
+
+    def set_disabled(self, username: str, disabled: bool, requesting_user: str) -> bool:
+        """Switch an account off (it cannot sign in, and is signed out
+        everywhere) or back on. Not oneself, and not the last administrator."""
+        username = username.strip().lower()
+        with self._config_lock:
+            if username not in self.users or username == (requesting_user or "").strip().lower():
+                return False
+            if disabled and self.users[username].get("is_admin"):
+                others = [u for u, d in self.users.items()
+                          if u != username and d.get("is_admin") and not d.get("disabled")]
+                if not others:
+                    return False
+            if disabled:
+                self._config["users"][username]["disabled"] = True
+            else:
+                self._config["users"][username].pop("disabled", None)
+            self._save()
+        if disabled:
+            self.revoke_user_sessions(username)
+        logger.info(f"Account '{username}' {'switched off' if disabled else 'switched on'}")
+        return True
+
+    def allows_pin(self, username: str) -> bool:
+        """Whether this account may use a short numeric PIN as its password
+        (an administrator's choice, per account)."""
+        return bool(self.users.get((username or "").strip().lower(), {}).get("allow_pin"))
+
+    def set_allow_pin(self, username: str, allowed: bool) -> bool:
+        username = username.strip().lower()
+        with self._config_lock:
+            if username not in self.users:
+                return False
+            if allowed:
+                self._config["users"][username]["allow_pin"] = True
+            else:
+                self._config["users"][username].pop("allow_pin", None)
+            self._save()
+        return True
+
+    def admin_set_password(self, username: str, new_password: str) -> bool:
+        """Set a new password without the old one (an administrator resetting
+        it). Signs the account out everywhere."""
+        username = username.strip().lower()
+        with self._config_lock:
+            if username not in self.users:
+                return False
+            self._config["users"][username]["password_hash"] = _hash_password(new_password)
+            self._save()
+        self.revoke_user_sessions(username)
+        logger.info(f"Password reset for '{username}'")
         return True
 
     def set_admin(self, username: str, is_admin: bool,
@@ -623,7 +862,7 @@ class AuthManager:
                 # deleted them while their cookie was still valid), drop the
                 # session so the next request kicks them out instead of
                 # silently authenticating against a non-existent account.
-                if session.get("username") not in self.users:
+                if session.get("username") not in self.users or self.users[session["username"]].get("disabled"):
                     self._sessions.pop(token, None)
                     deleted_user = True
         if expired or deleted_user:
@@ -647,7 +886,8 @@ class AuthManager:
             else:
                 _u = session["username"]
                 # SECURITY: orphan check — same rationale as validate_token.
-                if _u not in self.users:
+                # An account an administrator switched off is treated alike.
+                if _u not in self.users or self.users[_u].get("disabled"):
                     self._sessions.pop(token, None)
                     deleted_user = True
                 else:

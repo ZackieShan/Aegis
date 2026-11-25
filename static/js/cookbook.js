@@ -1,6 +1,10 @@
 // ============================================
 // COOKBOOK MODULE (v2 — simplified)
 // What Fits? + Saved presets, inline action panels
+//
+// People see this as the "Model Shopper". It was called Cookbook until the
+// Kitchen (food recipes) arrived; the code, ids, API paths (/api/cookbook/…)
+// and tool names keep the old name. Write "Model Shopper" in anything shown.
 // ============================================
 
 import uiModule from './ui.js';
@@ -1643,7 +1647,7 @@ async function _fetchDependencies() {
       const where = host || 'this server';
       const action = updateSource ? 'Update llama.cpp source and rebuild' : 'Rebuild llama.cpp engine';
       const detail = updateSource
-        ? 'This fast-forwards the Cookbook-managed ~/llama.cpp checkout when possible, then clears the cached llama-server build. The next launch recompiles or installs the latest matching prebuilt.'
+        ? 'This fast-forwards the Model Shopper-managed ~/llama.cpp checkout when possible, then clears the cached llama-server build. The next launch recompiles or installs the latest matching prebuilt.'
         : 'This clears the cached llama-server build. The next launch recompiles or installs a matching prebuilt.';
       if (!confirm(`${action} on ${where}?\n\n${detail}`)) return;
       const oldText = statusEl?.textContent;
@@ -2770,7 +2774,7 @@ export function _serverEntryHtml(s, i, defaultServer, forceRemote, isNew) {
     // sense once the server is saved.
     html += `<span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center;">${_checkBtn}${_keyBtn}<button class="cookbook-server-cancel-btn" title="Discard this new server" style="height:22px;box-sizing:border-box;display:inline-flex;align-items:center;position:relative;top:-2px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;flex-shrink:0;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Cancel</button></span>`;
   } else {
-    html += `<span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center;">${!isLocal ? _checkBtn + _keyBtn : ''}<span class="cookbook-srv-default${_isDefaultSrv ? ' active' : ''}" title="${_isDefaultSrv ? 'Default server — Cookbook opens here' : 'Make this the default server'}" data-srv-key="${esc(_srvKey)}">${_serverDefaultHtml(_isDefaultSrv)}</span></span>`;
+    html += `<span style="margin-left:auto;display:inline-flex;gap:4px;align-items:center;">${!isLocal ? _checkBtn + _keyBtn : ''}<span class="cookbook-srv-default${_isDefaultSrv ? ' active' : ''}" title="${_isDefaultSrv ? 'Default server — Model Shopper opens here' : 'Make this the default server'}" data-srv-key="${esc(_srvKey)}">${_serverDefaultHtml(_isDefaultSrv)}</span></span>`;
   }
   html += `</span>`;
   html += `<div class="cookbook-server-row">`;

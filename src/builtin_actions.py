@@ -275,7 +275,9 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
             total_removed += group_removed
 
         if total_removed or total_cleaned:
-            manager.save(all_memories)
+            from services.memory import journal as _journal
+            with _journal.cause("tidy"):
+                manager.save(all_memories)
             if ai_used:
                 reasons = ai_reasons[:3]
                 reason_text = f": {'; '.join(reasons)}" if reasons else ""
@@ -1755,6 +1757,14 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                     )
                     cache[n.id] = now.isoformat()
                     sent.append(title)
+                    # A repeating reminder moves to its next time here, on the
+                    # server, so it keeps coming round with no browser open.
+                    try:
+                        from services.home.reminders import advance_after_firing
+                        if advance_after_firing(n):
+                            db.commit()
+                    except Exception as _adv:
+                        logger.debug(f"ping_notes: repeat not advanced for {n.id}: {_adv}")
                 except Exception as e:
                     logger.warning(f"ping_notes: dispatch failed for {n.id}: {e}")
 
@@ -2587,7 +2597,7 @@ async def action_cookbook_serve(
         preset_names = [(p.get("name") or "") for p in (state.get("presets") or []) if isinstance(p, dict)]
         hint = f" Saved presets: {preset_names!r}" if preset_names else ""
         return (f"No launchable config for {preset_name!r} (repo_id={repo_id!r}). "
-                f"Check Cookbook → Presets has a real cmd, not 'adopted'.{hint}", False)
+                f"Check Model Shopper → Presets has a real cmd, not 'adopted'.{hint}", False)
 
     # Resolve env_prefix etc. from the host's saved cookbook server entry,
     # matching the chat agent's serve_model path.

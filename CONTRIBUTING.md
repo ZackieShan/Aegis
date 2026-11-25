@@ -120,7 +120,7 @@ For model-serving issues, include:
 - Backend: Ollama, vLLM, SGLang, llama.cpp, LM Studio, etc.
 - Model name.
 - GPU/CPU and operating system.
-- Cookbook task logs or server logs.
+- Model Shopper task logs or server logs.
 
 Issues with only "help", "does not work", or a screenshot without context may be closed as not actionable.
 

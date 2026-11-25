@@ -674,7 +674,7 @@ export const ERROR_PATTERNS = [
   {
     pattern: /cmake: command not found|cmake.*not found.*Could not/i,
     message: 'cmake is required to compile llama.cpp from source, but it is not installed on this server.',
-    suggestion: 'Suggested action: install cmake via the OS package manager — apt: cmake build-essential / pacman: cmake base-devel / dnf: cmake gcc-c++ make / brew: cmake. Cookbook can do this automatically on the next launch if your user has passwordless sudo for apt/pacman/dnf.',
+    suggestion: 'Suggested action: install cmake via the OS package manager — apt: cmake build-essential / pacman: cmake base-devel / dnf: cmake gcc-c++ make / brew: cmake. Model Shopper can do this automatically on the next launch if your user has passwordless sudo for apt/pacman/dnf.',
     fixes: [
       { label: 'Open Dependencies', action: () => _openCookbookDependencies('llama_cpp') },
       { label: 'Copy apt install', action: () => _copyText('sudo apt install -y cmake build-essential git') },
@@ -726,7 +726,7 @@ export const ERROR_PATTERNS = [
   },
   {
     pattern: /No module named ['"]?torch|No module named ['"]?diffusers|diffusers.*command not found/i,
-    message: 'Diffusion serving needs PyTorch and diffusers. Install diffusers from Cookbook → Dependencies.',
+    message: 'Diffusion serving needs PyTorch and diffusers. Install diffusers from Model Shopper → Dependencies.',
     fixes: [
       { label: 'Open Dependencies', action: () => _openCookbookDependencies('diffusers') },
       { label: 'Copy install command', action: () => _copyText('python3 -m pip install "diffusers[torch]"') },
@@ -870,7 +870,7 @@ export function _diagnose(text) {
 }
 
 function _diagnosisCopyBundle(task, diagnosis, sourceText, suggestionText) {
-  const lines = ['## Aegis Cookbook troubleshooting'];
+  const lines = ['## Aegis Model Shopper troubleshooting'];
   if (task) {
     lines.push(
       '',

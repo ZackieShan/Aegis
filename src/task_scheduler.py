@@ -397,20 +397,47 @@ class TaskScheduler:
             logger.debug("Task abort marker failed for %s", task_id, exc_info=True)
             return False
 
-    def add_notification(self, task_name: str, status: str, task_id: str = None, owner: str = None, body: str = None):
+    def add_notification(self, task_name: str, status: str, task_id: str = None, owner: str = None, body: str = None,
+                         url: str = None, push: bool = True):
         """Store a notification about a completed task run. Tagged with the
         task's owner so `pop_notifications` can return only that user's
         notifications and prevent cross-tenant drain. `body` is the result
         text — populated when output_target='notification' so the client can
-        show a rich browser Notification, not just a toast."""
-        self._pending_notifications.append({
+        show a rich browser Notification, not just a toast. `url` is where a
+        tap on it leads (a finished report, the activity log).
+
+        The person's phone is told as well (``push``): a scheduled task or an
+        automation finishes when nobody is looking at the screen, which is the
+        point of scheduling it. ``push=False`` is for a caller that has sent
+        the push itself (services/notify.py)."""
+        entry = {
             "task_name": task_name,
             "status": status,
             "task_id": task_id,
             "owner": owner,
             "body": (body[:500] + "…") if body and len(body) > 500 else body,
             "timestamp": _utcnow().isoformat() + "Z",
-        })
+        }
+        if url:
+            entry["url"] = str(url)[:300]
+        self._pending_notifications.append(entry)
+        if push and owner:
+            try:
+                from services import notify
+                failed = str(status or "").lower() in ("error", "failed", "failure")
+                # A task that keeps failing says so on the phone once in six hours, not at every run.
+                recent = getattr(self, "_failure_pushed_at", None)
+                if recent is None:
+                    recent = self._failure_pushed_at = {}
+                key, now = (owner, task_id or task_name), time.time()
+                if not failed or now - recent.get(key, 0.0) > 6 * 3600:
+                    if failed:
+                        recent[key] = now
+                    notify.push_soon(owner, f"{'Did not finish' if failed else 'Finished'}: {task_name}"[:120],
+                                     " ".join(str(body or "").split())[:180], url=str(url or "/")[:300],
+                                     tag=f"task-{task_id}" if task_id else None)
+            except Exception:
+                logger.debug("task notification not pushed", exc_info=True)
         # Cap at 50 to avoid unbounded growth
         if len(self._pending_notifications) > 50:
             self._pending_notifications = self._pending_notifications[-50:]

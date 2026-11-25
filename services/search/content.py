@@ -10,8 +10,8 @@ import logging
 import socket
 import ssl
 from datetime import datetime, timedelta
-from typing import Iterable, List, cast
-from urllib.parse import urljoin, urlparse
+from typing import Iterable, List, Tuple, cast
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import httpx
 import httpcore
@@ -698,6 +698,64 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0,
     }
     _cache_result(cache_file, cache_key, result, url)
     return result
+
+
+# ----------------------------------------------------------------------
+# A page as markdown (the Web toolbox's reader, mcp_servers/web_server.py)
+# ----------------------------------------------------------------------
+_ASSET_RE = re.compile(r"\.(png|jpe?g|gif|webp|svg|ico|css|js|pdf|zip|gz|mp4|mp3|woff2?|ttf|xml|json)(\?|$)", re.I)
+
+
+def page_markdown(html: str, url: str) -> Tuple[str, str, List[str]]:
+    """``(title, markdown, links)`` of an HTML page: its headings, paragraphs,
+    list items and quotes as markdown — navigation, scripts and forms dropped —
+    and its links to other pages of the same site."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "noscript", "svg", "iframe"]):
+        tag.decompose()
+    title = (soup.title.get_text(strip=True) if soup.title else "") or url
+    main = soup.find("main") or soup.find("article") or soup.body or soup
+    parts: List[str] = []
+    for el in main.find_all(["h1", "h2", "h3", "h4", "p", "li", "pre", "blockquote"]):
+        txt = el.get_text(" ", strip=True)
+        if not txt:
+            continue
+        name = el.name
+        if name in ("h1", "h2", "h3", "h4"):
+            parts.append(("#" * int(name[1])) + " " + txt)
+        elif name == "li":
+            parts.append("- " + txt)
+        elif name == "blockquote":
+            parts.append("> " + txt)
+        else:
+            parts.append(txt)
+    text = re.sub(r"\n{3,}", "\n\n", "\n\n".join(parts)).strip()
+    base = urlparse(url)
+    links = []
+    for a in soup.find_all("a", href=True):
+        u = urldefrag(urljoin(url, a["href"]))[0]
+        p = urlparse(u)
+        if p.scheme in ("http", "https") and p.netloc == base.netloc and not _ASSET_RE.search(p.path):
+            links.append(u)
+    return title, text, links
+
+
+def read_public_page(url: str, timeout: float = 15.0) -> Tuple[str, str, List[str]]:
+    """Fetch one page of the public web and return :func:`page_markdown` of it.
+
+    The fetch is the same guarded one search uses (:func:`_get_public_url`):
+    the address must be public — never this machine or the home network — every
+    redirect is checked again, and the body is size-capped. Raises
+    ``httpx.RequestError`` / ``httpx.HTTPStatusError`` / ``BodyTooLargeError``."""
+    headers = {"User-Agent": WEB_FETCH_USER_AGENT, "Accept": "text/html,application/xhtml+xml",
+               "Accept-Language": "en-US,en;q=0.5", "Accept-Encoding": "identity"}
+    response = _get_public_url(url, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    kind = (response.headers.get("content-type") or "").lower()
+    text = response.text
+    if "html" not in kind and "<html" not in text[:200].lower():
+        return (url, f"[not an HTML page: {kind or 'unknown type'}]", [])
+    return page_markdown(text, url)
 
 
 def _cache_result(cache_file, cache_key: str, result: dict, url: str):

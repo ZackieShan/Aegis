@@ -33,6 +33,22 @@ def set_think_override(value: Optional[bool]) -> None:
     _THINK_OVERRIDE.set(value)
 
 
+# Model families whose reasoning is steered by an effort LEVEL rather than
+# an enable_thinking boolean (OpenAI's open-weight gpt-oss / Harmony format).
+_REASONING_EFFORT_MODELS = ("gpt-oss",)
+
+
+def _reasoning_effort_for(model: str, want: bool) -> Optional[str]:
+    """The reasoning_effort to send for the chat UI's Thinking On/Off toggle,
+    or None when the model is not effort-steered. Off maps to "low", not
+    "none": gpt-oss is trained to plan in its analysis channel, and a short
+    plan costs a second while keeping tool calls and long answers on track."""
+    m = (model or "").lower()
+    if not any(p in m for p in _REASONING_EFFORT_MODELS):
+        return None
+    return "high" if want else "low"
+
+
 def _apply_think_override(payload: Dict, url: str, model: str) -> None:
     """If the chat UI forced thinking on/off, encode it in the payload for local
     engines. llama.cpp reads chat_template_kwargs.enable_thinking; Ollama's
@@ -44,7 +60,16 @@ def _apply_think_override(payload: Dict, url: str, model: str) -> None:
         want = None
     if want is None:
         return
-    if not is_local_endpoint(url) or not _supports_thinking(model):
+    if not is_local_endpoint(url):
+        return
+    effort = _reasoning_effort_for(model, want)
+    if effort:
+        # Harmony-format models have no thinking on/off switch, only an effort
+        # dial; llama.cpp hands `reasoning_effort` to the chat template. An
+        # effort the caller already chose (e.g. an agent step) is left alone.
+        payload.setdefault("reasoning_effort", effort)
+        return
+    if not _supports_thinking(model):
         return
     # llama.cpp and Ollama use DIFFERENT knobs, and a localhost /v1 URL can't be
     # told apart (llama-swap vs a custom-port Ollama). So set BOTH: llama.cpp
@@ -68,8 +93,14 @@ def _local_model_gate_enabled() -> bool:
     return os.getenv("AEGIS_LOCAL_MODEL_GATE", "true").lower() not in {"0", "false", "no", "off"}
 
 
+# Background work that gives way to a person at work but not to a screen merely left on:
+# a long nightly job would otherwise wait for as long as a tab is visible anywhere.
+_NIGHTLY_WORKLOADS = frozenset({"nightly"})
+
+
 def _gate_workload(workload: Optional[str]) -> str:
-    return "background" if str(workload or "").lower() == "background" else "foreground"
+    kind = str(workload or "").lower()
+    return "background" if kind == "background" or kind in _NIGHTLY_WORKLOADS else "foreground"
 
 
 @asynccontextmanager
@@ -103,10 +134,14 @@ async def _local_model_slot(target_url: str, model: str, workload: Optional[str]
         # Background work should not jump in while the browser/chat is active
         # or while a foreground request is waiting to acquire the local model.
         try:
-            from src.interactive_gate import has_foreground_activity
+            from src.interactive_gate import has_foreground_activity, someone_is_working
         except Exception:
-            has_foreground_activity = lambda: False  # type: ignore
-        while _LOCAL_MODEL_WAITING_FOREGROUND > 0 or has_foreground_activity():
+            has_foreground_activity = someone_is_working = lambda: False  # type: ignore
+        # A "nightly" job waits for people (requests, a chat being written), not for
+        # a visible tab's heartbeat. Like any background call it is still cancelled
+        # the moment a foreground request wants the model.
+        in_use = someone_is_working if str(workload or "").lower() in _NIGHTLY_WORKLOADS else has_foreground_activity
+        while _LOCAL_MODEL_WAITING_FOREGROUND > 0 or in_use():
             await asyncio.sleep(0.25)
 
     acquired = False
@@ -940,6 +975,40 @@ def _apply_local_cache_affinity(payload: Dict, url: str, session_id: Optional[st
         return
     payload.setdefault("session_id", str(session_id))
     payload.setdefault("cache_prompt", True)
+
+
+def _apply_local_progress(payload: Dict, url: str) -> None:
+    """Ask a self-hosted llama.cpp server to say how far it has read, in place.
+
+    Before the first word of an answer the model reads the whole prompt, and on a
+    home server that is most of the wait. With ``return_progress`` llama.cpp
+    sends ``prompt_progress`` (total, cache, processed, time_ms) in the stream
+    while it reads; the stream parser turns each into a ``reading`` event so the
+    screen can show a real bar instead of a spinner. An llama.cpp / LM Studio
+    extension, so — like the cache hints above — only for self-hosted endpoints.
+    """
+    if _is_self_hosted_openai_compatible(url):
+        payload.setdefault("return_progress", True)
+
+
+def _reading_event(progress) -> Optional[str]:
+    """The ``reading`` event for one llama.cpp ``prompt_progress`` block, or None.
+
+    ``done``/``total`` count every token of the prompt; ``cached`` is the part the
+    server already had from the turn before, so the work actually being timed is
+    ``done - cached`` of ``total - cached``.
+    """
+    if not isinstance(progress, dict):
+        return None
+    try:
+        total = int(progress.get("total") or 0)
+        done = int(progress.get("processed") or 0)
+        cached = int(progress.get("cache") or 0)
+    except (TypeError, ValueError):
+        return None
+    if total <= 0:
+        return None
+    return f'data: {json.dumps({"type": "reading", "done": max(0, min(done, total)), "total": total, "cached": max(0, min(cached, total))})}\n\n'
 
 
 def _is_local_minimax_mlx_request(url: str, model: str) -> bool:
@@ -2157,7 +2226,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                      max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                      tools: Optional[List[Dict]] = None, session_id: Optional[str] = None,
-                     tool_choice_none: bool = False, workload: str = "foreground"):
+                     tool_choice_none: bool = False, workload: str = "foreground",
+                     progress: bool = False):
     target_url = _stream_target_url(url)
     async with _local_model_slot(target_url, model, workload):
         async for chunk in _stream_llm_inner(
@@ -2172,6 +2242,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             tools=tools,
             session_id=session_id,
             tool_choice_none=tool_choice_none,
+            progress=progress,
         ):
             yield chunk
 
@@ -2180,11 +2251,12 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                             max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                             timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                             tools: Optional[List[Dict]] = None, session_id: Optional[str] = None,
-                            tool_choice_none: bool = False):
+                            tool_choice_none: bool = False, progress: bool = False):
     """Stream LLM responses with improved error handling.
 
     Yields SSE chunks:
       - data: {"delta": "text"}           — text content
+      - data: {"type": "reading", ...}     — how far a local model has read the prompt (only with progress=True)
       - data: {"type": "tool_calls", ...}  — accumulated native tool calls (before DONE)
       - event: error                       — errors
       - data: [DONE]                       — end of stream
@@ -2258,6 +2330,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
         # A chat-UI thinking toggle overrides the above for local engines.
         _apply_think_override(payload, url, model)
         _apply_local_cache_affinity(payload, url, session_id)
+        if progress:
+            _apply_local_progress(payload, url)
         _apply_local_generation_stability(payload, target_url, model)
         h = _provider_headers(provider, headers)
         if provider == "copilot":
@@ -2592,6 +2666,11 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                                     ):
                                         _actual_model_announced = True
                                         yield f'data: {json.dumps({"type": "model_actual", "requested_model": model, "model": _actual_model})}\n\n'
+                                # llama.cpp, while it is still reading the prompt (return_progress).
+                                if progress and "prompt_progress" in j:
+                                    _reading = _reading_event(j.get("prompt_progress"))
+                                    if _reading:
+                                        yield _reading
                                 # Usage chunk (from stream_options)
                                 _choices = j.get("choices") or []
                                 _delta0 = _choices[0].get("delta") if (_choices and _choices[0] is not None) else None
@@ -2622,6 +2701,16 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                                             _usage_data["gen_tps"] = round(_tm["predicted_per_second"], 2)
                                         if _tm.get("prompt_per_second"):
                                             _usage_data["prefill_tps"] = round(_tm["prompt_per_second"], 2)
+                                        # How much of the prompt was read now and how much the server
+                                        # still had from the turn before (its prompt cache).
+                                        if isinstance(_tm.get("prompt_n"), int):
+                                            _usage_data["read_tokens"] = _tm["prompt_n"]
+                                        if isinstance(_tm.get("cache_n"), int):
+                                            _usage_data["cached_tokens"] = _tm["cache_n"]
+                                    if "cached_tokens" not in _usage_data:
+                                        _details = u.get("prompt_tokens_details")
+                                        if isinstance(_details, dict) and isinstance(_details.get("cached_tokens"), int):
+                                            _usage_data["cached_tokens"] = _details["cached_tokens"]
                                     if _actual_model:
                                         _usage_data["model"] = _actual_model
                                         if not _same_model_identity(_actual_model, model):
@@ -2863,7 +2952,7 @@ async def stream_llm_with_fallback(candidates, messages, **kwargs):
                     event_data = json.loads(chunk[6:])
                 except Exception:
                     event_data = {}
-                if event_data.get("type") == "model_actual":
+                if event_data.get("type") in ("model_actual", "reading"):
                     yield chunk
                     continue
                 # First real output from a NON-primary candidate: tell the client

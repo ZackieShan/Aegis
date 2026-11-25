@@ -217,7 +217,7 @@ hardcode anything user-specific into the procedure:
     one-shot artefacts. The named tool (`serve_model`, `stop_served_model`) \
     owns session naming.
   - NO direct `ssh <host> 'tmux ...'` shell incantations even if that's \
-    what the failed trace did — those bypass the cookbook's state \
+    what the failed trace did — those bypass the Model Shopper's state \
     tracker. The skill must use `serve_model` / `stop_served_model` \
     / `serve_preset`, not bash.
 
@@ -312,7 +312,7 @@ user-specific token from your trace before writing the procedure:
     `serve_preset`, `list_cached_models`, `search_hf_models`, etc.) \
     rather than `ssh <host> 'tmux new-session ... vllm serve ...'` \
     shell incantations — even if THAT'S what worked in the trace. Raw \
-    shell launches bypass the cookbook tracker and don't reproduce on \
+    shell launches bypass the Model Shopper tracker and don't reproduce on \
     another user's box.
 
 If the trace did NOT genuinely solve the user's problem (e.g. you also \

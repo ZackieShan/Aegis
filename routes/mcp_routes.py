@@ -114,6 +114,25 @@ def _mcp_oauth_redirect_uri() -> str:
     return REDIRECT_URI
 
 
+def _set_mcp_shared(server_id: str, shared: bool) -> bool:
+    """Open an MCP server to every account, or close it to administrators again. Returns how it now stands.
+
+    The list is the ``mcp_shared_servers`` setting; ``src.tool_security`` reads it at every tool call.
+    """
+    from src.settings import load_settings, save_settings
+    from src.tool_security import MCP_SHARED_SETTING, UNSHAREABLE_MCP
+
+    if shared and server_id in UNSHAREABLE_MCP:
+        raise HTTPException(400, "This one stays with administrators: it holds private data or acts on the server itself.")
+    settings = dict(load_settings())
+    kept = [item for item in (settings.get(MCP_SHARED_SETTING) or []) if isinstance(item, str) and item != server_id]
+    if shared:
+        kept.append(server_id)
+    settings[MCP_SHARED_SETTING] = kept
+    save_settings(settings)
+    return shared
+
+
 def setup_mcp_routes(mcp_manager: McpManager):
     """Setup MCP routes with the provided manager."""
 
@@ -125,6 +144,8 @@ def setup_mcp_routes(mcp_manager: McpManager):
         try:
             servers = db.query(McpServer).all()
             result = []
+            from src.tool_security import UNSHAREABLE_MCP, shared_mcp_servers
+            shared = shared_mcp_servers()
             for srv in servers:
                 status = mcp_manager.get_server_status(srv.id)
                 oauth_cfg = json.loads(srv.oauth_config) if srv.oauth_config else None
@@ -152,6 +173,9 @@ def setup_mcp_routes(mcp_manager: McpManager):
                     "auth_url": status.get("auth_url"),
                     "has_oauth": oauth_cfg is not None,
                     "needs_oauth": needs_oauth,
+                    # May every account's assistant use it, or administrators only (the default)?
+                    "shared": srv.id in shared,
+                    "shareable": srv.id not in UNSHAREABLE_MCP,
                 })
             return result
         finally:
@@ -370,6 +394,26 @@ def setup_mcp_routes(mcp_manager: McpManager):
         finally:
             db.close()
 
+    @router.put("/servers/{server_id}/shared")
+    async def share_server(server_id: str, request: Request):
+        """{"shared": true} opens this server's tools to every account; false keeps them to administrators."""
+        require_admin(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("shared"), bool):
+            raise HTTPException(400, "shared must be true or false")
+        db = SessionLocal()
+        try:
+            if not db.query(McpServer).filter(McpServer.id == server_id).first():
+                raise HTTPException(404, "Server not found")
+        finally:
+            db.close()
+        shared = _set_mcp_shared(server_id, body["shared"])
+        logger.info("MCP server %s is now %s", server_id, "open to every account" if shared else "for administrators only")
+        return {"id": server_id, "shared": shared}
+
     @router.delete("/servers/{server_id}")
     async def delete_server(server_id: str, request: Request):
         """Remove an MCP server."""
@@ -387,6 +431,10 @@ def setup_mcp_routes(mcp_manager: McpManager):
 
             db.delete(srv)
             db.commit()
+            try:
+                _set_mcp_shared(server_id, False)       # a later server given the same id starts closed
+            except Exception:
+                logger.warning("Could not clear the sharing switch of the removed MCP server %s", server_id)
             return {"status": "deleted"}
         finally:
             db.close()

@@ -74,6 +74,108 @@ def is_up(timeout: float = 2.0) -> bool:
         return False
 
 
+# A workflow needs more than its weights: activations, VAE decode, the text
+# encoder's scratch space. Weights x this factor + a fixed margin is the
+# headroom make_room() wants before it lets a job start beside chat models.
+_ROOM_OVERHEAD = 1.15
+_ROOM_MARGIN_MB = 4096
+
+
+def _swap_base() -> str:
+    return f"http://127.0.0.1:{os.getenv('LLAMA_SWAP_PORT', '9090')}"
+
+
+def job_need_mb(spec: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Rough GPU memory a catalog entry's job needs, from the size of the
+    model files it loads. None when the entry or its files can't be sized."""
+    if not spec:
+        return None
+    from src import comfyui_workflows
+    root = comfyui_workflows._models_dir()
+    total = 0
+    for rel in comfyui_workflows.spec_files(spec):
+        try:
+            total += os.path.getsize(os.path.join(root, rel))
+        except OSError:
+            pass
+    if not total:
+        return None
+    return int(total / (1024 * 1024) * _ROOM_OVERHEAD) + _ROOM_MARGIN_MB
+
+
+async def make_room(spec: Optional[Dict[str, Any]], label: str = "") -> list:
+    """Free GPU memory for a ComfyUI job when it will not fit beside the chat
+    model llama-swap is holding. Returns the model ids that were unloaded.
+
+    ComfyUI and llama-swap are separate processes that know nothing about
+    each other's memory. On a 24GB card ComfyUI's own low-VRAM offloading
+    papered over that; on a unified-memory box a 63GB chat model plus a 71GB
+    FLUX.2 render simply exceeds RAM and the machine swaps itself to a crawl.
+    So: if the job's weights (plus overhead) exceed what is free right now,
+    unload llama-swap's GPU-resident models first. They reload on their next
+    request, and while the job runs the GPU guard is already answering chat
+    on the CPU model. CPU-only models (`--device none`) hold no GPU memory
+    and are left alone. Best-effort: any failure here just lets the job
+    proceed as before. Disable with AEGIS_COMFY_MAKE_ROOM=0.
+    """
+    if os.getenv("AEGIS_COMFY_MAKE_ROOM", "1").strip().lower() in ("0", "false", "no", "off"):
+        return []
+    try:
+        import httpx
+        from src import engine_tuner
+
+        need = job_need_mb(spec)
+        if not need:
+            return []
+        free = await asyncio.to_thread(engine_tuner.gpu_free_mb)
+        if free is None or free >= need:
+            return []
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(_swap_base() + "/running")
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            items = data.get("running", data) if isinstance(data, dict) else data
+            victims = [
+                str(it["model"]) for it in items or []
+                if isinstance(it, dict) and it.get("model")
+                and "--device none" not in str(it.get("cmd") or "")
+            ]
+            unloaded = []
+            for mid in victims:
+                try:
+                    u = await client.post(f"{_swap_base()}/api/models/unload/{mid}")
+                    if u.status_code // 100 == 2:
+                        unloaded.append(mid)
+                except Exception as e:
+                    logger.debug("llama-swap unload of %s failed: %s", mid, e)
+        if unloaded:
+            logger.info("Made room for ComfyUI job %s (needs ~%d MB, %d MB was free): unloaded %s",
+                        label or "", need, free, ", ".join(unloaded))
+        return unloaded
+    except Exception as e:
+        logger.debug("make_room skipped: %s", e)
+        return []
+
+
+async def abandon_prompt(client, remote_id: str) -> None:
+    """Stop a prompt we submitted without hurting anyone else's (best-effort).
+
+    ComfyUI runs one prompt at a time and queues the rest, so "our" prompt
+    may be executing or still waiting. Drop it from the queue (covers the
+    waiting case) and interrupt it by id (ComfyUI only acts when that prompt
+    is the one executing). A bare POST /interrupt stops whatever is running —
+    when ours is still queued that is another job's render, and ours would
+    then run later with nobody left to collect it.
+    """
+    for path, body in (("/queue", {"delete": [remote_id]}),
+                       ("/interrupt", {"prompt_id": remote_id})):
+        try:
+            await client.post(f"{base_url()}{path}", json=body)
+        except Exception as e:
+            logger.debug("comfyui %s for %s failed: %s", path, remote_id, e)
+
+
 async def free_vram() -> None:
     """Ask ComfyUI to drop loaded models + cached memory (best-effort)."""
     import httpx
@@ -119,6 +221,7 @@ async def start_video_job(
     graph = comfyui_workflows.build_video_graph(model, **params)
     if graph is None:
         raise ValueError(f"Unknown ComfyUI workflow '{model}'")
+    await make_room(comfyui_workflows.COMFY_VIDEO_MODELS.get(model), model)
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
         r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
@@ -198,6 +301,7 @@ async def start_song_job(
     )
     if graph is None:
         raise ValueError(f"Unknown ComfyUI audio workflow '{model}'")
+    await make_room(comfyui_workflows.COMFY_AUDIO_MODELS.get(model), model)
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
         r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
@@ -270,6 +374,7 @@ async def start_narrate_job(
     )
     if graph is None:
         raise ValueError(f"Unknown ComfyUI audio workflow '{model}'")
+    await make_room(comfyui_workflows.COMFY_AUDIO_MODELS.get(model), model)
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
         r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
@@ -339,6 +444,7 @@ async def start_video_op_job(
     graph = comfyui_workflows.build_video_op_graph(op, **params)
     if graph is None:
         raise ValueError(f"Unknown video op '{op}'")
+    await make_room(comfyui_workflows.COMFY_VIDEO_OPS.get(op), f"op:{op}")
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
         r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
@@ -400,6 +506,7 @@ async def start_image_op_job(
     graph = comfyui_workflows.build_image_op_graph(op, image_file=staged, seed=int(seed), **op_params)
     if graph is None:
         raise ValueError(f"Unknown image op '{op}'")
+    await make_room(comfyui_workflows.COMFY_IMAGE_OPS.get(op), f"op:{op}")
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
         r = await client.post(f"{base_url()}/prompt", json={"prompt": graph, "client_id": "aegis"})
@@ -456,10 +563,7 @@ async def _poll_job(job_id: str, remote_id: str, deadline_s: float = _JOB_DEADLI
             while time.time() < deadline:
                 if job.get("cancel_requested") or job.get("status") == "canceled":
                     job["status"] = "canceled"
-                    try:  # interrupt whatever is executing (best-effort)
-                        await client.post(f"{base_url()}/interrupt")
-                    except Exception:
-                        pass
+                    await abandon_prompt(client, remote_id)
                     await free_vram()
                     return
                 try:
@@ -513,6 +617,11 @@ async def _poll_job(job_id: str, remote_id: str, deadline_s: float = _JOB_DEADLI
                 return
         job["error"] = f"Video generation exceeded the {int(deadline_s) // 60}-minute cap"
         job["status"] = "error"
+        # Stop it: otherwise ComfyUI keeps the GPU for a render whose poller
+        # is gone, while the queue already reports the GPU as free.
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await abandon_prompt(client, remote_id)
+        await free_vram()
     except Exception as e:
         logger.exception("ComfyUI job %s poller crashed", job_id)
         job["error"] = f"Video job failed: {e}"
@@ -524,6 +633,9 @@ async def _poll_job(job_id: str, remote_id: str, deadline_s: float = _JOB_DEADLI
         video_generation._mirror_queue(job)
 
 
+_IMAGE_BUDGET_S = 600.0
+
+
 async def render_image(
     model: str,
     prompt: str,
@@ -532,14 +644,60 @@ async def render_image(
     height: int = 1024,
     seed: Optional[int] = None,
     steps: Optional[int] = None,
-    budget_s: float = 600.0,
+    budget_s: Optional[float] = None,
+    owner: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Render one image on a ComfyUI workflow and wait for it inline.
 
     Returns {"b64_json": ..., "seed": n} or {"error": ...} — the same contract
     the sd-server native path uses, so /api/image/generate can treat both
     engines identically. Frees ComfyUI's VRAM afterwards.
+
+    The render registers with the unified queue for its whole duration, like
+    the sd-server image path and every ComfyUI video/audio job do: that entry
+    is what tells the GPU guard to keep chat off the GPU while ComfyUI holds
+    it. An unregistered multi-minute render (FLUX.2-dev) would let a chat
+    turn load a second big model next to it. budget_s=None takes the catalog
+    entry's own "budget_s" when it has one, else the 10-minute default.
     """
+    from src import comfyui_workflows
+
+    spec = comfyui_workflows.COMFY_IMAGE_MODELS.get(model) or {}
+    if budget_s is None:
+        budget_s = float(spec.get("budget_s") or _IMAGE_BUDGET_S)
+    qid = job_queue.add(
+        "image", prompt or "image", owner=owner, session_id=session_id,
+        meta={"model": model, "engine": "comfyui", "width": int(width), "height": int(height)},
+    )
+    job_queue.start(qid)
+    try:
+        result = await _render_image_inner(
+            model, prompt, negative_prompt=negative_prompt,
+            width=width, height=height, seed=seed, steps=steps, budget_s=budget_s,
+        )
+    except BaseException as e:
+        # Includes cancellation (client went away): never leave a phantom
+        # "running" entry pinning chat to the CPU model.
+        job_queue.finish(qid, "error", error=str(e) or type(e).__name__)
+        raise
+    if result.get("error"):
+        job_queue.finish(qid, "error", error=str(result["error"]))
+    else:
+        job_queue.finish(qid, "done")
+    return result
+
+
+async def _render_image_inner(
+    model: str,
+    prompt: str,
+    negative_prompt: str = "",
+    width: int = 1024,
+    height: int = 1024,
+    seed: Optional[int] = None,
+    steps: Optional[int] = None,
+    budget_s: float = _IMAGE_BUDGET_S,
+) -> Dict[str, Any]:
     import base64
     import httpx
     from src import comfyui_workflows
@@ -555,6 +713,7 @@ async def render_image(
     graph = comfyui_workflows.build_image_graph(model, **params)
     if graph is None:
         return {"error": f"Unknown ComfyUI workflow '{model}'"}
+    await make_room(comfyui_workflows.COMFY_IMAGE_MODELS.get(model), model)
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)) as client:
@@ -592,6 +751,11 @@ async def render_image(
                         return {"error": f"ComfyUI output fetch failed ({vr.status_code})"}
                     return {"b64_json": base64.b64encode(vr.content).decode(), "seed": seed}
                 await asyncio.sleep(2.0)
+            # Out of budget: stop the render too. Otherwise ComfyUI keeps the
+            # GPU for a result nobody will collect while the queue (and so
+            # the GPU guard) already believes it is free.
+            await abandon_prompt(client, remote_id)
+            await free_vram()
             return {"error": f"Image generation exceeded {int(budget_s)}s"}
     except httpx.TimeoutException:
         return {"error": "ComfyUI did not answer — is the engine running?"}

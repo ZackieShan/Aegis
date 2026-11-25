@@ -56,6 +56,15 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 
 
+def _note_failure(session_id, cause) -> None:
+    """Keep the technical cause of a failed reply for when the person presses "Tell …" (services/notify.py)."""
+    try:
+        from services import notify
+        notify.note_failure(session_id, cause)
+    except Exception:
+        pass
+
+
 def _stream_set(session_id: str, **fields) -> None:
     """Update fields on the active-stream entry for `session_id`, or
     no-op if the entry has already been popped. Using .get() avoids a
@@ -552,6 +561,9 @@ def setup_chat_routes(
         message = form_data.get("message")
         session = form_data.get("session")
         attachments = form_data.get("attachments")
+        # Which screen is asking. The family screen ("home") draws an answer's card; the full app does
+        # not, so a job that answers with a card has the card's content written out for it (services/cards.py).
+        _draws_cards = str(form_data.get("screen") or "").lower() == "home"
         use_web = form_data.get("use_web")
         use_research = form_data.get("use_research")
         time_filter = form_data.get("time_filter")
@@ -604,10 +616,29 @@ def setup_chat_routes(
         # manual form posts that still send plan_mode=true.
         plan_mode = False
         chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
+        # Code mode: agent mode pointed at software work, on a chosen machine
+        # (this server unless another is picked in the composer). It implies
+        # the shell. Whether this account may use it is decided further down,
+        # with the other privileges.
+        code_mode = str(form_data.get("code_mode") or (body or {}).get("code_mode") or "").lower() == "true"
+        code_host = str(form_data.get("code_host") or (body or {}).get("code_host") or "").strip().lower() or "local"
+        code_target = None
+        if code_mode:
+            chat_mode = "agent"
+            allow_bash = "true"
         # Workspace: confine the agent's file/shell tools to this folder.
         workspace, workspace_rejected = _resolve_request_workspace(
             request, form_data.get("workspace")
         )
+        # A project opened in this chat (manage_projects / /project) wins over
+        # the browser-wide workspace setting.
+        try:
+            from services.workbench import projects as _wb_projects
+            _bound = _wb_projects.bound_workspace(str(session or ""))
+            if _bound:
+                workspace, workspace_rejected = _bound, ""
+        except Exception:
+            pass
         # Plan mode is a modifier on agent mode — it only makes sense with tools.
         if plan_mode:
             chat_mode = "agent"
@@ -764,6 +795,69 @@ def setup_chat_routes(
             raise HTTPException(400, "Invalid request parameters")
 
         # ------------------------------------------------------------------ #
+        # Auto: how should this turn be answered? (services/router.py)
+        # A turn left in the tool-using mode takes the quick lane — a plain
+        # answer, no tool prompt — when the message is plainly conversation.
+        # The effort follows the message when Thinking was not set by hand. A
+        # model is swapped only where the administrator named one. The mode
+        # the person chose is what gets saved with the chat, not the lane.
+        _mode_as_sent = chat_mode
+        _auto_route = None
+        _auto_model = None
+        _auto_quick_lane = False
+        try:
+            from services import router as _router
+            if isinstance(message, str) and message.strip() and _router.enabled(owner):
+                _last_reply, _last_tools = "", False
+                for _past in reversed(list(getattr(sess, "history", None) or [])):
+                    if getattr(_past, "role", "") == "assistant":
+                        _said = getattr(_past, "content", "")
+                        _last_reply = _said if isinstance(_said, str) else ""
+                        _last_tools = bool((getattr(_past, "metadata", None) or {}).get("tool_events"))
+                        break
+                _has_files = bool(body and isinstance(body.get("attachments"), list) and body["attachments"]) or (
+                    isinstance(attachments, str) and attachments.strip() not in ("", "[]", "null"))
+                _named = _router.named_models()
+                try:
+                    from src.tool_index import _library_ready as _lib_ready
+                    from src.tool_security import owner_uses_home_screen as _home_user
+                    _library_ok, _is_home = bool(_lib_ready()), bool(_home_user(owner))
+                except Exception:
+                    _library_ok, _is_home = False, False
+                _auto_route = _router.decide(_router.Turn(
+                    message=message, mode=chat_mode, code_mode=code_mode, has_attachments=_has_files,
+                    # The web being allowed (it is, by default) is not a reason to
+                    # keep tools: only plain chat's own "search first" is.
+                    search_on=str(use_web).lower() == "true",
+                    special=bool(active_doc_id or active_email_uid or _active_toolboxes or compare_mode or approved_plan
+                                 or str(use_rag).lower() == "true" or str(use_research).lower() == "true"),
+                    home_account=_is_home, library_ready=_library_ok, think_set=_think_override,
+                    last_reply=_last_reply, last_used_tools=_last_tools, auto_models=_named,
+                    available_models=_router.served_models(sess.endpoint_url) if _named else None,
+                    current_model=sess.model or ""))
+                # In a chat that is under way, the top of the prompt is what a local model still
+                # has from the turn before (src/prompt_stability.py). The quick lane is a different
+                # prompt altogether and a lower effort changes its first lines: either makes the
+                # model read the whole chat again, which costs more than "thanks" answered the
+                # quick way saves. So both are for a chat's opening; a harder question still gets
+                # more thought whenever it comes.
+                from src import prompt_stability as _stability_route
+                _chat_under_way = _stability_route.under_way(session)
+                if chat_mode == "agent" and _auto_route.path == "chat" and not _chat_under_way:
+                    chat_mode = "chat"
+                    _auto_quick_lane = True
+                if _auto_route.effort and _think_override is None and (_auto_route.effort == "high" or not _chat_under_way):
+                    from src import llm_core as _auto_llm
+                    _auto_llm.set_think_override(_auto_route.effort == "high")
+                _auto_model = _auto_route.model
+                logger.info("auto route: mode=%s→%s effort=%s model=%s (%s)", _mode_as_sent, chat_mode,
+                            _auto_route.effort or "default", _auto_model or "-", "; ".join(_auto_route.reasons))
+        except Exception:
+            logger.debug("auto routing skipped", exc_info=True)
+            _auto_route, _auto_model, _auto_quick_lane = None, None, False
+            chat_mode = _mode_as_sent
+
+        # ------------------------------------------------------------------ #
         # Privilege gates that must fire BEFORE any LLM work / token spend.
         #   1. allowed_models — reject if session.model isn't in the user's
         #      configured allowlist (empty list = "no restriction").
@@ -782,6 +876,286 @@ def setup_chat_routes(
             if get_session_mode(session) == 'research_pending':
                 do_research = True
                 logger.info(f"Session {session} in research_pending — auto-triggering research")
+
+        # ------------------------------------------------------------------ #
+        # The straight-to-tool lane (services/direct.py). A sentence one exact
+        # tool can answer alone — sunset, a unit conversion, days until a date,
+        # the forecast, a short translation, something for a list — is answered
+        # by that tool with no model round first: about a second instead of
+        # four to eleven, and the same answer every time. Only a turn left on
+        # Auto, with nothing attached or open beside it, is looked at; anything
+        # the lane does not read goes on exactly as before.
+        _direct = None
+        _plain_turn = False
+        _lane_off = None                      # tools that are not this person's to use; None until worked out
+        try:
+            _plain_turn = (
+                isinstance(message, str) and _mode_as_sent == "agent" and not code_mode and not compare_mode and not incognito
+                and not do_research and not active_doc_id and not active_email_uid and not _active_toolboxes and not approved_plan
+                and not (body and isinstance(body.get("attachments"), list) and body["attachments"])
+                and not (isinstance(attachments, str) and attachments.strip() not in ("", "[]", "null"))
+            )
+            if _plain_turn:
+                from services import direct as _direct_lane
+                from services import router as _lane_router
+                if _lane_router.enabled(owner):
+                    _may_act = True
+                    if owner and hasattr(request.app.state, "auth_manager") and request.app.state.auth_manager:
+                        _may_act = bool(request.app.state.auth_manager.get_privileges(owner).get("can_use_agent", True))
+                    if _may_act:
+                        from src.settings import get_setting as _lane_setting
+                        from src.tool_security import blocked_tools_for_owner as _lane_blocked
+                        _off = set(_lane_blocked(owner)) | set(_lane_setting("disabled_tools", []) or [])
+                        _lane_policy = build_effective_tool_policy(last_user_message=message)
+                        _off |= _lane_policy.all_disabled_names()
+                        if not _lane_policy.block_all_tool_calls:       # "no tools, just tell me": then no tool answers either
+                            _lane_off = _off
+                            if _direct_lane.worth_trying(message):
+                                _direct = await _direct_lane.answer(message, owner, allowed=lambda tool: tool not in _off)
+        except Exception:
+            logger.debug("straight-to-tool lane skipped", exc_info=True)
+            _direct = None
+        if _direct is not None:
+            logger.info("direct answer: %s answered %r without a model round", _direct.tool, message[:80])
+            _direct_started = time.time()
+            _direct_event = {"round": 1, "tool": _direct.tool, "command": _direct.command, "output": _direct.output, "exit_code": 0}
+            if _direct.card:
+                _direct_event["card"] = _direct.card
+            sess.add_message(ChatMessage("user", message))
+            try:
+                chat_handler.update_session_name_if_needed(sess, message)
+            except Exception:
+                pass
+            set_session_mode(session, "agent")
+            _direct_metrics = {"model": sess.model, "requested_model": sess.model, "direct": _direct.tool, "response_time": 0.0,
+                               "tool_events": [_direct_event]}
+
+            async def _direct_stream() -> AsyncGenerator[str, None]:
+                _info = {"type": "model_info", "model": sess.model, "direct": _direct.tool,
+                         "auto": {"path": "direct", "effort": "none", "model": "", "label": "instant",
+                                  "why": "one exact tool answers this: no model round was needed"}}
+                yield f'data: {json.dumps(_info)}\n\n'
+                yield f'data: {json.dumps({"type": "tool_start", "tool": _direct.tool, "command": _direct.command, "round": 1})}\n\n'
+                yield f'data: {json.dumps({"type": "tool_output", **{k: v for k, v in _direct_event.items() if k != "round"}})}\n\n'
+                yield f'data: {json.dumps({"delta": _direct.text})}\n\n'
+                _direct_metrics["response_time"] = round(time.time() - _direct_started, 2)
+                _saved = save_assistant_response(sess, session_manager, session, _direct.text, _direct_metrics, tool_events=[_direct_event])
+                yield f'data: {json.dumps({"type": "metrics", "data": _direct_metrics})}\n\n'
+                if _saved:
+                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved})}\n\n'
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(_direct_stream(), media_type="text/event-stream")
+
+        # ------------------------------------------------------------------ #
+        # Dinner (services/dinner.py): "what can I make with chicken and rice?"
+        # done as one job with fixed steps — the cookbooks, one recipe chosen,
+        # set out in the Kitchen, what is missing, when to start — and answered
+        # with a recipe card. And its follow-up, "add the ingredients for … to
+        # my shopping list", which needs no model at all.
+        _dinner, _shop = None, None
+        try:
+            if _plain_turn and _lane_off is not None and "manage_lists" not in _lane_off:
+                from services import dinner as _dinner_job
+                _shop = await asyncio.to_thread(_dinner_job.shopping, message, owner, getattr(sess, "history", None))
+            if (_shop is None and _plain_turn and _lane_off is not None and "library_search" not in _lane_off
+                    and "manage_kitchen" not in _lane_off):
+                from services import dinner as _dinner_job
+                from services.library import config as _library_config
+                from src.user_time import now_user_local as _local_now
+                if _library_config.enabled():
+                    _dinner = _dinner_job.read(message, _local_now())
+        except Exception:
+            logger.debug("dinner check skipped", exc_info=True)
+            _dinner, _shop = None, None
+        if _shop is not None:
+            sess.add_message(ChatMessage("user", message))
+            set_session_mode(session, "agent")
+            _shop_events = [dict(event, round=1, exit_code=0) for event in _shop["events"]]
+
+            async def _shop_stream() -> AsyncGenerator[str, None]:
+                yield f'data: {json.dumps({"type": "model_info", "model": sess.model, "direct": "manage_lists", "auto": {"label": "instant"}})}\n\n'
+                yield f'data: {json.dumps({"type": "tool_start", "tool": "manage_lists", "command": "", "round": 1})}\n\n'
+                yield f'data: {json.dumps({"type": "tool_output", "tool": "manage_lists", "command": "add", "output": _shop["text"], "exit_code": 0, "card": _shop["card"]})}\n\n'
+                yield f'data: {json.dumps({"delta": _shop["text"]})}\n\n'
+                _metrics = {"model": sess.model, "requested_model": sess.model, "direct": "manage_lists", "response_time": 0.0, "tool_events": _shop_events}
+                _saved = save_assistant_response(sess, session_manager, session, _shop["text"], _metrics, tool_events=_shop_events)
+                yield f'data: {json.dumps({"type": "metrics", "data": _metrics})}\n\n'
+                if _saved:
+                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved})}\n\n'
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(_shop_stream(), media_type="text/event-stream")
+        if _dinner is not None:
+            logger.info("dinner: looking for %s", _dinner["dish"] or ", ".join(_dinner["have"]))
+            sess.add_message(ChatMessage("user", message))
+            try:
+                chat_handler.update_session_name_if_needed(sess, message)
+            except Exception:
+                pass
+            set_session_mode(session, "agent")
+            _dinner_started = time.time()
+
+            async def _ask_about_dinner(prompt: str) -> str:
+                from src.llm_core import llm_call_async, set_think_override
+                set_think_override(False)
+                return await llm_call_async(sess.endpoint_url, sess.model, [{"role": "user", "content": prompt}],
+                                            temperature=0.2, max_tokens=1200, headers=sess.headers, timeout=180, session_id=session)
+
+            async def _dinner_stream() -> AsyncGenerator[str, None]:
+                from src.llm_core import set_think_override as _think
+                _think(False)                       # the Kitchen's own setting-out is asked the same way a home turn asks
+                yield f'data: {json.dumps({"type": "model_info", "model": sess.model})}\n\n'
+                yield f'data: {json.dumps({"type": "smart", "key": "dinner", "title": "Finding something to cook"})}\n\n'
+                _text, _events, _card, _last, _told, _said = "", [], None, "", False, ""
+                try:
+                    async for _step in _dinner_job.plan(_dinner, owner, _ask_about_dinner, may=lambda tool: tool not in _lane_off):
+                        if _step.get("say"):                 # what was chosen, said while it is being set out
+                            _said = _step["say"]
+                            yield f'data: {json.dumps({"delta": _said})}\n\n'
+                        elif _step.get("step"):
+                            if _step["step"] in ("thinking", "manage_kitchen") and not _told:
+                                _told = True
+                                try:                      # the first model round of this job: say so if the model has to be woken
+                                    from services import waiting as _wait
+                                    _asleep = await _wait.waking(sess.endpoint_url, sess.model)
+                                    if _asleep:
+                                        yield f'data: {json.dumps(_asleep)}\n\n'
+                                except Exception:
+                                    pass
+                            if _step["step"] != "thinking":
+                                if _last:
+                                    yield f'data: {json.dumps({"type": "tool_output", "tool": _last, "command": "", "output": "", "exit_code": 0})}\n\n'
+                                _last = _step["step"]
+                                yield f'data: {json.dumps({"type": "tool_start", "tool": _last, "command": "", "round": 1})}\n\n'
+                        elif _step.get("sources"):
+                            try:
+                                from services.search.origin import LIBRARY as _LIB, marked as _marked
+                                _found = _marked(_step["sources"], _LIB)
+                            except Exception:
+                                _found = _step["sources"]
+                            yield f'data: {json.dumps({"type": "web_sources", "data": _found})}\n\n'
+                        elif _step.get("done"):
+                            _text, _card = _step["text"], _step.get("card")
+                            _events = [dict(event, round=1, exit_code=0) for event in _step["events"]]
+                            if _card:
+                                yield f'data: {json.dumps({"type": "tool_output", "tool": "plan_dinner", "command": _card["title"], "output": _text, "exit_code": 0, "card": _card})}\n\n'
+                                if not _draws_cards:      # the full app: what the card holds, in words
+                                    from services.cards import as_markdown as _written
+                                    _text = (_text + "\n\n" + _written(_card)).strip()
+                            elif _last:
+                                yield f'data: {json.dumps({"type": "tool_output", "tool": _last, "command": "", "output": "", "exit_code": 0})}\n\n'
+                except Exception as _dinner_error:
+                    logger.exception("dinner: the job failed part-way")
+                    _note_failure(session, f"dinner: {type(_dinner_error).__name__}: {_dinner_error}")
+                    yield f'data: {json.dumps({"type": "error", "error": "I could not finish finding a recipe."})}\n\n'
+                    yield "data: [DONE]\n\n"
+                    return
+                yield f'data: {json.dumps({"delta": _text[len(_said):] if _said and _text.startswith(_said.strip()) else _text})}\n\n'
+                _metrics = {"model": sess.model, "requested_model": sess.model, "direct": "plan_dinner",
+                            "response_time": round(time.time() - _dinner_started, 2), "tool_events": _events}
+                _saved = save_assistant_response(sess, session_manager, session, _text, _metrics, tool_events=_events)
+                yield f'data: {json.dumps({"type": "metrics", "data": _metrics})}\n\n'
+                if _saved:
+                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved})}\n\n'
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(_dinner_stream(), media_type="text/event-stream")
+
+        # ------------------------------------------------------------------ #
+        # Going out (services/outing.py): "plan a day hike for Saturday" done as
+        # one job with fixed steps — the sun, the forecast, the library, a saved
+        # packing list, a reminder — and answered with a trip card. The model
+        # is asked one thing (what to pack, what to watch for); everything else
+        # is the same every time. Taken only when there is a place to plan for;
+        # with no home saved the assistant asks, as before.
+        _outing = None
+        try:
+            if _plain_turn and _lane_off is not None and "sun_moon" not in _lane_off and "manage_lists" not in _lane_off:
+                from services import outing as _outing_job
+                from src.user_time import now_user_local as _local_now
+                _outing = (_outing_job.read(message, _local_now().date())
+                           or _outing_job.again(message, getattr(sess, "history", None), _local_now().date()))
+                if _outing is not None:
+                    from services.almanac import places as _places
+                    try:
+                        _places.resolve(_outing.get("place") or "", owner)
+                    except _places.PlaceError:
+                        # A lake or a trailhead it cannot place: plan for home and say so, when there is
+                        # a home; with none, the assistant asks where.
+                        if _outing.get("place") and _places.home(owner) is not None:
+                            _outing["place_unknown"], _outing["place"] = _outing["place"], ""
+                        else:
+                            _outing = None
+        except Exception:
+            logger.debug("outing check skipped", exc_info=True)
+            _outing = None
+        if _outing is not None:
+            logger.info("outing: planning a %s for %s", _outing["kind"], _outing["day"])
+            sess.add_message(ChatMessage("user", message))
+            try:
+                chat_handler.update_session_name_if_needed(sess, message)
+            except Exception:
+                pass
+            set_session_mode(session, "agent")
+            _outing_started = time.time()
+
+            async def _ask_for_the_lists(prompt: str) -> str:
+                from src.llm_core import llm_call_async, set_think_override
+                set_think_override(False)           # two short lists: a short plan is enough, and a long one eats the answer
+                return await llm_call_async(sess.endpoint_url, sess.model, [{"role": "user", "content": prompt}],
+                                            temperature=0.2, max_tokens=1500, headers=sess.headers, timeout=180, session_id=session)
+
+            async def _outing_stream() -> AsyncGenerator[str, None]:
+                yield f'data: {json.dumps({"type": "model_info", "model": sess.model})}\n\n'
+                yield f'data: {json.dumps({"type": "smart", "key": "going_out", "title": "Planning your outing"})}\n\n'
+                _text, _events, _last = "", [], ""
+                try:
+                    async for _step in _outing_job.plan(_outing, owner, _ask_for_the_lists, may=lambda tool: tool not in _lane_off):
+                        if _step.get("unreadable"):
+                            _text = "Where are you going? A town is enough."
+                        elif _step.get("step") == "thinking":
+                            if _last:
+                                yield f'data: {json.dumps({"type": "tool_output", "tool": _last, "command": "", "output": "", "exit_code": 0})}\n\n'
+                            try:                          # the one model round of this job: say so if the model has to be woken first
+                                from services import waiting as _wait
+                                _asleep = await _wait.waking(sess.endpoint_url, sess.model)
+                                if _asleep:
+                                    yield f'data: {json.dumps(_asleep)}\n\n'
+                            except Exception:
+                                pass
+                        elif _step.get("step"):
+                            _last = _step["step"]
+                            yield f'data: {json.dumps({"type": "tool_start", "tool": _last, "command": "", "round": 1})}\n\n'
+                        elif _step.get("sources"):
+                            try:
+                                from services.search.origin import LIBRARY as _LIB, marked as _marked
+                                _found = _marked(_step["sources"], _LIB)
+                            except Exception:
+                                _found = _step["sources"]
+                            yield f'data: {json.dumps({"type": "web_sources", "data": _found})}\n\n'
+                        elif _step.get("done"):
+                            _text, _events = _step["text"], [dict(event, round=1, exit_code=0) for event in _step["events"]]
+                            yield f'data: {json.dumps({"type": "tool_output", "tool": "plan_outing", "command": _step["card"]["title"], "output": _text, "exit_code": 0, "card": _step["card"]})}\n\n'
+                            if not _draws_cards:          # the full app: what the card holds, in words
+                                from services.cards import as_markdown as _written
+                                _text = (_text + "\n\n" + _written(_step["card"])).strip()
+                except Exception as _outing_error:
+                    logger.exception("outing: the plan failed part-way")
+                    _note_failure(session, f"outing: {type(_outing_error).__name__}: {_outing_error}")
+                    yield f'data: {json.dumps({"type": "error", "error": "The plan could not be finished."})}\n\n'
+                    yield "data: [DONE]\n\n"
+                    return
+                yield f'data: {json.dumps({"delta": _text})}\n\n'
+                _metrics = {"model": sess.model, "requested_model": sess.model, "direct": "plan_outing",
+                            "response_time": round(time.time() - _outing_started, 2), "tool_events": _events}
+                _saved = save_assistant_response(sess, session_manager, session, _text, _metrics, tool_events=_events)
+                yield f'data: {json.dumps({"type": "metrics", "data": _metrics})}\n\n'
+                if _saved:
+                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved})}\n\n'
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(_outing_stream(), media_type="text/event-stream")
 
         att_ids = []
         if body and isinstance(body.get("attachments"), list):
@@ -923,6 +1297,20 @@ def setup_chat_routes(
         # START tool; manage_research (read/list/delete existing reports) stays so
         # the agent can still open a report the user points at.
         disabled_tools.add("trigger_research")
+        # ...unless the person asked for exactly that, in so many words ("do deep
+        # research on …", "research the best …"), in a turn that has tools. Their
+        # words decide (services/router.asks_for_research), not the model's
+        # judgment, so an ordinary question still cannot start a job. Without
+        # this the only way to start one from a chat was a typed command.
+        _research_asked = False
+        try:
+            from services.router import may_start_research as _may_start_research
+            if isinstance(message, str) and _may_start_research(message, _mode_as_sent, code_mode):
+                disabled_tools.discard("trigger_research")
+                _research_asked = True
+                logger.info("research asked for by name: trigger_research allowed this turn")
+        except Exception:
+            logger.debug("research-request check skipped", exc_info=True)
         # Only disable bash when the caller *explicitly* set it to a falsy
         # value. When unset (None), defer to per-user privilege checks below.
         # Web search is per-turn opt-in: either the chat pre-search setting
@@ -982,6 +1370,23 @@ def setup_chat_routes(
         _user = ctx.user
         if _user and hasattr(request.app.state, 'auth_manager') and request.app.state.auth_manager:
             _privs = request.app.state.auth_manager.get_privileges(_user)
+        # Which machine this chat's shell and file tools act on. Only an
+        # administrator can point a chat at one; any other request (and any
+        # turn that is not in Code mode) puts the chat back on this server.
+        try:
+            from services import workbench as _workbench
+            from services.workbench import targets as _code_targets
+            from src.tool_security import owner_is_admin_or_single_user as _is_admin_user
+            _may_code = bool(code_mode and session and _workbench.enabled() and _is_admin_user(_user))
+            if _may_code:
+                code_target = await asyncio.to_thread(_code_targets.for_turn, str(session), code_host)
+                logger.info("code mode: session=%s machine=%s folder=%s", session, code_target.get("host"),
+                            code_target.get("folder") or "-")
+            elif session:
+                _code_targets.clear(str(session))
+        except Exception as _code_err:
+            logger.warning("code mode: could not set the machine for this turn: %s", _code_err)
+            code_target = None
         if _privs:
             if not _privs.get("can_use_bash", True):
                 disabled_tools.update({"bash", "python", "read_file", "write_file"})
@@ -995,9 +1400,11 @@ def setup_chat_routes(
                 disabled_tools.update({"manage_memory", "manage_skills"})
             if not _privs.get("can_use_research", True):
                 _research_flags["do"] = False
+                disabled_tools.add("trigger_research")
             if not _privs.get("can_use_agent", True):
                 _effective_mode = 'chat'
                 chat_mode = 'chat'
+                _auto_quick_lane = False
         # Global admin disabled tools
         from src.settings import get_setting
         _global_disabled = get_setting("disabled_tools", [])
@@ -1054,7 +1461,8 @@ def setup_chat_routes(
 
         # Persist session mode after policy/privilege gates so blocked research
         # turns remain ordinary chat/agent streams and saved messages.
-        _effective_mode = 'research' if effective_do_research else (chat_mode or 'chat')
+        # (_mode_as_sent: a turn Auto answered in the quick lane still belongs to the mode the person chose.)
+        _effective_mode = 'research' if effective_do_research else (('agent' if _auto_quick_lane else chat_mode) or 'chat')
         if _effective_mode in ('agent', 'research', 'chat'):
             set_session_mode(session, _effective_mode)
 
@@ -1226,6 +1634,18 @@ def setup_chat_routes(
 
             full_response = ""
             thinking_response = ""
+            # How long the model spent thinking, summed over the rounds of the answer: kept with the
+            # message so a reopened chat can still say "Thought for 6 s".
+            _think_clock = {"since": None, "total": 0.0}
+
+            def _note_thinking(is_thinking: bool) -> None:
+                now = time.time()
+                if is_thinking:
+                    if _think_clock["since"] is None:
+                        _think_clock["since"] = now
+                elif _think_clock["since"] is not None:
+                    _think_clock["total"] += now - _think_clock["since"]
+                    _think_clock["since"] = None
             last_metrics = None
 
             # Configured fallback chain for the default chat model. Tried in
@@ -1247,7 +1667,7 @@ def setup_chat_routes(
             except Exception:
                 logger.debug("GPU busy-swap check failed", exc_info=True)
                 _gpu_guard_mod, _busy_swap = None, None
-            _turn_model = _busy_swap["model"] if _busy_swap else sess.model
+            _turn_model = _busy_swap["model"] if _busy_swap else (_auto_model or sess.model)
 
             # Send model name early so the frontend can show it during streaming
             _model_suffix = "Research" if effective_do_research else None
@@ -1260,9 +1680,30 @@ def setup_chat_routes(
                 _model_info["original_model"] = _busy_swap["original_model"]
             if _model_suffix:
                 _model_info["suffix"] = _model_suffix
+            if _auto_route is not None and _auto_route.moved and not _busy_swap:
+                _model_info["auto"] = _auto_route.as_event()          # "quick" / "careful", and why
+                if _auto_model:
+                    _model_info["requested_model"] = sess.model
             if ctx.preset.character_name:
                 _model_info["character_name"] = ctx.preset.character_name
             yield f'data: {json.dumps(_model_info)}\n\n'
+
+            # Honest waiting (services/waiting.py): say so when the model has to
+            # be woken first, or when a smaller helper answers because the
+            # machine is busy — in the same plain words on every screen.
+            _woke_from = None
+            try:
+                from services import waiting as _waiting
+                if _busy_swap:
+                    yield f'data: {json.dumps(_waiting.busy())}\n\n'
+                else:
+                    _asleep = await _waiting.waking(sess.endpoint_url, _turn_model)
+                    if _asleep:
+                        _woke_from = time.time()
+                        yield f'data: {json.dumps(_asleep)}\n\n'
+            except Exception:
+                logger.debug("waiting notice skipped", exc_info=True)
+            _offline_said = False
 
             if _is_image_generation_session(sess, owner=_user):
                 from src.settings import get_setting
@@ -1326,20 +1767,30 @@ def setup_chat_routes(
                         prompt_type=preset_id,
                         tools=None,
                         session_id=session,
+                        progress=True,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
                                 data = json.loads(chunk[6:])
-                                if "delta" in data:
+                                if data.get("type") == "reading":
+                                    yield chunk                      # how far the model has read: the wait before its first word
+                                elif "delta" in data:
                                     # Reasoning tokens arrive flagged thinking:true.
                                     # Forward them so the client can show a thinking
                                     # indicator, but don't fold them into the saved
                                     # reply (mirrors the rewrite path below).
+                                    _note_thinking(bool(data.get("thinking")))
                                     if data.get("thinking"):
                                         thinking_response += data["delta"]
                                     else:
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
+                                    if _woke_from is not None:       # its first word after being woken: next time's estimate
+                                        try:
+                                            _waiting.note_woke(_turn_model, time.time() - _woke_from)
+                                        except Exception:
+                                            pass
+                                        _woke_from = None
                                     yield chunk
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.
@@ -1381,6 +1832,7 @@ def setup_chat_routes(
                                 yield chunk
                         elif chunk.startswith("event: error"):
                             logger.warning(f"Stream error for {sess.model} on {sess.endpoint_url}: {chunk!r}")
+                            _note_failure(session, f"{sess.model}: {chunk[:500]}")
                             yield chunk
                         elif chunk.startswith("event: "):
                             yield chunk
@@ -1408,6 +1860,9 @@ def setup_chat_routes(
                                 _metrics_to_save = dict(last_metrics or {})
                                 if thinking_response.strip() and not _metrics_to_save.get("thinking"):
                                     _metrics_to_save["thinking"] = thinking_response.strip()
+                                    _note_thinking(False)
+                                    if _think_clock["total"] >= 0.5:
+                                        _metrics_to_save["thinking_time"] = round(_think_clock["total"], 1)
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, _metrics_to_save,
                                     character_name=ctx.preset.character_name,
@@ -1451,6 +1906,7 @@ def setup_chat_routes(
                 # ── Agent mode: full agent loop with tools ──
                 _agent_rounds = 0
                 _agent_tool_calls = 0
+                _tools_used: set = set()
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
                 _actual_model = None
@@ -1473,9 +1929,39 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
+                    # The web tools are allowed whenever the web is (nobody
+                    # presses a button for it now); they are pressed on the
+                    # assistant only when the message is about something dated
+                    # or asks for a lookup (services/router.wants_web). For
+                    # the rest, tool retrieval offers them when they fit and
+                    # the offline library comes first.
                     _forced_tools = None
-                    if _search_enabled:
+                    _web_wanted = str(use_web).lower() == "true" or bool(_tool_intent and _tool_intent.category == "web")
+                    if not _web_wanted:
+                        try:
+                            from services.router import wants_web as _wants_web
+                            _web_wanted = bool(isinstance(message, str) and _wants_web(message))
+                        except Exception:
+                            _web_wanted = True
+                    if _search_enabled and _web_wanted:
                         _forced_tools = set(WEB_TOOL_NAMES)
+                    # A smart tool (services/smart_tools.py): its blades are
+                    # put in front of the assistant and its steps go with them.
+                    _smart = None
+                    try:
+                        if isinstance(message, str) and not code_mode and not compare_mode and not active_doc_id and not active_email_uid:
+                            from services import smart_tools as _smart_tools
+                            _smart = _smart_tools.pick(message)
+                            if _smart is not None:
+                                _forced_tools = set(_forced_tools or ()) | {t for t in _smart.tools if t not in disabled_tools}
+                                yield f'data: {json.dumps({"type": "smart", "key": _smart.key, "title": _smart.title})}\n\n'
+                    except Exception:
+                        logger.debug("smart tool check skipped", exc_info=True)
+                        _smart = None
+                    # Asked for by name: the research tool is offered whatever
+                    # tool retrieval picked, and the loop is told to use it.
+                    if _research_asked and "trigger_research" not in disabled_tools:
+                        _forced_tools = set(_forced_tools or ()) | {"trigger_research"}
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1507,8 +1993,11 @@ def setup_chat_routes(
                         approved_plan=approved_plan or None,
                         workspace=workspace or None,
                         forced_tools=_forced_tools,
+                        code_target=code_target,
                         uploaded_files=ctx.uploaded_files,
                         active_toolboxes=_active_toolboxes,
+                        research_requested=bool(_research_asked and "trigger_research" not in disabled_tools),
+                        smart_tool=_smart.key if _smart is not None else None,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1517,11 +2006,18 @@ def setup_chat_routes(
                                     # Reasoning tokens arrive flagged thinking:true.
                                     # Forward them for the live indicator, but keep
                                     # them out of the saved reply (same as chat mode).
+                                    _note_thinking(bool(data.get("thinking")))
                                     if data.get("thinking"):
                                         thinking_response += data["delta"]
                                     else:
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
+                                    if _woke_from is not None:       # its first word after being woken: next time's estimate
+                                        try:
+                                            _waiting.note_woke(_turn_model, time.time() - _woke_from)
+                                        except Exception:
+                                            pass
+                                        _woke_from = None
                                     yield chunk
                                 elif data.get("type") == "web_sources":
                                     web_sources = data.get("data", [])
@@ -1533,12 +2029,29 @@ def setup_chat_routes(
                                     "rounds_exhausted",
                                     "ask_user",
                                     "plan_update",
+                                    # Signs of life while nothing is being written yet: how far the
+                                    # model has read, what a long-running command has printed so far,
+                                    # and why a run was cut short. The screen draws all three; they
+                                    # were made here and never sent on.
+                                    "reading", "tool_progress", "budget_exceeded",
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))
                                     elif data.get("type") == "tool_start":
+                                        _note_thinking(False)        # the thinking ended in a tool call
                                         _agent_tool_calls += 1
+                                        _tools_used.add(str(data.get("tool") or ""))
                                     yield chunk
+                                    if data.get("type") == "tool_start" and data.get("tool") in WEB_TOOL_NAMES and not _offline_said:
+                                        # The search answers from the offline library by itself when the internet
+                                        # is down; say so, so nobody takes a library page for today's web.
+                                        try:
+                                            from services.search import netstate as _net
+                                            if not _net.internet_available():
+                                                _offline_said = True
+                                                yield f'data: {json.dumps(_waiting.OFFLINE)}\n\n'
+                                        except Exception:
+                                            pass
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.
                                     # Forward the notice and remember the real
@@ -1567,6 +2080,8 @@ def setup_chat_routes(
                             except json.JSONDecodeError:
                                 yield chunk
                         elif chunk.startswith("event: "):
+                            if chunk.startswith("event: error"):
+                                _note_failure(session, f"{sess.model}: {chunk[:500]}")
                             yield chunk
                         elif chunk == "data: [DONE]\n\n":
                             _has_tool_events = bool((last_metrics or {}).get("tool_events"))
@@ -1575,6 +2090,9 @@ def setup_chat_routes(
                                 _metrics_to_save = dict(last_metrics or {})
                                 if thinking_response.strip() and not _metrics_to_save.get("thinking"):
                                     _metrics_to_save["thinking"] = thinking_response.strip()
+                                    _note_thinking(False)
+                                    if _think_clock["total"] >= 0.5:
+                                        _metrics_to_save["thinking_time"] = round(_think_clock["total"], 1)
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, _response_to_save, _metrics_to_save,
                                     character_name=ctx.preset.character_name,
@@ -1597,6 +2115,18 @@ def setup_chat_routes(
                                     extract_skills=user_requested_agent,
                                     allow_background_extraction=not tool_policy.block_all_tool_calls,
                                 )
+                            # A comparison, a purchase, a plan with many parts: the short answer
+                            # stands, and one button under it offers the full report. Nobody has
+                            # to know the feature exists or the words that start it.
+                            try:
+                                if (full_response and not _research_asked and "trigger_research" not in _tools_used
+                                        and _privs.get("can_use_research", True) and not incognito and not compare_mode and not code_mode):
+                                    from services.router import report_offer as _report_offer
+                                    _offer = _report_offer(message if isinstance(message, str) else "")
+                                    if _offer:
+                                        yield f'data: {json.dumps(_offer)}\n\n'
+                            except Exception:
+                                logger.debug("report offer skipped", exc_info=True)
                             _stream_set(session, status="done")
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):
@@ -1631,6 +2161,7 @@ def setup_chat_routes(
                     # in compare mode the pane hung with no terminal event.
                     # Save whatever we have and terminate the stream cleanly.
                     logger.exception("Agent stream failed mid-loop (session %s)", session)
+                    _note_failure(session, f"{type(_loop_exc).__name__}: {_loop_exc}")
                     try:
                         if full_response:
                             _err_content, _err_md = clean_thinking_for_save(

@@ -738,7 +738,7 @@ def _hardware_visibility_warning(result):
             "severity": "warning",
             "title": "No GPU visible inside Docker",
             "message": (
-                "Cookbook is scanning hardware from inside the Aegis container. "
+                "Model Shopper is scanning hardware from inside the Aegis container. "
                 "If your host has a GPU, Docker may not be exposing it to the container, "
                 "so model recommendations may be CPU-only or too conservative."
             ),
@@ -756,7 +756,7 @@ def _hardware_visibility_warning(result):
             "severity": "info",
             "title": "Container-visible RAM may be lower than host RAM",
             "message": (
-                "Cookbook is seeing the RAM available inside the container. "
+                "Model Shopper is seeing the RAM available inside the container. "
                 "If your host has more memory, validate host RAM separately or use Manual Hardware."
             ),
             "actions": [

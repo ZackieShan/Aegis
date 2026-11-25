@@ -60,6 +60,39 @@ def test_cancel_marks_cancelled(client):
     assert job_queue.get(qid)["status"] == "cancelled"
 
 
+def test_cancel_really_stops_the_render_behind_the_entry(client, monkeypatch):
+    """Cancel has to reach the job doing the work — a video, a song or a picture
+    edit — and wait for it. The call used to be made without `await`: nothing
+    was stopped, and the queue reported the GPU free while it was still busy."""
+    from src import video_generation
+
+    stopped = []
+
+    async def cancel_job(job_id):
+        stopped.append(job_id)
+        return True
+
+    monkeypatch.setattr(video_generation, "cancel_job", cancel_job)
+    for kind in ("video", "audio", "image"):
+        qid = job_queue.add(kind, f"a {kind}", owner="alice", external_id=f"job-{kind}")
+        assert client.post(f"/api/queue/{qid}/cancel").json()["ok"] is True
+        assert job_queue.get(qid)["status"] == "cancelled"
+    assert stopped == ["job-video", "job-audio", "job-image"]
+    # an entry with nothing behind it (a film being joined) is simply marked
+    qid = job_queue.add("movie", "film", owner="alice")
+    assert client.post(f"/api/queue/{qid}/cancel").json()["ok"] is True and len(stopped) == 3
+    # someone else's job is not stopped
+    theirs = job_queue.add("video", "theirs", owner="bob", external_id="job-bob")
+    assert client.post(f"/api/queue/{theirs}/cancel").status_code == 403 and "job-bob" not in stopped
+
+    async def broken(job_id):
+        raise RuntimeError("engine gone")
+
+    monkeypatch.setattr(video_generation, "cancel_job", broken)          # a failing engine still lets the entry be cancelled
+    qid = job_queue.add("video", "again", owner="alice", external_id="job-x")
+    assert client.post(f"/api/queue/{qid}/cancel").json()["ok"] is True
+
+
 def test_cancel_unknown_is_404(client):
     assert client.post("/api/queue/nope/cancel").status_code == 404
 

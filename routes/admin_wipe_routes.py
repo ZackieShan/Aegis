@@ -91,6 +91,11 @@ def setup_admin_wipe_routes(session_manager):
                 db.query(Memory).delete()
                 db.commit()
                 _wipe_memory_files()
+                # What was written from those facts goes with them: every
+                # account's profile, topics, conversation digests, rules and
+                # change history.
+                _rmtree_quiet(os.path.join(DATA_DIR, "profiles"))
+                _rmtree_quiet(os.path.join(DATA_DIR, "mind"))
                 # Drop the vector store too so semantic search doesn't
                 # return ghosts. Lazy import — chromadb may not be
                 # initialised in every deployment.

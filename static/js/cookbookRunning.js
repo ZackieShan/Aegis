@@ -292,7 +292,7 @@ function _buildCrashReport(task, outputText) {
   const diag = _diagnose(capturedOutput);
   const started = task?.ts ? new Date(task.ts).toISOString() : '';
   const report = [
-    '## Aegis Cookbook crash report',
+    '## Aegis Model Shopper crash report',
     '',
     'Please review this report for secrets before posting it publicly.',
     '',
@@ -4325,7 +4325,7 @@ async function _pollBackgroundStatus() {
           } else if (t.status === 'ready') {
             statusEl.textContent = 'ready';
           } else {
-            statusEl.textContent = 'cooking';
+            statusEl.textContent = 'starting';
           }
         } else {
           var _dlProgress = '';

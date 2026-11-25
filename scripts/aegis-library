@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""aegis-library — the offline reference library (Kiwix + PDF manuals).
+
+    aegis-library status                       # collections installed, index size
+    aegis-library search "water purification"  # same search the assistant uses
+    aegis-library search "snare" --scope manuals --count 5
+    aegis-library search "tourniquet" --text   # the block the model would read
+    aegis-library read URL [--query "…"]       # extracted text of one result
+    aegis-library index                        # (re)build the PDF-manual index
+    aegis-library index --ocr                  # also OCR manuals that are scans
+    aegis-library index --only armypubs_en_all # one collection
+    aegis-library catalog survival             # find collections to download (needs internet)
+    aegis-library catalog wikipedia_en_all --urls >> ~/library/zim-list.txt
+    aegis-library search "sourdough" --shelf Cooking          # one shelf only
+    aegis-library shelves                      # the tree: every shelf and how much is on it
+    aegis-library shelves "History/Ancient world"             # what is on one
+    aegis-library shelves --find "moby dick"   # a book or document by title or author
+    aegis-library shelve                       # (re)file everything: Gutenberg books, manuals, documents
+    aegis-library files                        # take in files copied into <library>/<any folder>
+    aegis-library files --ask-model            # …and let the local model file the unclear ones
+    aegis-library files --ocr                  # …and read scanned PDFs with OCR
+
+`status`, `search` and `read` talk to kiwix-serve (settings: kiwix_url) and
+read <library>/index/manuals.db. `index` reads the ZIM files in
+<library>/zim directly; it is resumable and safe to re-run after adding
+collections (unchanged ones are skipped), and it refreshes the shelves when
+it is done. `shelve` and `files` are just as repeatable. Full notes:
+docs/offline-library.md and docs/library-shelves.md.
+"""
+
+from __future__ import annotations
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_lib"))
+from cli import quiet_logs, emit, fail, common_parser, run
+quiet_logs()
+
+try:
+    from services import library
+    from services.library import config as lib_config, manuals
+    quiet_logs()
+except ModuleNotFoundError as e:
+    sys.stderr.write(f"error: {e}\nhint: run from repo root with venv active.\n")
+    sys.exit(2)
+
+
+def cmd_status(args):
+    info = library.status()
+    if not args.books:
+        info["books"] = [
+            {"id": b["id"], "title": b["title"], "articles": b["articles"], "date": b["date"]}
+            for b in info["books"]
+        ]
+    emit(info, args)
+
+
+def cmd_search(args):
+    query = " ".join(args.query)
+    results = library.library_search(query, count=args.count, scope=args.scope, shelf=args.shelf or "")
+    if args.text:
+        text, _sources = library.format_for_model(query, results, fetch=args.fetch, shelf=args.shelf or "")
+        sys.stdout.write(text + "\n")
+        return
+    emit({"query": query, "shelf": args.shelf or "", "count": len(results), "results": results}, args)
+
+
+def _say(message: str) -> None:
+    sys.stderr.write(message + "\n")
+    sys.stderr.flush()
+
+
+def _shelve(force: bool = False, fetch: bool = False, only=None) -> dict:
+    """File everything that is filed one by one. Project Gutenberg's own
+    catalogue is fetched the first time a Gutenberg collection needs it."""
+    from services.library import catalogue, shelves
+
+    zim_dir = lib_config.zim_dir()
+    has_gutenberg = zim_dir.is_dir() and any(shelves.is_gutenberg(z.name) for z in zim_dir.glob("gutenberg_*.zim"))
+    if fetch or (has_gutenberg and not catalogue.pg_catalogue_path().exists()):
+        try:
+            catalogue.fetch_pg_catalogue(progress=_say)
+        except Exception as exc:
+            _say(f"Gutenberg's catalogue could not be fetched ({exc}); its books are filed by collection for now.")
+    return catalogue.build(force=force, only=only, progress=_say)
+
+
+def cmd_shelve(args):
+    emit(_shelve(force=args.force, fetch=args.fetch_catalogue, only=args.only), args)
+
+
+def cmd_shelves(args):
+    from services.library import catalogue, kiwix, shelves
+
+    if args.find:
+        place = shelves.resolve(" ".join(args.shelf)) if args.shelf else ""
+        found = catalogue.find(args.find, limit=args.count, scope=place, everything=args.all)
+        emit({"find": args.find, "count": len(found),
+              "items": [dict(item, shelf_name=shelves.display(item["shelf"]), url=catalogue.link(item["book"], item["key"]))
+                        for item in found]}, args)
+        return
+    books = kiwix.list_books() if kiwix.available() else []
+    if args.shelf:
+        place = shelves.resolve(" ".join(args.shelf))
+        if not place:
+            fail(f"no shelf called {' '.join(args.shelf)!r}; categories: {', '.join(shelves.categories())}", code=2)
+        found = catalogue.items(place, offset=args.offset, limit=args.count, everything=args.all)
+        emit({"shelf": place, "about": shelves.about(place), "hidden_by_the_cut": 0 if args.all else catalogue.hidden_under(place),
+              "collections": [book["id"] for book in catalogue.whole_collections(books, place)],
+              "total": found["total"], "items": found["items"]}, args)
+        return
+    tree = catalogue.overview(books)
+    if getattr(args, "json", False):
+        emit({"categories": tree}, args)
+        return
+    rule = catalogue.keeping()
+    if rule["min_rating"] > 0:
+        sys.stdout.write(f"Kept: Project Gutenberg books with a popularity of {rule['min_rating']:g} or more, classics, the best-read "
+                         f"{rule['keep_per_shelf']} of every shelf, and all of {', '.join(rule['keep_whole'])}. "
+                         f"{catalogue.hidden_under():,} books are left off (shown as +N).\n\n")
+    for category in tree:
+        sys.stdout.write(f"{category['name']}  ({category['collection_count']} collections, {category['items']:,} books and documents"
+                         + (f", +{category['hidden']:,} below the cut" if category.get("hidden") else "") + ")\n")
+        for shelf in category["shelves"]:
+            if shelf["collections"] or shelf["items"] or shelf.get("hidden"):
+                sys.stdout.write(f"    {shelf['items']:>7,}  {shelf['name']}" + (f"  (+{shelf['hidden']:,})" if shelf.get("hidden") else "") +
+                                 (f"   [{', '.join(shelf['collections'])}]" if shelf["collections"] else "") + "\n")
+        if category["collections"] or category["own_items"]:
+            sys.stdout.write(f"    {category['own_items']:>7,}  (in the category itself)" +
+                             (f"   [{', '.join(category['collections'])}]" if category["collections"] else "") + "\n")
+
+
+def cmd_files(args):
+    """Take in the owner's own files, shelve them, optionally ask the model."""
+    import asyncio
+    from services.library import classify, files
+
+    summary = files.scan(progress=_say, ocr=args.ocr, workers=args.workers, limit=args.limit)
+    if summary.get("busy"):
+        fail("another scan of the library folder is running", code=1)
+    if not args.no_shelve:
+        summary["shelves"] = _shelve()
+    if args.ask_model:
+        summary["model"] = asyncio.run(classify.run(limit=args.model_limit, redo=args.redo, everything=args.all, progress=_say))
+    summary["waiting_for_model"] = len(classify.pending())
+    summary["in_library"] = files.stats()
+    summary["problems"] = files.problems(limit=20)
+    emit(summary, args)
+
+
+def cmd_read(args):
+    emit(library.fetch_content(args.url, query=args.query or "", budget=args.budget), args)
+
+
+def cmd_index(args):
+    import shutil
+
+    if not shutil.which("zimdump"):
+        fail("zimdump not found — install the zim-tools package (pacman -S zim-tools)", code=2)
+    zim_dir = lib_config.zim_dir()
+    if not zim_dir.is_dir():
+        fail(f"no ZIM folder at {zim_dir}", code=2)
+
+    def progress(message: str) -> None:
+        sys.stderr.write(message + "\n")
+        sys.stderr.flush()
+
+    results = manuals.index_all(
+        workers=args.workers, ocr=args.ocr, force=args.force, only=args.only, progress=progress,
+    )
+    with_pdfs = [r for r in results if r.get("pdfs") or r.get("error")]
+    shelved = {}
+    if not args.only:
+        try:                                  # new collections go on their shelves in the same run
+            shelved = _shelve()
+        except Exception as exc:
+            progress(f"shelves not refreshed: {type(exc).__name__}: {exc}")
+    emit({"collections_scanned": len(results), "with_pdfs": with_pdfs, "index": manuals.stats(), "shelves": shelved}, args)
+
+
+CATALOG_URL = "https://library.kiwix.org/catalog/v2/entries"
+
+
+def cmd_catalog(args):
+    """Search Kiwix's public catalog for collections (name, edition, size,
+    download link). The only subcommand that needs the internet."""
+    import urllib.parse
+    import urllib.request
+    import xml.etree.ElementTree as ET
+
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    rows, start = [], 0
+    query = " ".join(args.query)
+    # The catalog's own search matches titles and descriptions. A collection
+    # *name* ("wikipedia_en_all") is matched here instead, on the full list.
+    by_name = query if "_" in query and " " not in query else ""
+    while True:
+        params = {"lang": args.lang, "count": "500", "start": str(start)}
+        if query and not by_name:
+            params["q"] = query
+        request = urllib.request.Request(CATALOG_URL + "?" + urllib.parse.urlencode(params),
+                                         headers={"User-Agent": "aegis-library"})
+        with urllib.request.urlopen(request, timeout=90) as response:
+            root = ET.fromstring(response.read())
+        entries = root.findall("a:entry", ns)
+        for entry in entries:
+            size, href = 0, ""
+            for link in entry.findall("a:link", ns):
+                if link.get("type") == "application/x-zim":
+                    size, href = int(link.get("length") or 0), link.get("href") or ""
+            rows.append({
+                "name": entry.findtext("a:name", "", ns),
+                "flavour": entry.findtext("a:flavour", "", ns) or "",
+                "title": entry.findtext("a:title", "", ns),
+                "summary": entry.findtext("a:summary", "", ns) or "",
+                "date": (entry.findtext("a:updated", "", ns) or "")[:10],
+                "size_gb": round(size / 1e9, 2),
+                "url": href,
+            })
+        start += len(entries)
+        if len(entries) < 500 or start > 20000:
+            break
+    if by_name:
+        rows = [row for row in rows if by_name.lower() in row["name"].lower()]
+    if args.flavour:
+        rows = [row for row in rows if row["flavour"] == args.flavour]
+    rows.sort(key=lambda row: (row["name"], row["flavour"]))
+    if args.urls:
+        for row in rows:
+            sys.stdout.write(f"{row['url']}   # {row['title']} ({row['size_gb']} GB)\n")
+        return
+    emit({"query": query, "count": len(rows), "total_gb": round(sum(r["size_gb"] for r in rows), 1),
+          "collections": rows}, args)
+
+
+def build_parser():
+    p = common_parser("aegis-library", "Offline reference library (Kiwix + PDF manuals).")
+    parents = p._common_parents
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    ps = sub.add_parser("status", parents=parents, help="What is installed")
+    ps.add_argument("--books", action="store_true", help="Full catalog rows for every collection")
+    ps.set_defaults(func=cmd_status)
+
+    pq = sub.add_parser("search", parents=parents, help="Search articles and manuals")
+    pq.add_argument("query", nargs="+")
+    pq.add_argument("--scope", choices=library.VALID_SCOPES, default="all")
+    pq.add_argument("--count", type=int, default=8)
+    pq.add_argument("--text", action="store_true", help="Print the text block the model reads")
+    pq.add_argument("--fetch", type=int, default=3, help="With --text: how many results to quote")
+    pq.add_argument("--shelf", default="", help="Only this category or shelf, e.g. Cooking or 'History/Ancient world'")
+    pq.set_defaults(func=cmd_search)
+
+    pv = sub.add_parser("shelves", parents=parents, help="The shelves and what is on them")
+    pv.add_argument("shelf", nargs="*", help="A category or shelf to list (default: the whole tree)")
+    pv.add_argument("--find", default="", help="Books and documents by title or author")
+    pv.add_argument("--count", type=int, default=40)
+    pv.add_argument("--offset", type=int, default=0)
+    pv.add_argument("--all", action="store_true", help="Also the books the owner's rating cut leaves off the shelves")
+    pv.set_defaults(func=cmd_shelves)
+
+    pw = sub.add_parser("shelve", parents=parents, help="File books and documents on their shelves")
+    pw.add_argument("--force", action="store_true", help="Re-file collections even if unchanged")
+    pw.add_argument("--fetch-catalogue", action="store_true", help="Download Project Gutenberg's catalogue again (needs internet)")
+    pw.add_argument("--only", nargs="+", metavar="BOOK", help="Gutenberg collection ids")
+    pw.set_defaults(func=cmd_shelve)
+
+    pf = sub.add_parser("files", parents=parents, help="Take in files copied into the library folder")
+    pf.add_argument("--ocr", action="store_true", help="Read scanned PDFs with OCR (slow)")
+    pf.add_argument("--ask-model", action="store_true", help="Let the local model file what folder and title leave unclear")
+    pf.add_argument("--model-limit", type=int, default=0, help="With --ask-model: at most this many documents this run")
+    pf.add_argument("--redo", action="store_true", help="With --ask-model: ask again about documents the model already filed")
+    pf.add_argument("--all", action="store_true", help="With --ask-model: also the ones a folder or title already placed (for titles and authors)")
+    pf.add_argument("--limit", type=int, default=0, help="Read at most this many new files this run")
+    pf.add_argument("--workers", type=int, default=0, help="Parallel readers (default: CPUs - 2, max 8)")
+    pf.add_argument("--no-shelve", action="store_true", help="Do not refresh the shelves afterwards")
+    pf.set_defaults(func=cmd_files)
+
+    pr = sub.add_parser("read", parents=parents, help="Extracted text of one library link")
+    pr.add_argument("url")
+    pr.add_argument("--query", default="")
+    pr.add_argument("--budget", type=int, default=4000)
+    pr.set_defaults(func=cmd_read)
+
+    pi = sub.add_parser("index", parents=parents, help="Build or refresh the PDF-manual index")
+    pi.add_argument("--ocr", action="store_true", help="OCR documents whose pages are mostly images")
+    pi.add_argument("--force", action="store_true", help="Re-read collections even if unchanged")
+    pi.add_argument("--only", nargs="+", metavar="BOOK", help="Collection ids (without the date)")
+    pi.add_argument("--workers", type=int, default=0, help="Parallel readers (default: CPUs - 2, max 12)")
+    pi.set_defaults(func=cmd_index)
+
+    pc = sub.add_parser("catalog", parents=parents, help="Search Kiwix's public catalog (needs internet)")
+    pc.add_argument("query", nargs="*", help="Words to match in name/title/summary; empty = everything")
+    pc.add_argument("--lang", default="eng")
+    pc.add_argument("--flavour", choices=["maxi", "nopic", "mini"], help="Only this edition")
+    pc.add_argument("--urls", action="store_true", help="Print download links, one per line, for zim-list.txt")
+    pc.set_defaults(func=cmd_catalog)
+    return p
+
+
+if __name__ == "__main__":
+    sys.exit(run(build_parser()))
