@@ -735,6 +735,13 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     raise HTTPException(400, f"{key} must be an integer")
                 val = max(lo, min(val, hi))
             current[key] = val
+        # A search key typed on the Search tab is kept with the other keys (encrypted,
+        # services/connections) rather than in this file in the clear.
+        try:
+            from services.connections import store as _connections_store
+            _connections_store.take_from_settings(body, current)
+        except Exception:
+            logger.debug("search keys left in the settings file", exc_info=True)
         _save_settings(current)
         return current
 

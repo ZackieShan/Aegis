@@ -1,0 +1,50 @@
+/* The kitchen: recipes set out for cooking from. */
+
+:root { --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, 'Times New Roman', serif; }
+.recipe-card .title { font-weight: 600; }
+.recipe-card .star { color: var(--warn); }
+.icon-btn.on { color: var(--warn); }
+.icon-btn.on svg { fill: currentColor; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: var(--surface); }
+.seg button { border: none; background: transparent; padding: 8px 13px; cursor: pointer; font-size: .9rem; color: var(--muted); white-space: nowrap; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+
+.ingredient { display: flex; gap: 12px; align-items: flex-start; padding: 11px 14px; cursor: pointer; }
+.ingredient input { width: 22px; height: 22px; margin: 1px 0 0; accent-color: var(--accent); flex: 0 0 auto; }
+.ingredient .what b { font-weight: 600; }
+.ingredient.done .what { text-decoration: line-through; color: var(--faint); }
+.ingredient .old { display: block; margin-top: 2px; font-size: .84rem; color: var(--muted); font-family: var(--serif); font-style: italic; }
+.ingredient .why { display: block; margin-top: 2px; font-size: .82rem; color: var(--muted); }
+.about { color: var(--warn); font-weight: 600; }
+.method { counter-reset: step; }
+.method .step { display: flex; gap: 12px; padding: 12px 14px; }
+.method .step::before { counter-increment: step; content: counter(step); flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: .86rem; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+.method .step .old { display: block; margin-top: 4px; font-size: .86rem; color: var(--muted); font-family: var(--serif); font-style: italic; }
+.as-written { font-family: var(--serif); font-size: 1.06rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notes li + li { margin-top: 6px; }
+.notes { margin: 0; padding-left: 1.2em; }
+
+/* follow along */
+.cook { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: flex; flex-direction: column; padding: calc(10px + env(safe-area-inset-top, 0px)) 16px calc(14px + var(--safe-bottom)); }
+.cook-top { display: flex; align-items: center; gap: 6px; }
+.cook-top .count { flex: 1 1 auto; text-align: center; font-weight: 600; color: var(--muted); }
+.cook-dots { display: flex; gap: 4px; margin: 8px 0 4px; }
+.cook-dots i { flex: 1 1 0; height: 4px; border-radius: 4px; background: var(--line); }
+.cook-dots i.past { background: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.cook-dots i.now { background: var(--accent); }
+.cook-body { flex: 1 1 auto; overflow: auto; display: flex; flex-direction: column; justify-content: center; gap: 16px; max-width: 760px; width: 100%; margin: 0 auto; padding: 10px 0; }
+.cook-step { font-size: clamp(1.35rem, 4.6vw, 2.1rem); line-height: 1.35; font-weight: 500; }
+.cook-old { font-family: var(--serif); font-style: italic; color: var(--muted); font-size: 1.02rem; border-left: 3px solid var(--line); padding-left: 12px; }
+.cook-needs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cook-needs .chip { font-size: .9rem; padding: 6px 12px; white-space: normal; }
+.cook-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.timer { display: inline-flex; align-items: center; gap: 8px; }
+.timer .clock { font: 600 1.25rem var(--mono); min-width: 4.6ch; text-align: center; }
+.timer.over .clock { color: var(--danger); }
+.cook-nav { display: flex; gap: 10px; max-width: 760px; width: 100%; margin: 0 auto; }
+.cook-nav .btn { flex: 1 1 0; min-height: 58px; font-size: 1.05rem; }
+.running { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; min-height: 0; }
+.running .chip { cursor: pointer; font-family: var(--mono); }
+.running .chip.over { background: var(--danger); color: #fff; }

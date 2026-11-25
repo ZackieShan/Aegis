@@ -29,6 +29,7 @@ MODELS_DIR="$REPO_DIR/models"
 BACKEND="vulkan"                 # vulkan | rocm
 COMFY_CPU=0
 TTS_ROCM=0
+TTS_TURBO=0
 SKIP_LLAMA=0
 SKIP_SD=0
 SKIP_COMFY=0
@@ -61,6 +62,9 @@ Options:
   --backend B        vulkan (default) or rocm - llama.cpp / sd.cpp GPU backend
   --comfy-cpu        ComfyUI venv gets CPU torch instead of $TORCH_INDEX_URL
   --tts-rocm         TTS venvs get torch from $TORCH_INDEX_URL (default: CPU)
+  --tts-turbo        Also fetch Chatterbox Turbo (4GB, from Hugging Face): the
+                     faster cloned-voice model, ~2x realtime on a 16-core CPU.
+                     The chatterbox server uses it once it is there.
   --skip-llama       Skip llama.cpp + llama-swap
   --skip-sd          Skip stable-diffusion.cpp
   --skip-comfy       Skip ComfyUI + custom nodes
@@ -91,6 +95,7 @@ while [ $# -gt 0 ]; do
     --backend)      BACKEND="$2"; shift 2 ;;
     --comfy-cpu)    COMFY_CPU=1; shift ;;
     --tts-rocm)     TTS_ROCM=1; shift ;;
+    --tts-turbo)    TTS_TURBO=1; shift ;;
     --skip-llama)   SKIP_LLAMA=1; shift ;;
     --skip-sd)      SKIP_SD=1; shift ;;
     --skip-comfy)   SKIP_COMFY=1; shift ;;
@@ -394,6 +399,19 @@ else
       fi
     fi
   done
+
+  # The faster cloned-voice model is only ever fetched when asked for: 4GB.
+  # server.py (--model auto) speaks with it from its next start, and goes on
+  # with the standard model if this did not work.
+  if [ "$TTS_TURBO" -eq 1 ]; then
+    banner "TTS: Chatterbox Turbo (ResembleAI/chatterbox-turbo, ~4GB)"
+    "$ENGINE_DIR/chatterbox/venv/bin/python" -c '
+from huggingface_hub import snapshot_download
+path = snapshot_download(repo_id="ResembleAI/chatterbox-turbo",
+                         allow_patterns=["*.safetensors", "*.json", "*.txt", "*.pt", "*.model"])
+print("  - Chatterbox Turbo is in", path)
+' || echo "  ! Chatterbox Turbo could not be fetched (no network?). The standard model stays in use; run this again later."
+  fi
 fi
 
 # ---------------------------------------------------------------------------

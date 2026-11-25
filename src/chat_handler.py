@@ -259,6 +259,18 @@ class ChatHandler:
                             except Exception:
                                 vl_desc = None
                         if not vl_desc:
+                            # Sort the photo first: one that shows a living thing goes through the
+                            # species identifier and the home library, never to a general description
+                            # (services/identify.for_chat). Any other photo is described as before.
+                            try:
+                                from services import identify as _identify
+                                vl_desc = await asyncio.to_thread(_identify.for_chat, file_info["path"], message or "", owner)
+                                if vl_desc:
+                                    vl_model = "species identifier"
+                            except Exception as _sort_error:
+                                logger.info("photo not sorted (%s): described instead", type(_sort_error).__name__)
+                                vl_desc = ""
+                        if not vl_desc:
                             vl_result = analyze_image_with_vl_result(file_info["path"], owner=owner)
                             vl_desc = vl_result.get("text", "")
                             vl_model = vl_result.get("model", "")

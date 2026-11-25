@@ -14,6 +14,21 @@ Pipeline (``identify_image``):
 Every stage degrades: no classifier → the vision model works unaided; no
 library → no reference notes (the answer says so); only the vision model is
 required. Nothing here needs the internet.
+
+Nobody has to say what kind of photo it is. The pipeline sorts it: a living
+thing or an animal's sign is identified against the library; print is read
+(and put into the household's language when it is in another, and offered to
+the Kitchen when it is a recipe); anything else is described. ``want`` is the
+correction for when the sorting was wrong: ``"text"`` (it is a label — read
+it), ``"describe"`` (just describe it), ``"living"`` (identify it anyway).
+
+The answer comes as markdown and as a ``card``: the few things a screen shows
+large — the likely name, how sure that is in words, the closest dangerous
+lookalike with the check that separates them, and the library page.
+
+``for_chat`` is the same rule for a photo that arrives with a question in a
+chat: when the species classifier says it shows a living thing, the chat is
+given this identification rather than a general description of the picture.
 """
 
 from __future__ import annotations
@@ -35,6 +50,13 @@ LIVING = {
     "reptile", "amphibian", "fish", "animal_sign",
 }
 CATEGORIES = sorted(LIVING | {"text", "object", "scene", "unclear"})
+WANTS = ("", "living", "text", "describe")
+
+# The species classifier's best score (species, genus or family) at which a
+# photo is taken to show a living thing. Measured on reference photos: living
+# subjects scored 0.26 and up, objects, print, screens and people 0.11 and
+# down (services/identify calibration, docs/photo-id.md).
+LIVING_SCORE = 0.2
 
 _lock = asyncio.Lock()
 
@@ -97,9 +119,26 @@ _WRITE_OTHER = """Describe and identify the subject of the attached photo for so
 What was observed in the photo:
 {observed}
 {notes_block}
-Write: **What it is:** one line with your confidence. **Details:** bullets — the visible features, markings, model numbers or condition that matter. **Useful to know:** what it is for, how it is used or handled, anything to watch out for. Leave a part out if there is nothing to say. Use only what is visible or stated in the notes.{hint}"""
+Write: **What it is:** one line with your confidence. **Details:** bullets — the visible features, markings, model numbers or condition that matter. **Useful to know:** what it is for, how it is used or handled, anything to watch out for. Leave a part out if there is nothing to say. Use only what is visible or stated in the notes. If the photo shows words — a sign, a label, a notice, a screen — end with a part **Text:** giving those words exactly as written, in their own language, one line for each line of print, and nothing else in that part.{hint}"""
 
 _TRANSCRIBE = """Transcribe all legible text in the attached photo exactly as written, keeping line breaks and reading order. Mark anything you cannot read as [illegible]. After the transcription add one line starting with "Summary:" that says what this document or label is.{hint}"""
+
+_DESCRIBE = """Describe what the attached photo shows for someone who wants to know what they are looking at. Markdown, tight and concrete: **What it shows:** one or two sentences. **Details:** bullets — what is visible that matters (objects, markings, numbers, condition, setting). Leave out anything you cannot see. Do not name a species. If the photo shows words — a sign, a label, a notice, a screen — end with a part **Text:** giving those words exactly as written, in their own language, and nothing else in that part.{hint}"""
+
+
+def likely_living(classified: Optional[dict]) -> bool:
+    """Whether the species classifier's scores say the photo shows a living thing (see ``LIVING_SCORE``)."""
+    if not classified:
+        return False
+    best = 0.0
+    for key in ("species", "genus", "family"):
+        rows = classified.get(key) or []
+        if rows:
+            try:
+                best = max(best, float(rows[0].get("score") or 0))
+            except (TypeError, ValueError):
+                pass
+    return best >= LIVING_SCORE
 
 
 # Classifier scores above which its answer is taken as the starting point
@@ -273,9 +312,15 @@ def asset_url(image_path: str) -> str:
     return "/api/reference/asset?p=" + quote(image_path, safe="") if image_path else ""
 
 
-def _identify_sync(image_path: str, hint: str, owner: Optional[str]) -> dict:
+def _plain_analysis(category: str) -> dict:
+    return {"category": category, "subject": "", "features": [], "best_guess": {"common_name": "", "scientific_name": "", "rank": "other", "confidence": "low"},
+            "alternatives": [], "text_in_image": "", "need_more": [], "parsed": True}
+
+
+def _identify_sync(image_path: str, hint: str, owner: Optional[str], want: str = "") -> dict:
     timings: Dict[str, float] = {}
     started = time.time()
+    want = want if want in WANTS else ""
 
     try:
         photo = vision.prepare_image(image_path)
@@ -284,18 +329,19 @@ def _identify_sync(image_path: str, hint: str, owner: Optional[str]) -> dict:
 
     vision.warm_up(owner)       # let the model load while the classifier runs
 
-    # 1. Species classifier (optional).
+    # 1. Species classifier (optional) — not asked when the person said it is print, or just wants it described.
     mark = time.time()
-    classified = classifier.classify(photo)
+    classified = classifier.classify(photo) if want in ("", "living") else None
     timings["classifier_s"] = round(time.time() - mark, 2)
     candidate_lines = classifier.summarize(classified)
 
     # 2. Structured look at the photo — skipped when the classifier is
     #    confident: its candidates go straight to the write-up, which still
-    #    has to square them with what the photo shows.
+    #    has to square them with what the photo shows. Skipped too when the
+    #    person already said what kind of photo it is.
     mark = time.time()
     first: dict = {}
-    analysis = analysis_from_classifier(classified)
+    analysis = _plain_analysis("text" if want == "text" else "scene") if want in ("text", "describe") else analysis_from_classifier(classified)
     if analysis is None:
         prompt = _ANALYZE.format(
             categories=", ".join(f'"{name}"' for name in CATEGORIES),
@@ -310,6 +356,8 @@ def _identify_sync(image_path: str, hint: str, owner: Optional[str]) -> dict:
         analysis = parse_analysis(first["text"])
         timings["look_s"] = round(time.time() - mark, 2)
     category = analysis["category"]
+    if want == "living" and category not in LIVING:
+        category = "unclear"                             # told it is a living thing: identify it as one
 
     sources: List[dict] = []
     images: List[dict] = []
@@ -325,9 +373,19 @@ def _identify_sync(image_path: str, hint: str, owner: Optional[str]) -> dict:
         except vision.VisionUnavailable as exc:
             raise IdentifyError(str(exc), 503) from exc
         body = second["text"].strip()
+        if not body.partition("Summary:")[0].strip():
+            # A small model sometimes gives only the closing line. Ask once more, for the words alone.
+            try:
+                again = vision.vision_call(photo, "Read out every word of text in this image, exactly as written, line by line. Give only the text.",
+                                           owner=owner, max_tokens=2000, temperature=0.0)
+                words = again["text"].strip()
+                if words:
+                    body = f"{words}\n{body}" if body else words
+            except vision.VisionUnavailable:
+                pass
     else:
-        living = category in LIVING or bool(classified and category == "unclear"
-                                           and float(classified["species"][0].get("score") or 0) >= 0.25)
+        living = want != "describe" and (want == "living" or category in LIVING or bool(
+            classified and category == "unclear" and float(classified["species"][0].get("score") or 0) >= 0.25))
         notes_text = ""
         if living:
             for name in lookup_names(analysis, classified):
@@ -359,6 +417,8 @@ def _identify_sync(image_path: str, hint: str, owner: Optional[str]) -> dict:
                 notes=notes_text or "(none — the offline library has no article for these candidates; say so where it matters)",
                 hint=_hint_line(hint),
             )
+        elif want == "describe":
+            prompt = _DESCRIBE.format(hint=_hint_line(hint))
         else:
             prompt = _WRITE_OTHER.format(observed=_observed(analysis), notes_block="", hint=_hint_line(hint))
         try:
@@ -384,6 +444,9 @@ def _identify_sync(image_path: str, hint: str, owner: Optional[str]) -> dict:
 
     return {
         "markdown": "\n\n".join(part for part in parts if part),
+        "body": body,
+        "living": bool(living),
+        "want": want,
         "category": category,
         "subject": analysis["subject"],
         "best_guess": analysis["best_guess"],
@@ -398,8 +461,184 @@ def _identify_sync(image_path: str, hint: str, owner: Optional[str]) -> dict:
     }
 
 
-async def identify_image(image_path: str, hint: str = "", owner: Optional[str] = None) -> dict:
-    """Identify the subject of a photo. One at a time: each run occupies the
-    vision model for half a minute, and queued runs would only thrash it."""
+# ── the answer as a card ────────────────────────────────────────────────────
+
+# The labels the write-up is asked to use. Only these start a part: other bold words inside a part
+# ("the **death cap** is…") are just emphasis.
+_LABELS = ("most likely", "why", "check to confirm", "lookalikes", "edible or hazardous", "useful to know", "for a firmer id",
+           "what it is", "what it shows", "details", "text")
+_PART = re.compile(r"\*\*\s*(" + "|".join(re.escape(label) for label in _LABELS) + r")\s*\??\s*:?\s*\*\*\s*:?[ \t]*", re.I)
+_SURE = {"high": "Quite sure", "medium": "Fairly sure", "low": "Not sure: treat this as a guess"}
+_DANGER = re.compile(r"danger|deadly|toxic|poison|venom|fatal|lethal|harm|serious|do not eat|not edible|inedible", re.I)
+
+
+def parts_of(markdown: str) -> Dict[str, str]:
+    """The write-up cut at its bold labels: ``{"most likely": "…", "lookalikes": "…", …}``."""
+    found: Dict[str, str] = {}
+    pieces = _PART.split(markdown or "")
+    for index in range(1, len(pieces) - 1, 2):
+        label = re.sub(r"[^a-z ]", "", pieces[index].lower()).strip()
+        text = pieces[index + 1].strip()
+        if label and text and label not in found:
+            found[label] = text
+    return found
+
+
+def _plain(text: str, limit: int = 0) -> str:
+    """Markdown as the words it says, on one line."""
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text or "")
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\s*\[\d+\]", "", text)                 # reference marks
+    text = re.sub(r"[*_`#>]+", "", text)
+    text = re.sub(r"^\s*[-•]\s*", "", text, flags=re.M)
+    text = re.sub(r"\s+", " ", text).strip()
+    if limit and len(text) > limit:
+        cut = text.rfind(". ", 0, limit)
+        text = (text[:cut + 1] if cut > limit * 0.5 else text[:limit].rstrip(" ,;") + "…")
+    return text
+
+
+def _bullets(text: str) -> List[str]:
+    lines = [line.strip() for line in (text or "").split("\n") if line.strip()]
+    marked = [re.sub(r"^[-*•]\s*", "", line) for line in lines if re.match(r"^[-*•]\s+", line)]
+    return marked or lines
+
+
+_AMOUNT = re.compile(r"^\s*(?:[-•*]\s*)?(?:\d+(?:[.,/]\d+)?|[¼½¾⅓⅔⅛]|a|an|one|two|three|half)\b[^\n]{0,40}?\b(?:cups?|c\.|tsp|tbsp|teaspoons?|tablespoons?|"
+                     r"oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|l|litres?|liters?|pints?|quarts?|gills?|sticks?|cloves?|pinch|dash|eggs?|cans?|sprigs?)\b", re.I)
+_COOKING = re.compile(r"\b(?:bake|stir|mix|simmer|preheat|whisk|boil|fry|saut[eé]|knead|chop|dice|pour|beat|fold|roast|grease|sift|cream|"
+                      r"cook|oven|skillet|saucepan|serves|ingredients|until\s+(?:golden|tender|done|smooth|thick))\b", re.I)
+
+
+def looks_like_recipe(text: str) -> bool:
+    """Print that reads like a recipe: amounts of ingredients, and the verbs of cooking."""
+    lines = [line for line in (text or "").split("\n") if line.strip()]
+    amounts = sum(1 for line in lines if _AMOUNT.match(line))
+    verbs = len(set(match.lower() for match in _COOKING.findall(text or "")))
+    return (amounts >= 3 and verbs >= 2) or (amounts >= 2 and verbs >= 4)
+
+
+def words_in(result: dict) -> str:
+    """The words read off a photo: the transcription of print, or the **Text:** part of a description."""
+    body = str(result.get("body") or "")
+    if result.get("category") == "text":
+        return body.partition("\nSummary:")[0].strip()
+    if result.get("living"):
+        return ""
+    found = parts_of(body).get("text") or ""
+    lines = [re.sub(r"^[-*•]\s*", "", line).strip().strip('"“”') for line in found.split("\n")]
+    words = "\n".join(line for line in lines if line)
+    return "" if re.fullmatch(r"(?i)(?:none|n/?a|no (?:legible |visible )?(?:text|words)[^\n]*)\.?", words.strip()) else words
+
+
+def card_for(result: dict) -> dict:
+    """The answer as the few things a screen shows large (see the module docstring)."""
+    body = str(result.get("body") or result.get("markdown") or "")
+    category = str(result.get("category") or "")
+    if category == "text":
+        text, _, summary = body.partition("\nSummary:")
+        if not summary and body.lower().startswith("summary:"):
+            text, summary = "", body[8:]
+        card = {"type": "reading", "text": text.strip()[:6000], "summary": _plain(summary, 240), "recipe": looks_like_recipe(text)}
+        if result.get("translation"):
+            card["translation"] = result["translation"]
+        return card
+    if not result.get("living"):
+        words = words_in(result)
+        shown = _PART.split(body)                         # the description without its Text part: the card shows that separately
+        if words:
+            at = next((i for i in range(1, len(shown) - 1, 2) if shown[i].lower() == "text"), None)
+            if at is not None:
+                body = body[:body.lower().rfind("**text")].rstrip()
+        card = {"type": "description", "text": body[:6000], "title": _plain(result.get("subject") or "", 80)}
+        if words:
+            card["words"] = words[:3000]
+            card["recipe"] = looks_like_recipe(words)
+        if result.get("translation"):
+            card["translation"] = result["translation"]
+        return card
+    parts = parts_of(body)
+    best = result.get("best_guess") or {}
+    headline = _plain(parts.get("most likely") or "", 200)
+    level = str(best.get("confidence") or "low")
+    said = re.search(r"confidence[:\s]+(high|medium|low)|\b(high|medium|low)\s+confidence", headline, re.I)
+    if said:
+        level = (said.group(1) or said.group(2)).lower()
+    name = best.get("common_name") or ""
+    latin = best.get("scientific_name") or ""
+    if not name and headline:
+        name = re.split(r"\s+[—–-]\s+|\s*\(|\.\s", headline, maxsplit=1)[0].strip()
+    lookalikes = _bullets(parts.get("lookalikes") or "")
+    dangerous = next((item for item in lookalikes if _DANGER.search(item)), lookalikes[0] if lookalikes else "")
+    sources = result.get("sources") or []
+    images = result.get("images") or []
+    more = [{"label": label, "text": parts[key]} for key, label in (
+        ("why", "Why"), ("check to confirm", "Check to confirm"), ("lookalikes", "Lookalikes"), ("edible or hazardous", "Edible or hazardous?"),
+        ("useful to know", "Useful to know"), ("for a firmer id", "For a firmer ID")) if parts.get(key)]
+    return {
+        "type": "identification", "kind": category,
+        "name": (name or latin or _plain(result.get("subject") or "", 80) or "Not sure what this is")[:120],
+        "latin": latin[:120] if latin and latin.lower() != (name or "").lower() else "",
+        "sure": {"level": level if level in _SURE else "low", "words": _SURE.get(level, _SURE["low"])},
+        "headline": headline,
+        "lookalike": _plain(dangerous, 260),
+        "hazard": _plain(parts.get("edible or hazardous") or "", 320),
+        "library": {"title": str(sources[0].get("title") or ""), "url": str(sources[0].get("url") or "")} if sources else None,
+        "photo": {"title": str(images[0].get("title") or ""), "url": str(images[0].get("url") or "")} if images else None,
+        "more": more,
+    }
+
+
+async def _into_the_household_language(result: dict, owner: Optional[str]) -> None:
+    """Print in another language than the household reads is translated into it: the answer then carries
+    both. Quietly does nothing when the language cannot be told or the translator is not available."""
+    text = words_in(result)
+    if len(text) < 8:
+        return
+    try:
+        from services import household, translate
+        from services.translate import detect, languages
+        code, sure = detect.detect(text)
+        mine = household.language()
+        if not code or sure < 0.5 or code.split("-")[0] == mine.split("-")[0]:
+            return
+        done = await asyncio.wait_for(translate.translate_text(text[:4000], mine, code, owner=owner), timeout=180)
+        if done.get("same_language") or not str(done.get("text") or "").strip():
+            return
+        result["translation"] = {"from": languages.plain_name(code) or code, "from_code": code,
+                                 "to": languages.plain_name(mine) or mine, "to_code": mine, "text": str(done["text"]).strip()}
+        result["markdown"] += f"\n\n**In {result['translation']['to']}** (it is written in {result['translation']['from']}):\n\n{result['translation']['text']}"
+    except Exception as exc:
+        logger.info("the text in the photo was not translated (%s: %s)", type(exc).__name__, str(exc)[:120])
+
+
+async def identify_image(image_path: str, hint: str = "", owner: Optional[str] = None, want: str = "") -> dict:
+    """Identify, read or describe the subject of a photo — whichever it calls for. ``want`` overrides the
+    sorting (see the module docstring). One at a time: each run occupies the vision model for half a
+    minute, and queued runs would only thrash it."""
     async with _lock:
-        return await asyncio.to_thread(_identify_sync, image_path, hint, owner)
+        result = await asyncio.to_thread(_identify_sync, image_path, hint, owner, want)
+        await _into_the_household_language(result, owner)
+    result["card"] = card_for(result)
+    return result
+
+
+def for_chat(image_path: str, question: str = "", owner: Optional[str] = None) -> str:
+    """What a chat is told about a photo that came with a message, when the photo shows a living thing:
+    the identification, in place of a general description. "" for any other photo, or when the species
+    classifier is not installed — the chat then describes the picture as it always did. Blocking."""
+    try:
+        photo = vision.prepare_image(image_path)
+    except Exception:
+        return ""
+    if not likely_living(classifier.classify(photo)):
+        return ""
+    try:
+        found = _identify_sync(image_path, question, owner)
+    except IdentifyError as problem:
+        logger.info("photo in a chat not identified (%s)", problem)
+        return ""
+    if not found.get("living"):
+        return ""
+    return ("[This photo was put through the species identifier and checked against the home library. Use this "
+            "identification and its cautions as they are; do not name the species yourself.]\n" + str(found.get("markdown") or ""))

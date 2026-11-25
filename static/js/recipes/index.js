@@ -1,5 +1,10 @@
 /**
- * recipes/index.js — Recipes: a visual node editor for tool + model workflows.
+ * recipes/index.js — Automations: a visual node editor for tool + model workflows.
+ *
+ * People see this as "Automations" (one of them is "an automation"; one that
+ * runs by itself is "scheduled"). It was called Recipes until the Kitchen (food
+ * recipes) arrived; the code, ids and API paths (/api/recipes/…) keep the old
+ * name. Write "automation" in anything shown — never "recipe".
  *
  * A recipe is a directed graph. You drop nodes onto a canvas and wire them:
  *   input  → emits the run-time input text
@@ -26,7 +31,7 @@ let _blocks = { models: [], tools: [] };   // building blocks from /api/recipes/
 let _nodes = [];                            // {id, type, x, y, config}
 let _edges = [];                            // {from, to}
 let _recipeId = null;
-let _recipeName = 'Untitled recipe';
+let _recipeName = 'Untitled automation';
 let _nodeSeq = 0;
 let _running = false;
 
@@ -249,7 +254,7 @@ function _injectStyles() {
   #recipe-run-panel .recipe-run { border-top: 0; padding: 0; background: transparent; max-height: none; }
   .rp-header-btn { display: none; }
 
-  /* automate form (schedule a recipe) */
+  /* automate form (schedule an automation) */
   .rp-automate { border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 40%, var(--border, #333));
     border-radius: var(--radius-md, 12px); padding: 14px; display: flex; flex-direction: column; gap: 11px;
     background: color-mix(in srgb, var(--accent, var(--red)) 5%, transparent); }
@@ -301,33 +306,33 @@ function _build() {
   const modal = _el('div', 'modal hidden');
   modal.id = MODAL_ID;
   modal.innerHTML = `
-    <div class="modal-content" role="dialog" aria-label="Recipes">
+    <div class="modal-content" role="dialog" aria-label="Automations">
       <div class="modal-header" style="padding:8px 12px;border-bottom:1px solid var(--border,#333)">
         <h4 style="margin:0;margin-right:auto;display:flex;align-items:center;gap:7px">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="7" height="6" rx="1.5"/><rect x="2" y="14" width="7" height="6" rx="1.5"/><rect x="15" y="9" width="7" height="6" rx="1.5"/><path d="M9 7h3a2 2 0 0 1 2 2v1"/><path d="M9 17h3a2 2 0 0 0 2-2v-1"/></svg>
-          Recipes
+          Automations
         </h4>
         <button class="recipe-btn" id="recipe-to-library" hidden>← Library</button>
-        <button class="recipe-btn" id="recipe-to-jobs" hidden title="Your scheduled automations">⏰ Automations</button>
-        <button class="recipe-btn" id="recipe-to-build" hidden title="Build your own recipe in the node editor">+ Build your own</button>
-        <button class="close-btn" aria-label="Close recipes">✖</button>
+        <button class="recipe-btn" id="recipe-to-jobs" hidden title="What you have set to run by itself">⏰ Scheduled</button>
+        <button class="recipe-btn" id="recipe-to-build" hidden title="Build your own automation in the node editor">+ Build your own</button>
+        <button class="close-btn" aria-label="Close automations">✖</button>
       </div>
 
       <!-- Library front door — the default view -->
       <div id="recipe-library-view">
         <div class="lib-head">
-          <input class="lib-search" id="recipe-lib-search" placeholder="Search recipes…" spellcheck="false" />
+          <input class="lib-search" id="recipe-lib-search" placeholder="Search automations…" spellcheck="false" />
           <div class="lib-cats" id="recipe-lib-cats"></div>
         </div>
         <div id="recipe-lib-grid"></div>
         <div id="recipe-run-panel" hidden></div>
       </div>
 
-      <!-- Automations — recipes on a schedule -->
+      <!-- Scheduled — automations that run by themselves -->
       <div id="recipe-jobs-view" hidden>
         <div class="lib-head">
-          <div style="font-weight:600;font-size:14px;margin-right:auto">Automations</div>
-          <div class="lib-note">Recipes that run on a schedule and deliver the result.</div>
+          <div style="font-weight:600;font-size:14px;margin-right:auto">Scheduled</div>
+          <div class="lib-note">Automations that run on a schedule and deliver the result.</div>
         </div>
         <div id="recipe-jobs-list"></div>
       </div>
@@ -337,12 +342,12 @@ function _build() {
         <div class="recipe-toolbar">
           <input class="recipe-name-input" id="recipe-name" value="${_esc(_recipeName)}" spellcheck="false" />
           <button class="recipe-btn" id="recipe-new">New</button>
-          <button class="recipe-btn" id="recipe-starters" title="Install or load ready-made starter recipes built for what you have">✨ Starters</button>
+          <button class="recipe-btn" id="recipe-starters" title="Install or load ready-made starter automations built for what you have">✨ Starters</button>
           <button class="recipe-btn" id="recipe-open">Open…</button>
           <button class="recipe-btn" id="recipe-save">Save</button>
           <button class="recipe-btn" id="recipe-explain" title="Plain-English summary of this workflow">Explain</button>
           <span style="flex:1"></span>
-          <button class="recipe-btn" id="recipe-delete" title="Delete this recipe">Delete</button>
+          <button class="recipe-btn" id="recipe-delete" title="Delete this automation">Delete</button>
         </div>
         <div class="recipe-body">
           <div class="recipe-palette" id="recipe-palette"></div>
@@ -769,7 +774,7 @@ function _syncEmptyHint() {
 function _renderStartChooser(hint) {
   hint.replaceChildren();
   const box = _el('div', 'rc-start');
-  box.appendChild(Object.assign(_el('h4'), { textContent: 'Start a new recipe' }));
+  box.appendChild(Object.assign(_el('h4'), { textContent: 'Start a new automation' }));
   box.appendChild(Object.assign(_el('div', 'rc-sub'),
     { textContent: 'Pick a starting point — you can edit everything after.' }));
 
@@ -777,7 +782,7 @@ function _renderStartChooser(hint) {
   const tBlock = _el('div', 'rc-block');
   tBlock.appendChild(Object.assign(_el('label'), { textContent: 'From a template' }));
   const sel = _el('select');
-  sel.appendChild(new Option('Choose a recipe to start from…', ''));
+  sel.appendChild(new Option('Choose an automation to start from…', ''));
   (_catalog || []).filter(r => r.recipe).forEach(r => sel.appendChild(new Option(r.name, r.id)));
   sel.addEventListener('change', () => {
     const r = (_catalog || []).find(x => x.id === sel.value);
@@ -812,7 +817,7 @@ function _renderStartChooser(hint) {
 }
 
 async function _generateFromDescription(description, btn, msg) {
-  if (!description) { msg.textContent = 'Describe what the recipe should do.'; return; }
+  if (!description) { msg.textContent = 'Describe what the automation should do.'; return; }
   btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Generating…';
   msg.textContent = 'Designing your workflow…';
   try {
@@ -828,7 +833,7 @@ async function _generateFromDescription(description, btn, msg) {
 }
 
 async function _explainCurrent() {
-  if (!_nodes.length) { _toast('Nothing to explain yet — add or generate a recipe first.'); return; }
+  if (!_nodes.length) { _toast('Nothing to explain yet — add or generate an automation first.'); return; }
   document.querySelectorAll('.recipe-explain-box').forEach(b => b.remove());
   // Anchor to the visible body, not the scrollable canvas (which is 2400px wide).
   const canvas = document.querySelector('#recipe-editor-view .recipe-body') || _canvas();
@@ -855,7 +860,7 @@ async function _explainCurrent() {
 function _graph() {
   return {
     id: _recipeId || undefined,
-    name: _recipeName || 'Untitled recipe',
+    name: _recipeName || 'Untitled automation',
     nodes: _nodes.map(n => ({ id: n.id, type: n.type, x: n.x, y: n.y, config: n.config })),
     edges: _edges.map(e => ({ from: e.from, to: e.to })),
   };
@@ -878,7 +883,7 @@ async function _save() {
 
 async function _deleteCurrent() {
   if (!_recipeId) { _newRecipe(); return; }
-  if (!confirm('Delete this recipe?')) return;
+  if (!confirm('Delete this automation?')) return;
   try {
     await fetch(`${API}/api/recipes/${_recipeId}`, { method: 'DELETE', credentials: 'same-origin' });
   } catch (_) {}
@@ -888,7 +893,7 @@ async function _deleteCurrent() {
 
 function _newRecipe() {
   _recipeId = null;
-  _recipeName = 'Untitled recipe';
+  _recipeName = 'Untitled automation';
   _nodes = []; _edges = []; _nodeSeq = 0;
   const canvas = _canvas();
   canvas.querySelectorAll('.recipe-node').forEach(n => n.remove());
@@ -920,7 +925,7 @@ async function _startersMenu(e) {
     menu.appendChild(_el('div', 'menu-empty', 'No starters available — add a model in Settings first.'));
   } else {
     const all = _el('button');
-    all.innerHTML = `<div><b>⬇ Install all ${starters.length} to my recipes</b></div>`
+    all.innerHTML = `<div><b>⬇ Install all ${starters.length} to my automations</b></div>`
       + `<div style="font-size:10.5px;opacity:0.55">Saved so you can Open + Run them anytime</div>`;
     all.addEventListener('click', () => { menu.remove(); _installStarters(); });
     menu.appendChild(all);
@@ -955,9 +960,9 @@ async function _installStarters() {
     const n = d.count || 0;
     const sk = (d.skipped || []).length;
     if (n) {
-      _toast(`Installed ${n} starter recipe${n === 1 ? '' : 's'}${sk ? ` (${sk} already present)` : ''} — open them via “Open…”.`);
+      _toast(`Installed ${n} starter automation${n === 1 ? '' : 's'}${sk ? ` (${sk} already present)` : ''} — open them via “Open…”.`);
     } else {
-      _toast(sk ? 'Starter recipes are already installed — see “Open…”.' : 'No starters to install.');
+      _toast(sk ? 'Starter automations are already installed — see “Open…”.' : 'No starters to install.');
     }
   } catch (e) { _toast('Install failed: ' + e.message); }
 }
@@ -976,7 +981,7 @@ async function _openMenu(e) {
   menu.style.left = btn.left + 'px';
   menu.style.top = (btn.bottom + 4) + 'px';
   if (!list.length) {
-    menu.appendChild(_el('div', 'menu-empty', 'No saved recipes yet.'));
+    menu.appendChild(_el('div', 'menu-empty', 'No saved automations yet.'));
   } else {
     list.forEach(r => {
       const b = _el('button', null, `${r.name}  ·  ${r.node_count} node${r.node_count === 1 ? '' : 's'}`);
@@ -995,7 +1000,7 @@ async function _openMenu(e) {
 function _loadGraph(r) {
   _newRecipe();
   _recipeId = r.id || null;
-  _recipeName = r.name || 'Untitled recipe';
+  _recipeName = r.name || 'Untitled automation';
   document.getElementById('recipe-name').value = _recipeName;
   _nodes = (r.nodes || []).map(n => ({
     id: n.id, type: n.type,
@@ -1015,7 +1020,7 @@ function _loadGraph(r) {
 async function _load(id) {
   try {
     const res = await fetch(`${API}/api/recipes/${id}`, { credentials: 'same-origin' });
-    if (!res.ok) { _toast('Could not open recipe.'); return; }
+    if (!res.ok) { _toast('Could not open that automation.'); return; }
     _loadGraph(await res.json());
   } catch (e) { _toast('Open failed: ' + e.message); }
 }
@@ -1145,10 +1150,10 @@ async function _renderJobs() {
   try {
     const r = await fetch(`${API}/api/jobs`, { credentials: 'same-origin' });
     jobs = (await r.json()).jobs || [];
-  } catch (e) { list.replaceChildren(_el('div', 'lib-note', 'Could not load automations: ' + e.message)); return; }
+  } catch (e) { list.replaceChildren(_el('div', 'lib-note', 'Could not load what is scheduled: ' + e.message)); return; }
   list.replaceChildren();
   if (!jobs.length) {
-    list.appendChild(_el('div', 'lib-note', 'No automations yet. Run a recipe from the library, then hit “⏰ Automate” to schedule it.'));
+    list.appendChild(_el('div', 'lib-note', 'Nothing is scheduled yet. Run an automation from the library, then press “⏰ Schedule” to have it run by itself.'));
     return;
   }
   jobs.forEach(j => list.appendChild(_jobCard(j)));
@@ -1234,7 +1239,7 @@ async function _runJobNow(id, btn) {
 }
 
 async function _deleteJob(id) {
-  if (!confirm('Delete this automation?')) return;
+  if (!confirm('Stop running this on a schedule? The automation itself stays in the library.')) return;
   try {
     await fetch(`${API}/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' });
     _renderJobs();
@@ -1246,7 +1251,7 @@ function _openAutomateForm(recipe, inputEl, container) {
   const existing = container.querySelector('.rp-automate');
   if (existing) { existing.remove(); return; }
   const form = _el('div', 'rp-automate');
-  form.appendChild(Object.assign(_el('h4'), { textContent: '⏰ Automate “' + recipe.name + '”' }));
+  form.appendChild(Object.assign(_el('h4'), { textContent: '⏰ Schedule “' + recipe.name + '”' }));
 
   const nameRow = _el('div', 'rp-row');
   nameRow.appendChild(Object.assign(_el('label'), { textContent: 'Name' }));
@@ -1281,7 +1286,7 @@ function _openAutomateForm(recipe, inputEl, container) {
   form.appendChild(outRow);
 
   const actions = _el('div', 'rp-row');
-  const save = _el('button', 'recipe-btn primary', 'Create automation'); save.type = 'button';
+  const save = _el('button', 'recipe-btn primary', 'Schedule it'); save.type = 'button';
   const cancel = _el('button', 'recipe-btn', 'Cancel'); cancel.type = 'button';
   cancel.addEventListener('click', () => form.remove());
   actions.append(save, cancel);
@@ -1310,7 +1315,7 @@ function _openAutomateForm(recipe, inputEl, container) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { _toast('✗ ' + (d.detail || 'could not create')); save.disabled = false; return; }
-      _toast('Automation created — see ⏰ Automations.');
+      _toast('Scheduled — see ⏰ Scheduled.');
       form.remove();
     } catch (e) { _toast('✗ ' + e.message); save.disabled = false; }
   });
@@ -1327,7 +1332,7 @@ async function _loadCatalog() {
     _canAuthor = !!d.can_author;
   } catch (e) {
     _catalog = [];
-    console.warn('recipes catalog load failed', e);
+    console.warn('automations catalog load failed', e);
   }
 }
 
@@ -1362,7 +1367,7 @@ function _renderLibrary() {
   if (!items.length) {
     grid.appendChild(_el('div', 'lib-note', _catalog.length
       ? 'Nothing matches that search.'
-      : 'No recipes available — add a model in Settings first.'));
+      : 'No automations available — add a model in Settings first.'));
     return;
   }
   // Group by category (only when showing All).
@@ -1390,7 +1395,7 @@ function _libCard(r) {
   } else if (r.preview) {
     foot.appendChild(_el('span', 'lib-chip preview', 'Coming soon'));
     if (r.preview_note) card.title = r.preview_note;
-    const note = _el('span', 'lib-note', r.preview_note || 'Arrives with Automations.');
+    const note = _el('span', 'lib-note', r.preview_note || 'Arrives with scheduling.');
     foot.appendChild(note);
   } else if (gated) {
     const need = r.needs[0];
@@ -1439,7 +1444,7 @@ function _openRunPanel(r) {
   panel.hidden = false;
   panel.replaceChildren();
 
-  const back = _el('button', 'rp-back', '← All recipes');
+  const back = _el('button', 'rp-back', '← All automations');
   back.type = 'button';
   back.addEventListener('click', _showLibrary);
   panel.appendChild(back);
@@ -1456,7 +1461,7 @@ function _openRunPanel(r) {
   const btnRow = _el('div', 'rp-row');
   const runBtn = _el('button', 'recipe-btn primary', '▶ Run');
   runBtn.type = 'button';
-  const autoBtn = _el('button', 'recipe-btn', '⏰ Automate');
+  const autoBtn = _el('button', 'recipe-btn', '⏰ Schedule');
   autoBtn.type = 'button';
   autoBtn.title = 'Run this on a schedule';
   btnRow.append(runBtn, autoBtn);

@@ -59,7 +59,24 @@ def setup_home_routes(auth_manager=None) -> APIRouter:
         due = [r for r in mine if r["due"] and r["due"] <= soon][:6]
         all_lists = lists.all_lists(owner)
         all_trackers = trackers.all_trackers(owner)
+        # Who runs this server, by the name the family knows them by: the one
+        # to tell when something does not work. And what is set for the
+        # household, so the screen never has to ask.
+        keeper = ""
+        if auth_manager is not None:
+            for name in sorted(auth_manager.users):
+                if name != owner and auth_manager.is_admin(name):
+                    keeper = auth_manager.get_experience(name).get("display_name") or name.title()
+                    break
+        house = {"home": "", "units": "us", "language": "en", "keeper": keeper}
+        try:
+            from services import household
+            found = household.get()
+            house.update({"home": (found["home"] or {}).get("label") or "", "units": found["units"], "language": found["language"]})
+        except Exception:
+            logger.debug("household settings not read", exc_info=True)
         return {
+            "house": house,
             "me": {
                 "username": owner or "", "name": experience.get("display_name") or (owner or "").title(),
                 "assistant": experience.get("assistant_name") or "Aegis", "is_admin": is_admin,
@@ -75,6 +92,83 @@ def setup_home_routes(auth_manager=None) -> APIRouter:
                 "boards": len(boards.all_boards(owner)),
             },
         }
+
+    # ── today at home ────────────────────────────────────────────────────
+
+    @router.get("/today")
+    async def today(request: Request):
+        """Today at home in one glance — the forecast and tonight's sunset — for the first screen. Never
+        slow and never an error: with no home position, no forecast or no internet, that part is left out."""
+        owner = _owner(request)
+        out = {"weather": None, "sun": None}
+        try:
+            from services.almanac import places
+            if places.home(owner or None) is None:
+                return out
+            from src.agent_tools.almanac_tools import AlmanacProblem, sun_card, sun_moon_answer
+            try:
+                out["sun"] = sun_card(sun_moon_answer({}, owner or None)[1])
+            except AlmanacProblem:
+                pass
+            from services.almanac import weather
+            try:
+                out["weather"] = await asyncio.wait_for(asyncio.to_thread(weather.today_line, owner or None), timeout=6.0)
+            except asyncio.TimeoutError:
+                pass
+        except Exception:
+            logger.debug("today at home not made", exc_info=True)
+        return out
+
+    # ── when something did not work ──────────────────────────────────────
+
+    @router.post("/problem")
+    async def problem(request: Request, body: dict = Body(...)):
+        """"Tell <whoever runs this>": the person pressed the button under a reply that failed. The
+        administrators are told who asked, what for and the technical cause, with a link to the log —
+        the person is never shown the cause, and nothing is sent unless they press."""
+        owner = _owner(request)
+        asked = " ".join(str(body.get("asked") or "").split())[:240]
+        seen = " ".join(str(body.get("error") or "").split())[:300]
+        chat = str(body.get("session") or "")[:80]
+        from core import access
+        from services import notify
+        cause = notify.last_failure(chat) or seen or "no cause was recorded"
+        name = (owner or "Someone").title()
+        if auth_manager is not None and owner and owner in auth_manager.users:
+            name = auth_manager.get_experience(owner).get("display_name") or name
+        access.audit("problem_reported", user=owner or None, detail=f"asked: {asked or '(nothing typed)'} — cause: {cause}"[:300])
+        told = await notify.tell_admins(f"It did not work for {name}", f"They asked: “{asked[:120]}”. Cause: {cause[:200]}",
+                                        url=f"/admin#activity/{owner}" if owner else "/admin#activity", tag=f"problem-{chat or int(datetime.now().timestamp())}",
+                                        but=owner or None)
+        return {"ok": True, "phones": told, "anyone": bool([a for a in notify.admins() if a != owner])}
+
+    # ── full reports ─────────────────────────────────────────────────────
+
+    @router.get("/reports")
+    def reports(request: Request):
+        """The person's own finished reports, newest first: a title, when, and where it opens."""
+        import json as _json
+        import os as _os
+        owner = _owner(request)
+        found = []
+        try:
+            from src.constants import DEEP_RESEARCH_DIR
+            for name in _os.listdir(str(DEEP_RESEARCH_DIR)):
+                if not name.endswith(".json"):
+                    continue
+                try:
+                    with open(_os.path.join(str(DEEP_RESEARCH_DIR), name), "r", encoding="utf-8") as handle:
+                        data = _json.load(handle)
+                except (OSError, ValueError):
+                    continue
+                if (data.get("owner") or "") != (owner or "") or data.get("status") != "done" or data.get("archived"):
+                    continue
+                found.append({"id": name[:-5], "title": " ".join(str(data.get("query") or "A report").split())[:140],
+                              "finished": data.get("completed_at") or 0, "href": f"/api/research/report/{name[:-5]}"})
+        except OSError:
+            pass
+        found.sort(key=lambda item: item["finished"], reverse=True)
+        return {"reports": found[:40]}
 
     # ── lists ────────────────────────────────────────────────────────────
 

@@ -6,6 +6,11 @@ import Storage from './js/storage.js';
 import uiModule from './js/ui.js';
 import workspaceModule from './js/workspace.js';
 import codeMode from './js/codeMode.js';
+import { initReaderLinks } from './js/readerLinks.js';
+import { initPhotoButton } from './js/photoButton.js';
+import { initResearchButton } from './js/researchButton.js';
+import { initWorkings } from './js/workings.js';
+import { initReadingSettings } from './js/readingSettings.js';
 import fileHandlerModule from './js/fileHandler.js';
 import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
@@ -53,6 +58,7 @@ window.sessionModule = sessionModule;
 window.uiModule = uiModule;
 window.adminModule = adminModule;
 window.cookbookModule = cookbookModule;
+window.researchPanelModule = researchPanelModule;      // the one instance: researchButton.js opens the window through it
 
 function _isMobileChatInput() {
   return window.innerWidth <= 768;
@@ -164,8 +170,8 @@ function initRailHoverLabels() {
     'rail-documents': 'Docs',
     'rail-calendar': 'Calendar',
     'rail-compare': 'Compare',
-    'rail-recipes': 'Recipes',
-    'rail-cookbook': 'Cookbook',
+    'rail-recipes': 'Automations',
+    'rail-cookbook': 'Model Shopper',
     'rail-research': 'Research',
     'rail-email': 'Email',
     'rail-gallery': 'Gallery',
@@ -292,7 +298,7 @@ async function _syncWelcomeModelHint() {
   const hasModel = await _hasUsableChatModel();
   if (hasModel) {
     if (sub && !sub.dataset.researchOrigText) sub.textContent = 'New chat ready.';
-    if (tip) tip.textContent = 'Pick a model if you want, or just type.';
+    if (tip) tip.textContent = document.documentElement.dataset.admin === '1' ? 'Pick a model if you want, or just type.' : 'Just type, or add a photo.';
   } else {
     if (sub && !sub.dataset.researchOrigText) {
       sub.innerHTML = 'Welcome, <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">type /setup</span> to get started.';
@@ -889,7 +895,7 @@ function initializeEventListeners() {
       if (bashChk && bashChk.checked) {
         bashChk.checked = false;
         if (bashBtn) bashBtn.classList.remove('active');
-        saveToolPref('bash', (loadToggleState().mode || 'chat'), false);
+        saveToolPref('bash', (loadToggleState().mode || 'agent'), false);
       }
     }
     const s = loadToggleState(); s.research = active; saveToggleState(s);
@@ -920,7 +926,7 @@ function initializeEventListeners() {
       const _webChk = el('web-toggle');
       if (_webChk && _webChk.checked) {
         _webChk.checked = false;
-        saveToolPref('web', (loadToggleState().mode || 'chat'), false);
+        saveToolPref('web', (loadToggleState().mode || 'agent'), false);
       }
     }
     const s = loadToggleState(); s.group = active; saveToggleState(s);
@@ -1205,6 +1211,8 @@ function initializeEventListeners() {
     },
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
+    '/model-shopper': () => document.getElementById('tool-cookbook-btn')?.click(),      // its name now; /cookbook is kept for old bookmarks
+    '/automations': () => document.getElementById('tool-recipes-btn')?.click(),
     '/email':    () => {
       // Collapse the wide sidebar → icon rail (48px) so the user keeps
       // navigation visible alongside the fullscreen email view.
@@ -1330,6 +1338,15 @@ function initializeEventListeners() {
     .then(r => r.json())
     .then(d => {
       window._isAdmin = !!d.is_admin;
+      // What the assistant is called for this person: shown over a reply
+      // where the model's id would be, unless the workings are switched on.
+      try { window.__aegisAssistantName = (d.experience && d.experience.assistant_name) || 'Aegis'; } catch (_) {}
+      // The page was served already saying whether this is an administrator
+      // (data-admin on <html>, see style.css); keep it true to the account.
+      try {
+        document.documentElement.dataset.admin = (d.is_admin || d.configured === false) ? '1' : '0';
+        if (typeof window.applyUIVis === 'function' && typeof window.loadUIVis === 'function') window.applyUIVis(window.loadUIVis());
+      } catch (_) { /* cosmetic */ }
       // Code mode needs the shell, which only administrators have.
       try { codeMode.setAvailable(!!d.is_admin || d.configured === false); } catch (_) {}
       if (d.is_admin && userBarAdmin) userBarAdmin.style.display = '';
@@ -1537,6 +1554,11 @@ function initializeEventListeners() {
           ids.forEach(id => { const e = el(id); if (e) e.style.display = 'none'; });
         }
       });
+      // (The Deep Research button on the message box is not in this list on
+      // purpose: the "deep_research" flag is off by default and the sidebar
+      // entry is shown regardless — see the re-apply just below — so the
+      // button follows the sidebar entry, the account's research permission
+      // and the Appearance switch instead. researchButton.js.)
       // Re-apply the user's Appearance UI-vis preferences after the
       // features fetch finishes hiding things — otherwise an admin-
       // disabled feature leaves the sidebar entry hidden even when the
@@ -1802,7 +1824,7 @@ function initializeEventListeners() {
     const chatBtn = el('mode-chat-btn');
     if (!agentBtn || !chatBtn) return;
     const state = loadToggleState();
-    let currentMode = state.mode || 'chat';
+    let currentMode = state.mode || 'agent';      // a browser that has never chosen starts on Auto
 
     // Immediately hide bash button in chat mode on page load
     if (currentMode === 'chat') {
@@ -1850,6 +1872,18 @@ function initializeEventListeners() {
     setMode(currentMode === 'agent' && state.code === true ? 'code' : currentMode);
   })();
 
+  // A source from the offline library that a reply cites opens in the reader
+  // (in a new tab, so the chat stays where it is).
+  try { initReaderLinks({ newTab: true }); } catch (_) {}
+  // The camera button on the message box: take or choose a photo, identify it or ask about it.
+  try { initPhotoButton(); } catch (_) {}
+  // Deep Research on the message box and in "More tools": opens its window.
+  try { initResearchButton(); } catch (_) {}
+  // Steps under a reply say what was used in plain words unless the workings are switched on.
+  try { initWorkings(); } catch (_) {}
+  // Settings → Appearance → Reading aloud: the person's voice and whether answers are read by themselves.
+  try { initReadingSettings(); } catch (_) {}
+
   // ── Tool splash explainer messages (shown first 2 times per tool) ──
   const SPLASH_COUNT_KEY = 'aegis-tool-splash-counts';
   const SPLASH_MAX = 2;
@@ -1886,14 +1920,14 @@ function initializeEventListeners() {
     const btn = el(btnId);
     if (!btn) return;
     // Restore per-mode saved state for both Agent and Chat modes.
-    const mode = (loadToggleState().mode) || 'chat';
+    const mode = (loadToggleState().mode) || 'agent';
     const saved = loadToolPref(stateKey, mode);
     const chk = el(checkboxId);
     if (chk) chk.checked = saved;
     btn.classList.toggle('active', saved);
     btn.setAttribute('aria-pressed', String(saved));
     btn.addEventListener('click', () => {
-      const curMode = (loadToggleState().mode) || 'chat';
+      const curMode = (loadToggleState().mode) || 'agent';
       const chk = el(checkboxId);
       chk.checked = !chk.checked;
       btn.classList.toggle('active', chk.checked);
@@ -2166,7 +2200,7 @@ function initializeEventListeners() {
         if (webChk && webChk.checked) {
           webChk.checked = false;
           if (webBtn) webBtn.classList.remove('active');
-          saveToolPref('web', (st.mode || 'chat'), false);
+          saveToolPref('web', (st.mode || 'agent'), false);
         }
       }
 
@@ -2184,7 +2218,7 @@ function initializeEventListeners() {
           if (webChk && webChk.checked) {
             webChk.checked = false;
             if (webBtn) webBtn.classList.remove('active');
-            saveToolPref('web', (loadToggleState().mode || 'chat'), false);
+            saveToolPref('web', (loadToggleState().mode || 'agent'), false);
           }
           // Research requires chat mode — force switch from agent
           const rs = loadToggleState();
@@ -2372,24 +2406,23 @@ function initializeEventListeners() {
     checkPickerOverflow();
   })();
 
-  // TTS Mode toggle (separate from overflow IIFE for safety)
+  // "Read answers aloud" in the + menu. The choice is the person's and is kept with their
+  // account (it follows them to another device); tts-ai.js says when it changes.
   (function initTTSToggle() {
     const ttsBtn = document.getElementById('overflow-tts-btn');
     if (!ttsBtn) return;
-    try {
-      const st = loadToggleState();
-      if (st.ttsMode) {
-        ttsBtn.classList.add('active');
-        if (window.aiTTSManager) window.aiTTSManager.autoPlay = true;
-      }
-    } catch(e) {}
-
-    ttsBtn.addEventListener('click', () => {
-      const isActive = !ttsBtn.classList.contains('active');
-      ttsBtn.classList.toggle('active', isActive);
-      if (window.aiTTSManager) window.aiTTSManager.autoPlay = isActive;
-      const s = loadToggleState(); s.ttsMode = isActive; saveToggleState(s);
-      updatePlusDot();
+    const show = () => {
+      const mgr = window.aiTTSManager;
+      ttsBtn.classList.toggle('active', !!(mgr && mgr.autoPlay));
+      try { updatePlusDot(); } catch (_) {}
+    };
+    document.addEventListener('aegis-reading-changed', show);
+    show();
+    ttsBtn.addEventListener('click', async () => {
+      const mgr = window.aiTTSManager;
+      if (!mgr) return;
+      await mgr.setAuto(!mgr.autoPlay);
+      show();
     });
   })();
 
@@ -2437,7 +2470,7 @@ function initializeEventListeners() {
         if (webChk && webChk.checked) {
           webChk.checked = false;
           if (webBtn) webBtn.classList.remove('active');
-          saveToolPref('web', (loadToggleState().mode || 'chat'), false);
+          saveToolPref('web', (loadToggleState().mode || 'agent'), false);
         }
         // Research requires chat mode
         const rs2 = loadToggleState();
@@ -2606,7 +2639,7 @@ function initializeEventListeners() {
           window.__aegisSetChatMode(_restoreMode === 'chat' ? 'chat' : 'agent');
         }
         // Reapply the current mode's real defaults to the visible toggles
-        const _curMode = (Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {}).mode || 'chat';
+        const _curMode = (Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {}).mode || 'agent';
         try { applyModeToToggles(_curMode); } catch (_) {}
       }
       // If toggled off mid-chat (welcome screen hidden), hide the button
@@ -2680,12 +2713,12 @@ function initializeEventListeners() {
     'preset-mini-btn':     '#overflow-preset-btn',
     'attach-btn':          '#overflow-attach-btn',
     'identify-btn':        '#overflow-identify-btn',
-    'research-btn':        '#overflow-research-btn',
+    'research-btn':        '#overflow-research-btn, #overflow-deepresearch-btn, #composer-research-btn',
     'rail-new-chat':       '#rail-new-session',
   };
 
   // Keys hidden by default on first run (no localStorage yet)
-  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn', 'text-emojis', 'chat-fullwidth']);
+  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn', 'text-emojis', 'chat-fullwidth', 'show-workings']);
 
   // Keys that need admin to toggle off (reserved for future use)
   const UI_VIS_ADMIN_ONLY = new Set([]);
@@ -2721,6 +2754,10 @@ function initializeEventListeners() {
     applyTextEmojis(state['text-emojis'] === true);
     // Hide thinking sections toggle (show-thinking: checked=show, unchecked=hide)
     document.body.classList.toggle('hide-thinking', state['show-thinking'] === false);
+    // The workings (model, speed, context, tool names) are the administrator's
+    // to switch on; off for everyone until they do. The thinking is not one of
+    // them: it has its own switch just above, on for everyone.
+    document.body.classList.toggle('show-workings', state['show-workings'] === true && document.documentElement.dataset.admin === '1');
     // Fullwidth chat toggle (chat-fullwidth: checked=fullwidth, unchecked=big-padding
     document.body.classList.toggle('fullwidth-chat', state['chat-fullwidth'] === true);
   }
@@ -3698,6 +3735,54 @@ function startAegisApp() {
       if (searchChatModule) searchChatModule.openSearch();
     });
   }
+
+  // The Workshop group in the sidebar: folded until opened, and it stays how it was left.
+  (function initWorkshop() {
+    const toggle = el('workshop-toggle');
+    const items = el('workshop-items');
+    if (!toggle || !items) return;
+    const show = (open) => {
+      items.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+    };
+    let open = false;
+    try { open = localStorage.getItem('aegis-workshop-open') === '1'; } catch (_) { /* private mode */ }
+    show(open);
+    toggle.addEventListener('click', () => {
+      open = items.hidden;
+      show(open);
+      try { localStorage.setItem('aegis-workshop-open', open ? '1' : '0'); } catch (_) { /* fine */ }
+    });
+    const control = el('tool-control-btn');
+    if (control) control.addEventListener('click', () => { const rail = el('rail-control'); if (rail) rail.click(); });
+  })();
+
+  // What is marked for administrators cannot be reached by anyone else by a
+  // side door either: a shortcut, a typed command or a bookmark all end in a
+  // click on one of these rows.
+  document.addEventListener('click', (event) => {
+    if (document.documentElement.dataset.admin === '1') return;
+    const target = event.target && event.target.closest ? event.target.closest('[data-admin-only], .admin-only') : null;
+    if (!target) return;
+    event.stopImmediatePropagation();
+    event.preventDefault();
+  }, true);
+
+  // "Answer without tools" (Settings, Appearance): plain chat, kept as a
+  // setting now that the switch on the message box is Auto | Code.
+  (function initNoToolsSwitch() {
+    const box = el('set-no-tools');
+    if (!box) return;
+    const sync = () => { box.checked = ((Storage.loadToggleState().mode) || 'agent') === 'chat'; };
+    sync();
+    box.addEventListener('change', () => {
+      if (typeof window.__aegisSetChatMode === 'function') window.__aegisSetChatMode(box.checked ? 'chat' : 'agent');
+      if (uiModule && uiModule.showToast) uiModule.showToast(box.checked ? 'Answering without tools until you switch back' : 'Tools are back on (Auto)', 2600);
+    });
+    document.addEventListener('click', (event) => {
+      if (event.target && event.target.closest && event.target.closest('.mode-toggle, #user-bar-settings, [data-settings-tab="appearance"]')) setTimeout(sync, 60);
+    });
+  })();
 
   // Rail tool buttons — delegate to sidebar tool buttons
   const _railToolMap = {

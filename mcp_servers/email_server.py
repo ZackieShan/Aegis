@@ -484,6 +484,57 @@ def _folder_role_from_name(name: str) -> str:
     return ""
 
 
+def _select_folder(conn, folder: str, readonly: bool = True) -> str:
+    """Open a folder to read or change it, and say which one was opened ('' when there is none).
+
+    A folder asked for by what it is — "Spam", "Junk", "Trash", "Archive" — opens the
+    provider's own folder for it: on Gmail the spam folder is "[Gmail]/Spam", and asked
+    for "Spam" the server used to answer "IMAP folder not found". An assistant told that
+    three times went on to treat the newest two hundred messages of the INBOX as the spam.
+    """
+    def _open(name: str) -> bool:
+        try:
+            status, _ = conn.select(_q(name), readonly=True) if readonly else conn.select(_q(name))
+        except Exception:
+            return False
+        return status == "OK"
+
+    if _open(folder):
+        return folder
+    role = _folder_role_from_name(folder)
+    if not role:
+        return ""
+    actual = _resolve_folder(conn, folder, role)
+    if not actual or actual == folder:
+        return ""
+    return actual if _open(actual) else ""
+
+
+# Deleting more than this many messages in one call needs the person's say-so first
+# (see the bulk_email tool). Twenty covers "delete those newsletters"; two hundred
+# messages gone on a misunderstanding is what it is there to stop.
+BULK_DELETE_ASK_ABOVE = 20
+
+
+def _bulk_delete_needs_asking(count: int, confirmed_count) -> str:
+    """What to answer instead of deleting, or '' when the delete may go ahead."""
+    if count <= BULK_DELETE_ASK_ABOVE:
+        return ""
+    try:
+        confirmed = int(confirmed_count)
+    except (TypeError, ValueError):
+        confirmed = -1
+    if confirmed == count:
+        return ""
+    return (
+        f"Nothing was deleted. That is {count} messages, and deleting more than {BULK_DELETE_ASK_ABOVE} at once "
+        "needs the person's say-so first. Tell them how many messages it is and what they are (who they are from, "
+        "a few of the subjects, which folder), and ask whether to delete them. Only if they say yes, call bulk_email "
+        f"again with the same uids and confirmed_count: {count}. If you are not sure these are the messages they "
+        "meant, say so instead of deleting."
+    )
+
+
 def _decode_header(raw):
     """Decode MIME encoded header."""
     if not raw:
@@ -717,8 +768,7 @@ def _list_emails(folder="INBOX", max_results=20, unresponded_only=False,
     conn = None
     try:
         conn = _imap_connect(account)
-        select_status, _ = conn.select(_q(folder), readonly=True)
-        if select_status != "OK":
+        if not _select_folder(conn, folder, readonly=True):
             raise ValueError(f"IMAP folder not found: {folder}")
 
         if unread_only and unresponded_only:
@@ -1692,7 +1742,8 @@ def _bulk_set_flag(uids, folder, flag, add=True, account=None):
     conn = _imap_connect(account)
     touched = []
     try:
-        conn.select(_q(folder))
+        if not _select_folder(conn, folder, readonly=False):
+            return 0
         op = "+FLAGS" if add else "-FLAGS"
         msg_set = ",".join(str(u) for u in uids)
         try:
@@ -1719,7 +1770,8 @@ def _bulk_move(uids, source_folder, dest_folder, account=None, role: str = ""):
     conn = _imap_connect(account)
     moved = 0
     try:
-        conn.select(_q(source_folder))
+        if not _select_folder(conn, source_folder, readonly=False):
+            return 0
         dest_folder = _resolve_folder(conn, dest_folder, role or _folder_role_from_name(dest_folder))
         msg_set = ",".join(str(u) for u in uids)
         try:
@@ -2069,7 +2121,11 @@ async def list_tools() -> list[Tool]:
                 "'mark all as read', 'archive these', 'delete all spam', etc. Select "
                 "messages either by an explicit `uids` list OR by `all_unread: true` "
                 "(operates on every unread message in the folder). Far better than "
-                "calling mark_email_read / archive_email once per message."
+                "calling mark_email_read / archive_email once per message. "
+                "Spam is in the folder 'Spam' (it opens the provider's own spam folder): list THAT "
+                "folder and act on its messages — never treat INBOX messages as spam because the spam "
+                "folder could not be opened. Deleting more than 20 messages in one call needs the "
+                "person's say-so: say how many and what they are, ask, and only then pass `confirmed_count`."
             ),
             inputSchema={
                 "type": "object",
@@ -2091,6 +2147,10 @@ async def list_tools() -> list[Tool]:
                     },
                     "folder": {"type": "string", "description": "IMAP folder", "default": "INBOX"},
                     "permanent": {"type": "boolean", "description": "For delete: expunge instead of moving to Trash.", "default": False},
+                    "confirmed_count": {
+                        "type": "integer",
+                        "description": "For delete of more than 20 messages: the number of messages, passed ONLY after the person was told how many and which, and said yes.",
+                    },
                     **ACCOUNT_PROP,
                 },
                 "required": ["action"],
@@ -2499,6 +2559,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 uids = _search_uids(folder, "UNSEEN", account=acct)
             if not uids:
                 return [TextContent(type="text", text="No messages selected (pass uids or all_unread=true).")]
+            if action == "delete":
+                _ask_first = _bulk_delete_needs_asking(len(uids), arguments.get("confirmed_count"))
+                if _ask_first:
+                    return [TextContent(type="text", text=_ask_first)]
             requested_n = len(uids)
             changed_n = 0
             try:

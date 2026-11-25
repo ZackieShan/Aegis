@@ -57,12 +57,15 @@ Five things set it apart:
 | **Models** | llama.cpp + llama-swap serving any GGUF through one endpoint with native tool calls, a hardware-aware context tuner, per-model thinking / temperature settings, optional cloud endpoints | [Windows](docs/engine-setup.md) · [Linux](docs/engine-setup-linux.md) |
 | **Memory** | Facts with evidence, topic dossiers, conversation digests and a profile, kept current in the background; a page to inspect, trace, correct and delete all of it; Nobody mode | [Guide](docs/memory-and-users.md) |
 | **People & access** | Separate accounts, roles, per-person app and assistant manner, PINs, an administrator's console with an activity log | [Guide](docs/memory-and-users.md#people-roles-and-each-persons-app) |
-| **Home screen** | A simple phone screen for non-technical people: chat, lists, reminders (with phone notifications), trackers, boards | [Guide](docs/home.md) |
+| **Home screen** | A simple phone screen for non-technical people: chat by typing, voice or photo; answers as cards; outings and dinners planned as one job; lists, reminders (with phone notifications), trackers, boards | [Guide](docs/home.md) |
 | **Offline library** | Kiwix collections (Wikipedia, medicine, how-to, Stack Exchange) plus a page-level index of PDF manuals; used automatically when the internet is down | [Guide](docs/offline-library.md) |
+| **Shelves and your own files** | Everything filed as category › shelf (cookbooks by style, history and literature by era, manuals by skill); PDFs and e-books copied into the library folder are read in, filed and searchable; a search can be kept to one shelf, and novels stay out of factual lookups | [Guide](docs/library-shelves.md) |
+| **Translate** | `/translate`: type, speak or photograph something and read or hear it in another language — 160 languages, on your own machine, with a dedicated translation model beside the chat model | [Guide](docs/translate.md) |
+| **Almanac** | `/almanac`: exact answers worked out on the machine instead of recalled by the model — unit conversion (250 units), map positions (lat/long, UTM, MGRS, distance and bearing), sunrise, sunset, twilight and moon for any place and day, calendar arithmetic. Four tools the assistant calls by itself | [Guide](docs/almanac.md) |
 | **Photo identification** | `/identify`: species classifier + local vision model + the library's own notes on lookalikes | [Guide](docs/offline-library.md#photo-identification) |
 | **Workbench** | Projects in git, apps kept running as services with an address, commands on other machines over SSH, hand-offs to other coding agents | [Guide](docs/workbench.md) |
 | **Agents** | Tool-using agent mode, toolboxes, Deep Research, browser automation, skills, MCP servers | |
-| **Recipes** | One-click workflows you can schedule or build by describing them | [Guide](docs/recipes.md) |
+| **Automations** | One-click workflows you can schedule or build by describing them | [Guide](docs/automations.md) |
 | **Studio** | Local image, video and music generation, an editor, a movie maker, voice cloning | [Guide](docs/studio.md) |
 | **Everyday** | Documents, email triage, notes, tasks, calendar, web search | |
 | **Operations** | Control Center, Doctor self-check, local traces, backup and restore | [Backup](docs/backup-restore.md) |
@@ -119,8 +122,8 @@ controls: kinds of information never to keep, export everything, forget everythi
 
 ## It fits everyone in the house
 
-**A home screen for people who do not want an AI workspace.** Give someone the *Household*
-role and signing in lands them on one plain screen: a chat box and four things.
+**A home screen for people who do not want an AI workspace.** Everyone who does not run
+the server lands on one plain screen: a chat box and four things.
 
 > *Add bread and butter to my groceries, and remind me to call the vet tomorrow at 3.*
 
@@ -128,6 +131,15 @@ It does it, says so in a sentence, and offers a button to open the list. Lists a
 reminders (once or repeating, with notifications on the phone), trackers (a habit, an
 amount toward a daily goal, a 1–5 rating) and boards (photos, links and notes around an
 idea). No models, modes or settings anywhere.
+
+Answers come in the shape of the thing asked. *Will it rain tomorrow?* is a forecast card
+in under a second, with no model round. A photo is sorted for the person — a plant or a
+bug is identified against the offline library, a label is read, anything else described.
+*Plan a day hike for Saturday* comes back with when to turn back, the forecast, what to
+watch for with the manual page beside each warning, a saved packing list and a reminder;
+*what can I make with chicken and rice?* with a recipe from the cookbooks, set out to cook
+a step at a time. It can be spoken to, and it says plainly when it is waking a model,
+where an answer came from, and what to do when something fails.
 
 **Roles and each person's app.** `/admin` is the administrator's console: add people,
 give each a role (Administrator, Member, Household, Guest, or your own), choose which app
@@ -167,13 +179,35 @@ article or manual page:
   this link"*, or *"go out and find the official guide on … and add it"*. Each document is
   read page by page (OCR for scans) and is searchable in the next answer.
 
-**Identify from a photo.** `/identify` (or *+ → Identify photo*) takes a picture of a
+**Read it like a book.** Anything in the library opens in the **Reader** (`/read`): one
+quiet column on your phone, your choice of type and paper, your place remembered. A
+manual's pages are shown as flowing text, with the printed page a tap away for the figures.
+Select a passage to highlight it, write a note beside it, or press **Remember** — it becomes
+a note in Aegis's memory of that topic, with a link back to the page, and can come up in
+later conversations.
+
+**Cook from it.** The **Kitchen** (`/kitchen`) sets a recipe out for cooking: the original
+wording, the measures worked out for today, and the method one step at a time with timers.
+Hand it a recipe from 1879 and *"3 teacups sugar … bake in a quick oven"* comes back as
+≈ 1 ½ cups (300 g) and 400–450 °F — marked as the estimates they are, with the old wording
+beside them.
+
+> *Here's a recipe for jumbles from an 1879 cookbook. Help me follow along.*
+
+<p align="center">
+  <img src="docs/media/reader-shelf.png" alt="The reader's shelf: keep reading, kept, highlights" width="200">
+  <img src="docs/media/reader-article.png" alt="An article with a highlight and the bar that appears over a selection" width="200">
+  <img src="docs/media/reader-document.png" alt="A document: the printed page above its text" width="200">
+  <img src="docs/media/kitchen-recipe.png" alt="A recipe from 1879 set out in modern measures" width="200">
+</p>
+
+**Identify from a photo.** The camera button on the message box (or `/identify`) takes a picture of a
 plant, mushroom, insect, spider, snake, track or object. A species classifier and a local
 vision model name the likely match; the answer lists what to check in hand, the dangerous
 lookalikes, and what the library says. It also reads labels and pages. Identification from
 a photo is a lead, not a verdict — the answer says so where it matters.
 
-→ [Offline library and photo identification](docs/offline-library.md)
+→ [Offline library and photo identification](docs/offline-library.md) · [Shelves and your own files](docs/library-shelves.md) · [Reader and Kitchen](docs/reader.md) · [Translate](docs/translate.md) · [Almanac](docs/almanac.md)
 
 ## It builds, hosts and operates
 
@@ -182,7 +216,7 @@ Agent mode is a development and operations seat you can use from anywhere:
 > *"Build me a workout tracker and host it."* · *"Restart the tracker and show me its log."*
 > · *"How much disk is free on my Windows PC?"* · *"Have Claude Code add login to it."*
 
-- **Code mode** — the third position of the mode switch (Agent · Chat · Code): a coding
+- **Code mode** — the third position of the mode switch (Auto · Chat · Code): a coding
   agent that reads, edits, runs and reports. It works on the server unless you pick another
   of your machines in the composer; then its shell and file tools act on that computer
   (PowerShell on Windows).
@@ -227,10 +261,16 @@ You choose how strong the models are, and the app helps you fit them to the mach
 - **Models are just files.** Drop any GGUF into `models/` — a 2 GB quantized model for a
   laptop, a 60 GB one for a large-memory box. Every feature works the same; speed and
   quality scale.
-- **Cookbook scans your hardware** and rates every model against it — fit, memory, context
+- **Model Shopper scans your hardware** and rates every model against it — fit, memory, context
   and expected speed — then downloads and serves the one you pick.
 - **The engine sizes itself — or you do.** `/engine` reads each model's real memory cost
   and what is free, sets every context window, and lets you override any of them. No YAML.
+- **Auto decides how to answer.** The default mode needs no choosing: a greeting or a
+  rewording job gets a plain, quick answer; anything that could use a tool keeps its tools;
+  a hard question gets more thinking; and each reply says which it was. One big model on
+  one GPU is the normal case, so Auto turns the *effort* up and down rather than swapping
+  models — unless you name a model for coding or for deep work.
+  → [How Auto decides](docs/auto.md)
 - **CPU-only works**, and so do very different machines: the screenshots below were made on
   a desktop with one RTX 4090; the same code runs a 120B open-weight model at 40–50
   tokens per second on a 128 GB unified-memory mini PC.
@@ -245,7 +285,7 @@ response length.
 
 **Put agents to work.** Toolboxes (OSINT recon, market analysis, network troubleshooting,
 web crawl) · Deep Research with source reading and a cited report · browser automation on
-real pages · recipes on a schedule or when new email arrives · MCP servers and teachable
+real pages · automations on a schedule or when new email arrives · MCP servers and teachable
 skills.
 
 **Create.**
@@ -273,8 +313,7 @@ and screenshots.
 tasks, calendar (reminders, scheduled agent tasks, CalDAV) and web search.
 
 **Run the place.** Control Center with live status for everything · Doctor (`/doctor`)
-with guarded one-click fixes · local traces (`/traces`) · knowledge-graph memory
-(`/graph`) · backup and restore · eighteen themes and a customizer · a few Y2K easter eggs
+with guarded one-click fixes · local traces (`/traces`) · backup and restore · eighteen themes and a customizer · a few Y2K easter eggs
 (`/bonzi`, `/winamp`, `/win98`).
 
 Type `/` in the chat box to see every command.
@@ -335,7 +374,7 @@ Account*). Native installs, GPU notes, HTTPS and configuration are in the
 
 | To add | Do |
 |---|---|
-| Local models | The engine guide for your OS, then *Cookbook* to pick models that fit |
+| Local models | The engine guide for your OS, then *Model Shopper* to pick models that fit |
 | Another person | `/admin` → *Add person*: pick a role (Household for the simple home screen) — [guide](docs/memory-and-users.md#people-roles-and-each-persons-app) |
 | The offline library | Install Kiwix, choose collections, index — [guide](docs/offline-library.md#setting-it-up) |
 | Building and hosting apps | [Workbench guide](docs/workbench.md) |
@@ -352,15 +391,23 @@ coding, vision, image and video models — with a live "loaded" indicator:
 
 ![Model picker with locally served models](docs/media/models.png)
 
+**Each model says what it is for.** Under every name in the picker is a line on what the
+model is and what to use it for, and the search box looks there too — type *vision*,
+*coding* or *fast*. With nothing written, the line says only what the name says (a coding
+model, 80B parameters, an uncensored build); an administrator can replace it with the
+pencil — the measured speed on this machine, the role the model plays here.
+
+<img src="docs/media/model-notes.png" alt="The model picker: under each model, what it is and what it is best for" width="340">
+
 **The engine tunes itself.** `/engine` reads each GGUF's real KV-cache cost and your free
 memory, then right-sizes every context window — no YAML editing, no restart:
 
 ![The /engine command showing per-model context recommendations](docs/media/engine.png)
 
-**Cookbook.** Scans your hardware and rates every model against it — fit, memory, context
+**Model Shopper.** Scans your hardware and rates every model against it — fit, memory, context
 and expected speed — then downloads and serves the one you pick:
 
-![Cookbook hardware scan and model fit table](docs/media/cookbook.png)
+![Model Shopper hardware scan and model fit table](docs/media/cookbook.png)
 
 **Control Center.** One dashboard for the engine, memory, models, agents and every
 capability's health:
@@ -375,7 +422,9 @@ what it knows about you, alongside teachable skills. The profile is written from
 ![Brain panel with long-term memories](docs/media/brain.png)
 
 **Deep Research.** An agent runs rounds of web search, reads the sources and writes a cited
-report — here 16 rounds over 117 URLs on a local model, ending in a visual report:
+report — here 16 rounds over 117 URLs on a local model, ending in a visual report. Start one
+with the microscope button beside the message box (what you have typed becomes the topic),
+or just ask: *"do deep research on …"*.
 
 ![Deep Research reading sources with a live progress graph](docs/media/research-progress.png)
 
@@ -391,26 +440,28 @@ buffer you can edit with follow-up instructions:
 
 ![Code Canvas with generated Python](docs/media/code-canvas.png)
 
-### Recipes
+### Automations
 
-**A workflow library you run, schedule and build.** Pick a recipe, type an input, hit Run —
-no node wiring:
+**A workflow library you run, schedule and build.** Pick an automation, type an input, hit
+Run — no node wiring:
 
-![Recipes library of one-click workflows](docs/media/recipes-library.png)
+![Automations library of one-click workflows](docs/media/recipes-library.png)
 
-**Turn any recipe into an automation.** A recipe plus a trigger — daily, every N hours, a
-cron, or *when new email arrives* — plus a delivery becomes a job that runs itself:
+**Have it run by itself.** An automation plus a trigger — daily, every N hours, a cron, or
+*when new email arrives* — plus a delivery becomes a schedule that runs on its own:
 
-![Recipes automations — recipes on a schedule](docs/media/recipes-automations.png)
+![Scheduled — automations that run by themselves](docs/media/recipes-automations.png)
 
 **Build your own by describing it.** Pick a template or describe what you want and a local
 model drafts the node graph; **Explain** summarizes any workflow in plain English:
 
-![Recipes editor — start from a template or describe what you want](docs/media/recipes-editor.png)
+![Automations editor — start from a template or describe what you want](docs/media/recipes-editor.png)
 
-![Recipes walkthrough — run, schedule, build](docs/media/recipes-howto.gif)
+![Automations walkthrough — browse, schedule, build](docs/media/recipes-howto.gif)
 
-> Full walkthrough: the **[Recipes guide](docs/recipes.md)**.
+> Full walkthrough: the **[Automations guide](docs/automations.md)**. (Automations used to be
+> called *Recipes*, and the Model Shopper *Cookbook* — both were renamed so that those words
+> only mean cooking, in the [Kitchen](docs/reader.md).)
 
 ### Studio
 
@@ -475,10 +526,13 @@ tagged by capability and best use:
 
 ![Studio style preset editor](docs/media/media-studio-styles.png)
 
-**Create, watch, stitch.** Generate in place, follow every long job in the queue — chat is
-answered by a CPU model while a render holds the GPU — and stitch clips into a film:
+**Create, watch, stitch.** The Studio opens on one question — *what would you like to
+make?* — a picture, a video, a song or a voice. Describe it, press one button, and the work
+shows its progress and then its result right there, with what to do next (animate it, change
+it, make another). Everything else is one tap away under More. Chat is answered by a CPU
+model while a render holds the GPU.
 
-![Create — prompt, model, style, duration in one panel](docs/media/studio-create.png)
+![Create — pick what to make, describe it, one button](docs/media/studio-create.png)
 
 ![The queue during a live render — chat protected on a CPU model](docs/media/studio-queue.png)
 

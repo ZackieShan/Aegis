@@ -103,6 +103,19 @@ PLAN_MODE_READONLY_TOOLS = {
     "web_search",
     "web_fetch",
     "library_search",
+    "library_browse",
+    "translate",
+    "convert_units",
+    "map_position",
+    "sun_moon",
+    "date_math",
+    "weather",
+    "identify_photo",
+    "news_search",
+    "find_places",
+    "medicine_info",
+    "paper_search",
+    "ask_wolfram",
     "search_chats",
     "list_models",
     "list_sessions",
@@ -148,7 +161,7 @@ PLAN_MODE_READONLY_TOOLS = {
 _PLAN_MODE_KNOWN_MUTATORS = {
     "write_file", "create_document", "edit_document", "update_document",
     "manage_projects", "manage_apps", "manage_hosts", "delegate_agent", "manage_library",
-    "manage_lists", "manage_reminders", "manage_trackers", "manage_boards",
+    "manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_kitchen",
     "suggest_document", "manage_documents", "create_session", "manage_session",
     "send_to_session", "pipeline", "manage_memory", "manage_skills",
     "manage_tasks", "manage_notes", "manage_endpoints", "manage_mcp",
@@ -226,6 +239,49 @@ def email_tool_policy_names(tool_name: str) -> frozenset:
     return frozenset((tool_name,))
 
 
+# MCP servers that stay with administrators whatever the sharing switch says: they hold one
+# person's mail, memory or documents, or they act on the server and its network.
+UNSHAREABLE_MCP = frozenset({"email", "memory", "rag", "image_gen", "troubleshoot", "builtin_browser"})
+MCP_SHARED_SETTING = "mcp_shared_servers"
+
+
+def mcp_server_of(tool_name: Optional[str]) -> str:
+    """The server id in ``mcp__<server>__<tool>``, or '' when the name is not of that shape."""
+    if not isinstance(tool_name, str):
+        return ""
+    parts = tool_name.split("__", 2)
+    return parts[1] if len(parts) == 3 and parts[0] == "mcp" and parts[1] and parts[2] else ""
+
+
+def shared_mcp_servers() -> Set[str]:
+    """The MCP servers an administrator opened to every account (Settings → Integrations).
+
+    Empty unless an administrator chose otherwise, so out of the box MCP stays theirs alone. Any
+    failure reading the setting also means "none": this is part of a security gate.
+    """
+    try:
+        from src.settings import get_setting
+        kept = get_setting(MCP_SHARED_SETTING, []) or []
+        if not isinstance(kept, (list, tuple, set)):
+            return set()
+        return {item for item in kept if isinstance(item, str) and item and "__" not in item} - UNSHAREABLE_MCP
+    except Exception as exc:
+        logger.warning("Could not read which MCP servers are shared; treating none as shared: %s", exc)
+        return set()
+
+
+def mcp_hidden_from_others(all_tools, shared: Set[str]) -> dict:
+    """For an account that is not an administrator: ``{server_id: {tool name, …}}`` of every MCP tool
+    outside the servers opened to everyone — what the agent loop adds to its hidden-tools map, so those
+    tools are neither offered nor run. ``all_tools`` is ``McpManager.get_all_tools()``."""
+    hidden: dict = {}
+    for tool in all_tools or []:
+        server = tool.get("server_id")
+        if server not in shared and tool.get("name"):
+            hidden.setdefault(server, set()).add(tool["name"])
+    return hidden
+
+
 def is_public_blocked_tool(tool_name: Optional[str]) -> bool:
     """Return True when a non-admin/public user must not execute this tool.
 
@@ -233,12 +289,20 @@ def is_public_blocked_tool(tool_name: Optional[str]) -> bool:
     name can't be matched against the blocklist or the ``mcp__`` namespace, so
     it is treated as blocked rather than silently allowed through. ``None`` /
     empty string means there is no tool to gate.
+
+    MCP tools are an administrator's, except those of a server the
+    administrator has opened to everyone (``shared_mcp_servers``).
     """
     if tool_name is None or tool_name == "":
         return False
     if not isinstance(tool_name, str):
         return True
-    return tool_name in NON_ADMIN_BLOCKED_TOOLS or tool_name.startswith("mcp__")
+    if tool_name in NON_ADMIN_BLOCKED_TOOLS:
+        return True
+    if tool_name.startswith("mcp__"):
+        server = mcp_server_of(tool_name)
+        return not server or server not in shared_mcp_servers()
+    return False
 
 
 def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
@@ -271,9 +335,11 @@ def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
         return False
 
 
-# Tools that act on the caller's own lists, reminders, trackers and boards.
-# Open to non-administrators unless their role leaves the "home" group out.
-HOME_TOOLS = frozenset({"manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes"})
+# Tools that act on the caller's own lists, reminders, trackers, boards and
+# cookbook. Open to non-administrators unless their role leaves the "home"
+# group out.
+HOME_TOOLS = frozenset({"manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes",
+                        "manage_kitchen"})
 
 
 def owner_uses_home_screen(owner: Optional[str]) -> bool:

@@ -13,7 +13,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple
 
-from . import config, kiwix, manuals
+from . import catalogue, config, kiwix, manuals, shelves
 from .text import coverage, query_terms
 
 logger = logging.getLogger(__name__)
@@ -121,16 +121,63 @@ def _search_relaxed(query: str, count: int, books: Optional[List[str]]) -> List[
     return hits[:count]
 
 
-def _article_hits(query: str, count: int) -> List[dict]:
+def _file(hits: List[dict]) -> List[dict]:
+    """Say where each hit is shelved: ``shelf`` (always), and for a book or a
+    document filed one by one its ``by`` (author), ``dates``, ``form`` and
+    one-line ``about``. Also ``source_kind`` — encyclopedia, manuals, questions
+    and answers… — so the reader of the results knows what it is looking at.
+    Hits inside books the owner's cut leaves out are dropped (in place)."""
+    for hit in hits:
+        if "entry" not in hit:
+            hit["entry"] = kiwix.split_content_path(hit.get("path", ""))[1]
+    known = catalogue.places((hit.get("book", ""), catalogue.item_key(hit.get("book", ""), hit.get("entry", ""))) for hit in hits)
+    kept = []
+    for hit in hits:
+        place = catalogue.place_for(hit.get("book", ""), hit.get("entry", ""), known)
+        if not place.get("kept", True):
+            continue                                   # a book below the owner's cut: off the shelves, out of searches
+        hit["shelf"] = place["shelf"]
+        hit["source_kind"] = place["kind"]
+        for key, name in (("author", "by"), ("dates", "dates"), ("form", "form"), ("note", "about")):
+            if place.get(key):
+                hit[name] = place[key]
+        kept.append(hit)
+    hits[:] = kept
+    return hits
+
+
+def _article_hits(query: str, count: int, place: str = "") -> List[dict]:
+    """Kiwix hits. With ``place`` only what is shelved there: the search goes
+    to the collections that hold something on that shelf and each hit is
+    checked against its own shelf. With none, everything but imaginative
+    writing — a how-to question should not be answered out of a novel."""
     books = kiwix.list_books()
+    if place:
+        holding = set(catalogue.books_with(place))
+        wanted = []
+        for book in books:
+            default = shelves.collection_shelf(book["id"])
+            if shelves.under(default, place) or book["id"] in holding or \
+                    (shelves.is_gutenberg(book["id"]) and shelves.under(place, default)):
+                wanted.append(book["id"])
+        if not wanted:
+            return []
+        hits = _file(_search_relaxed(query, min(max(count * 4, 24), 50), wanted))
+        hits = [hit for hit in hits if shelves.under(hit["shelf"], place)]
+        for hit in hits:
+            hit["kind"] = "article"
+        return hits[: count * 2]
+    books = [book for book in books if not shelves.is_fiction(shelves.collection_shelf(book["id"]))]
     core = [b["id"] for b in books if b["id"].startswith(_CORE_PREFIXES)]
     other = [b["id"] for b in books if not b["id"].startswith(_CORE_PREFIXES)]
+    # With a cut in force some hits will be dropped below: ask for more of the "other" ones.
+    wide = count * 3 if catalogue.keeping()["min_rating"] > 0 else count
     if len(books) <= _SPLIT_ABOVE or not core or not other:
-        hits = _search_relaxed(query, count, None)
+        hits = _search_relaxed(query, wide, [b["id"] for b in books] if len(books) < len(kiwix.list_books()) else None)
     else:
         with ThreadPoolExecutor(max_workers=2) as pool:
             core_job = pool.submit(_search_relaxed, query, count, core)
-            other_job = pool.submit(_search_relaxed, query, count, other)
+            other_job = pool.submit(_search_relaxed, query, min(wide, 50), other)
             core_hits, other_hits = core_job.result(), other_job.result()
         # Two encyclopedia results for each one from elsewhere.
         hits = []
@@ -141,18 +188,28 @@ def _article_hits(query: str, count: int) -> List[dict]:
             if not block:
                 break
             hits.extend(block)
+    hits = [hit for hit in _file(hits) if not shelves.is_fiction(hit["shelf"])]
     for hit in hits:
         hit["kind"] = "article"
     return hits[: count * 2]
 
 
-def library_search(query: str, count: int = 8, scope: str = "all") -> List[dict]:
-    """Search the offline library. ``scope``: ``all`` | ``articles`` | ``manuals``."""
+def library_search(query: str, count: int = 8, scope: str = "all", shelf: str = "") -> List[dict]:
+    """Search the offline library. ``scope``: ``all`` | ``articles`` | ``manuals``.
+
+    ``shelf`` keeps the search to one shelf or category (``Cooking``,
+    ``History/Ancient world`` — see :mod:`.shelves`; a name that fits nothing
+    is ignored). Without it everything is searched except imaginative
+    writing, which is only looked through when its shelf is asked for. Every
+    hit says which ``shelf`` it is on."""
     query = (query or "").strip()
     if not query or not config.enabled():
         return []
     scope = scope if scope in VALID_SCOPES else "all"
     count = max(1, min(int(count or 8), 25))
+    place = shelves.resolve(shelf) if shelf else ""
+    if place == shelves.UNSORTED:
+        place = ""
 
     articles: List[dict] = []
     manual_hits: List[dict] = []
@@ -160,10 +217,11 @@ def library_search(query: str, count: int = 8, scope: str = "all") -> List[dict]
     with ThreadPoolExecutor(max_workers=3) as pool:
         jobs = {}
         if scope in ("all", "articles") and kiwix.available():
-            jobs["articles"] = pool.submit(_article_hits, query, count)
-            jobs["titles"] = pool.submit(_title_hits, query)
+            jobs["articles"] = pool.submit(_article_hits, query, count, place)
+            if not place or shelves.under("Reference/Encyclopedias", place) or shelves.under("Medicine/Medical references", place):
+                jobs["titles"] = pool.submit(_title_hits, query)
         if scope in ("all", "manuals"):
-            jobs["manuals"] = pool.submit(manuals.search, query, count)
+            jobs["manuals"] = pool.submit(lambda: manuals.search(query, count, shelf=place, skip_fiction=not place))
         for name, job in jobs.items():
             try:
                 value = job.result(timeout=40)
@@ -178,9 +236,13 @@ def library_search(query: str, count: int = 8, scope: str = "all") -> List[dict]
                 manual_hits = value
 
     book_names = kiwix.book_titles() if (articles or manual_hits or titles) else {}
+    own = {config.ADDED_BOOK: "Added to the library", config.FILES_BOOK: "Your own files"}
     for hit in manual_hits:
-        hit["book_title"] = book_names.get(
-            hit["book"], "Added to the library" if hit["book"] == config.ADDED_BOOK else hit["book"])
+        hit["book_title"] = book_names.get(hit["book"], own.get(hit["book"], hit["book"]))
+    _file(manual_hits)
+    _file(titles)
+    if place:
+        titles = [hit for hit in titles if shelves.under(hit["shelf"], place)]
 
     # Interleave the two sources, then reorder by how much of the question
     # each hit covers: terms in the title count most ("Hypothermia" beats a
@@ -229,12 +291,12 @@ def library_search(query: str, count: int = 8, scope: str = "all") -> List[dict]
 
 
 def owns_url(url: str) -> bool:
-    return kiwix.owns_url(url) or config.is_added_url(url)
+    return kiwix.owns_url(url) or config.is_local_url(url)
 
 
 def fetch_content(url: str, query: str = "", budget: int = 4000) -> dict:
     """Quotable text for a library link (article passages or manual pages)."""
-    if config.is_added_url(url):
+    if config.is_local_url(url):
         return manuals.passage(url, budget=budget)
     if not kiwix.owns_url(url):
         return {"url": url, "title": "", "content": "", "success": False,
@@ -253,6 +315,24 @@ def collection_summary(limit: int = 12) -> str:
     return f"{text}, and {extra} more" if extra > 0 else text
 
 
+def _where_line(hit: dict) -> str:
+    """``Source:`` for one hit — the collection, what kind of thing it is, and
+    for a book who wrote it and when."""
+    where = hit.get("book_title") or hit.get("book") or ""
+    kind = "manual page" if hit.get("kind") == "manual" else (hit.get("source_kind") or "article")
+    if hit.get("kind") == "manual" and hit.get("book") == config.FILES_BOOK:
+        kind = "page of a document"
+    line = f"{where} ({kind})"
+    who = hit.get("by") or ""
+    if who:
+        line += f" — by {who}" + (f", {hit['dates']}" if hit.get("dates") else "")
+    elif hit.get("dates"):
+        line += f" — {hit['dates']}"
+    if hit.get("form"):
+        line += f" — {hit['form']}"
+    return line
+
+
 def format_for_model(
     query: str,
     results: List[dict],
@@ -260,6 +340,7 @@ def format_for_model(
     budget: int = 3500,
     offline_note: bool = False,
     max_chars: Optional[int] = None,
+    shelf: str = "",
 ) -> Tuple[str, List[dict]]:
     """Render hits (+ the text of the first ``fetch`` of them) as the block the
     model reads. Returns ``(text, sources)`` with ``sources`` shaped for the
@@ -268,31 +349,45 @@ def format_for_model(
     ``max_chars`` is the caller's hard cap on the whole block (agent tool
     output is truncated at ``MAX_OUTPUT_CHARS``): the excerpt budget shrinks
     to fit under it, so the closing instructions are never cut off."""
+    place = shelves.resolve(shelf) if shelf else ""
+    if place == shelves.UNSORTED:
+        place = ""
     if not results:
-        return (
-            f"No matches in the offline library for: {query}\n"
-            "Try fewer or different keywords (the library is searched by keyword, not by meaning).",
-            [],
-        )
+        where = f" on the shelf {shelves.display(place)}" if place else ""
+        tip = ("Try fewer or different keywords (the library is searched by keyword, not by meaning)"
+               + ("; or search without a shelf." if place else
+                  ". Novels, poetry and plays are only searched with shelf \"Literature\"."))
+        return f"No matches in the offline library{where} for: {query}\n{tip}", []
     sources = [{"url": hit["url"], "title": hit["title"]} for hit in results]
 
     head = ["=" * 70, "OFFLINE LIBRARY RESULTS (local reference library, no internet needed)",
             f"Query: {query}"]
+    if place:
+        head.append(f"Shelf searched: {shelves.display(place)} only")
+    elif shelf:
+        head.append(f"There is no shelf called \"{shelf}\": the whole library was searched instead. "
+                    "Categories: " + ", ".join(shelves.categories()) + ".")
     if offline_note:
         head.append("NOTE: the internet is unreachable, so this answer can only draw on the "
                     "offline library. Say so if the question needs current information.")
     head += ["=" * 70, "", "MATCHES:", "-" * 50]
     for index, hit in enumerate(results, start=1):
-        where = hit.get("book_title") or hit.get("book") or ""
-        kind = "manual page" if hit.get("kind") == "manual" else "article"
         head.append(f"\n[{index}] {hit['title']}")
-        head.append(f"    Source: {where} ({kind})")
+        head.append(f"    Source: {_where_line(hit)}")
+        if hit.get("shelf"):
+            head.append(f"    Shelf: {shelves.display(hit['shelf'])}")
         head.append(f"    URL: {hit['url']}")
         if hit.get("snippet"):
             head.append(f"    Snippet: {hit['snippet'][:240]}")
     tail = ["", "=" * 70, "END OF OFFLINE LIBRARY RESULTS", "=" * 70, "",
             "Cite the sources you use by their [number] and link. Manual pages are quoted from "
-            "the PDF page named in the title; articles are excerpts, not the whole page."]
+            "the PDF page named in the title; articles are excerpts, not the whole page. "
+            "The Shelf line says what kind of source each one is: a book with an author's dates, or anything on an "
+            "\"Old …\" shelf, is a historical text — say when it is from, and do not pass its medical or safety "
+            "advice off as current."]
+    if not place:
+        tail.append("Novels, poetry and plays were not searched; add \"shelf\": \"Literature\" to search them, "
+                    "or another shelf to search only there.")
     head_text = "\n".join(head)
     tail_text = "\n".join(tail)
 
@@ -347,5 +442,11 @@ def status() -> dict:
         "articles": sum(book["articles"] for book in books),
         "books": books,
         "manuals": manuals.stats(),
+        "files": _files_stats(),
         "library_dir": str(config.library_dir()),
     }
+
+
+def _files_stats() -> dict:
+    from . import files
+    return files.stats()

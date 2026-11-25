@@ -12,19 +12,21 @@ const state = {
   draft: null,      // what was changed on the open person's page and is not saved yet
   models: null,     // what GET /api/models answered, once a person's page has asked
   activity: { user: '', limit: 200, entries: [] },
+  household: null,  // what GET /api/admin/household answered
+  review: null,     // what GET /api/admin/review answered
 };
 
-const TABS = [['people', 'People'], ['roles', 'Roles'], ['activity', 'Activity']];
+const TABS = [['people', 'People'], ['household', 'Household'], ['roles', 'Roles'], ['activity', 'Activity'], ['review', 'Review']];
 const MODES = [
-  ['simple', 'Simple home screen', 'Chat, lists, reminders, trackers and boards, in plain language.'],
-  ['full', 'Full app', 'All of Aegis, with every tool and setting they are allowed to use.'],
+  ['simple', 'Family screen', 'Chat that does things, lists, reminders, trackers and boards, with Kitchen, Reader, Translate and the Almanac a tap away. Plain language, nothing to set up.'],
+  ['full', 'Full app', 'The larger app, with notes, calendar, Studio and documents. Models, the engine and every connection stay with administrators and are not shown.'],
 ];
-const MODE_LABEL = { simple: 'Simple home screen', full: 'Full app' };
+const MODE_LABEL = { simple: 'Family screen', full: 'Full app' };
 const THEME_LABEL = { auto: 'Match their device', light: 'Light', dark: 'Dark' };
 const TEXT_KEYS = ['display_name', 'assistant_name', 'tone'];
 const APP_WORDS = {
-  mode: 'home screen or full app', display_name: 'name shown', assistant_name: 'name of the assistant', tone: 'how it talks to them',
-  sections: 'home screen sections', theme: 'light or dark', accent: 'colour', allow_full_app: 'opening the full app', hidden_ui: 'hidden parts',
+  mode: 'family screen or full app', display_name: 'name shown', assistant_name: 'name of the assistant', tone: 'how it talks to them',
+  sections: 'family screen sections', theme: 'light or dark', accent: 'colour', allow_full_app: 'opening the full app', hidden_ui: 'hidden parts',
 };
 const SERVER_NOTE = 'No role can give access to the server, its files or other computers. That is for administrators only.';
 
@@ -60,7 +62,7 @@ async function go(tab, extra = {}) {
   await render();
 }
 
-const LOAD = { people: loadPeople, roles: () => loadOverview(true), activity: loadActivity };
+const LOAD = { people: loadPeople, household: loadHousehold, roles: () => loadOverview(true), activity: loadActivity, review: loadReview };
 let drawn = 0;        // the newest render() wins when tabs are tapped quickly
 let rendering = 0;
 let asked = 0;        // the newest answer from the server wins
@@ -97,7 +99,9 @@ async function refresh() {
 
 function draw() {
   if (state.tab === 'roles') drawRoles();
+  else if (state.tab === 'household') drawHousehold();
   else if (state.tab === 'activity') drawActivity();
+  else if (state.tab === 'review') drawReview();
   else if (state.person) drawPerson();
   else drawPeople();
 }
@@ -449,7 +453,7 @@ function appBlock(u) {
     plainHue.hidden = !hue;
     swatch.addEventListener('input', () => { set('accent', swatch.value); hueText.textContent = swatch.value; plainHue.hidden = false; });
     extra = [
-      group('On their home screen, besides chat',
+      group('On their family screen, besides chat',
         ticks(o.sections, now('sections') || [], (ids) => set('sections', ids), { grid: true, key: 'app-section' })),
       field('Light or dark', select(o.themes.map((t) => [t, THEME_LABEL[t] || t]), now('theme'),
         { dataset: { focus: 'app-theme' }, onchange: (event) => set('theme', event.target.value) })),
@@ -478,11 +482,11 @@ function appBlock(u) {
   sync();
 
   const allow = mode !== 'simple' ? null : setting('May also open the full app',
-    'Lets them switch to the full app when they want to. Off: the simple home screen is all they see.',
+    'Lets them switch to the full app when they want to. It comes without the server\'s controls: no models, engine or connections. Off: the family screen is all they see.',
     keyed(toggle(u.experience.allow_full_app, async (checked, input) => {
       try {
         await api(userPath(u.username), { method: 'PUT', body: { experience: { allow_full_app: checked } } });
-        toast(checked ? `${nameOf(u)} may open the full app` : `${nameOf(u)} stays on the home screen`);
+        toast(checked ? `${nameOf(u)} may open the full app` : `${nameOf(u)} stays on the family screen`);
         await refresh();
       } catch (error) { input.checked = !checked; oops(error); }
     }, 'May also open the full app'), 'app-allow'));
@@ -980,6 +984,252 @@ async function deleteRole(role) {
   } catch (error) { oops(error); }
 }
 
+// ── household ──────────────────────────────────────────────────────────────
+// Set once, used by everyone: where home is, how things are measured, the
+// language read here, and which outside sources may be asked.
+
+async function loadHousehold() {
+  await loadOverview();
+  state.household = await api('/api/admin/household');
+}
+
+async function saveHousehold(change, said) {
+  try {
+    state.household = await api('/api/admin/household', { method: 'PUT', body: change });
+    if (said) toast(said);
+  } catch (error) { oops(error); }
+  if (state.tab === 'household') redraw();
+}
+
+function drawHousehold() {
+  const hh = state.household;
+  const town = h('input', { class: 'input', maxlength: '120', autocapitalize: 'words', autocomplete: 'off', dataset: { focus: 'hh-home' },
+    placeholder: hh.home ? 'Change to another town' : 'Town, with its state or country', 'aria-label': 'Home town' });
+  const setHome = () => {
+    const place = town.value.trim();
+    if (!place) { toast('Type the town first', { bad: true }); town.focus(); return; }
+    saveHousehold({ home: place }, 'Home saved');
+  };
+  town.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.isComposing) setHome(); });
+  const today = h('div', { class: 'small muted' });
+  if (hh.home && hh.live.weather) {
+    add(today, 'Checking the forecast there…');
+    api('/api/almanac/weather', { method: 'POST', body: { place: `${hh.home.lat}, ${hh.home.lon}`, when: 'today' } }).then((found) => {
+      const card = found.card;
+      if (!card || !card.tiles) { clear(today, found.text || 'No forecast just now.'); return; }
+      const tile = (name) => (card.tiles.find((t) => t.label === name) || {}).value;
+      clear(today, `Today there: ${[card.summary, tile('High') ? `high ${tile('High')}` : '', tile('Low') ? `low ${tile('Low')}` : ''].filter(Boolean).join(', ')}. ${card.source || ''}`);
+    }).catch(() => clear(today, 'The forecast could not be checked just now.'));
+  }
+  const languages = (hh.language_choices || []).map((row) => [row.code, row.name]);
+  if (!languages.some(([code]) => code === hh.language)) languages.unshift([hh.language, hh.language_name || hh.language]);
+  clear(view,
+    h('p', { class: 'small muted', style: { marginBottom: '10px' } }, 'Set once, used by everyone here. Nobody is asked where they are or which units they want again.'),
+    h('div', { class: 'stack' },
+      h('div', { class: 'card stack' },
+        h('h3', {}, 'Home'),
+        h('p', { class: 'small muted' }, 'Where “here” is — for sunset, the forecast and anything else that needs a place. A town is enough. A person can still save a different home of their own on the Almanac page.'),
+        hh.home ? h('div', { class: 'row' },
+          h('div', { class: 'main' }, h('div', {}, hh.home.label), h('div', { class: 'small muted' }, [hh.home.zone, hh.home.decimal].filter(Boolean).join(' · ')), today),
+          h('button', { class: 'btn sm', type: 'button', onclick: async () => {
+            if (await confirmSheet('Sunset, the forecast and “near here” will ask for a place again.', { title: 'Remove the home position?', ok: 'Remove', danger: true })) saveHousehold({ home: '' }, 'Home removed');
+          } }, 'Remove')) : null,
+        h('div', { class: 'line' }, h('div', { class: 'grow' }, town), h('button', { class: 'btn primary', type: 'button', onclick: setHome }, hh.home ? 'Change' : 'Save'))),
+      h('div', { class: 'card stack' },
+        h('h3', {}, 'Units'),
+        h('p', { class: 'small muted' }, 'How temperatures, distances and amounts are given when nobody asks for something else.'),
+        choices('hh-units', hh.unit_choices.map((u) => [u.id, u.label, u.words]), hh.units, (value) => saveHousehold({ units: value }, 'Units saved'))),
+      h('div', { class: 'card stack' },
+        h('h3', {}, 'Language'),
+        h('p', { class: 'small muted' }, 'The language read here. A sign, label or page photographed in any other language is translated into it.'),
+        select(languages, hh.language, { 'aria-label': 'Household language', dataset: { focus: 'hh-language' }, style: { maxWidth: '320px' },
+          onchange: (event) => saveHousehold({ language: event.target.value }, 'Language saved') })),
+      h('div', { class: 'card stack' },
+        h('h3', {}, 'Live information'),
+        h('p', { class: 'small muted' }, 'Outside services Aegis may ask, each with its own switch. Everything else here works with no internet at all.'),
+        h('div', { class: 'rows' }, (hh.sources || []).map((source) => setting(source.label,
+          `${source.about} From ${source.who}. ${source.covers}.`,
+          keyed(toggle(source.on, (on) => saveHousehold({ live: { [source.id]: on } }, `${source.label} ${on ? 'on' : 'off'}`), source.label), `hh-live-${source.id}`)))),
+        h('div', { class: 'card soft notice' }, icon('lock'), h('span', {}, `What is sent: ${(hh.sources && hh.sources[0] && hh.sources[0].sends) || 'only the position, rounded.'} When the internet is down, or a switch is off, the answer says so and nothing is guessed.`)),
+        h('p', { class: 'small muted' }, 'Services you run yourself — Home Assistant, a feed reader, anything with an API — are connected in the full app under Settings, Integrations. The assistant can then read and control them when an administrator asks.'))));
+}
+
+// ── the daily review ───────────────────────────────────────────────────────
+// Each night the house's own model rates the day's chats. This page turns it on,
+// says whose chats are read, and shows what it found. The words of a chat are
+// shown only for the administrator's own chats; the server sends nobody else's.
+
+const PROBLEM = {
+  from_memory: 'From memory', unsupported: 'Unsupported facts', wrong_tool: 'Wrong tool', tool_failed: 'Tool failure passed over',
+  not_done: 'Not done', claimed_done: 'Said done, was not', misread: 'Misread', refused: 'Refused or hedged', too_long: 'Too long',
+  unclear: 'Unclear', asked_back: 'Asked instead of looking', had_to_repeat: 'Had to repeat', stopped: 'Stopped', redone: 'Asked again',
+  slow: 'Slow', no_reply: 'No reply',
+};
+const KIND = { setting: 'A setting', assistant: 'The assistant', tool: 'A tool', speed: 'Speed' };
+const NOTIFY = [['problems', 'Only for problems'], ['always', 'Every day'], ['never', 'Never']];
+let reviewPoll = 0;
+
+async function loadReview() {
+  await loadOverview();
+  state.review = await api('/api/admin/review');
+  watchReview();
+}
+
+// While a review is running, ask again every few seconds so the page follows it.
+function watchReview() {
+  clearTimeout(reviewPoll);
+  if (!state.review || !state.review.status.running) return;
+  reviewPoll = setTimeout(async () => {
+    if (state.tab !== 'review') return;
+    try { state.review = await api('/api/admin/review'); } catch (_) { /* the next look may work */ }
+    if (state.tab === 'review' && !rendering) redraw();
+    watchReview();
+  }, 3000);
+}
+
+async function saveReview(change, said) {
+  try {
+    state.review = await api('/api/admin/review', { method: 'PUT', body: change });
+    if (said) toast(said);
+  } catch (error) { oops(error); }
+  if (state.tab === 'review') redraw();
+}
+
+async function reviewNow(day) {
+  try {
+    await api('/api/admin/review/run', { method: 'POST', body: { day } });
+    toast('Started. It takes a few minutes.');
+    state.review = await api('/api/admin/review');
+  } catch (error) { oops(error); }
+  if (state.tab === 'review') redraw();
+  watchReview();
+}
+
+async function openReview(day) {
+  try { state.review.review = await api(`/api/admin/review/${day}`); } catch (error) { oops(error); return; }
+  if (state.tab === 'review') { redraw(); document.getElementById('review-day')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+
+const dayWords = (day) => new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+const scoreWords = (score) => (score === null || score === undefined ? 'Not rated' : `${Number(score).toFixed(1)} out of 5`);
+const ratingClass = (rating) => (rating >= 4 ? 'ok' : rating === 3 ? 'warn' : rating ? 'danger' : '');
+const problemChips = (problems, codes) => Object.entries(problems || {}).map(([code, count]) =>
+  h('span', { class: 'chip', title: codes[code] || '' }, `${PROBLEM[code] || code}${count > 1 ? ` × ${count}` : ''}`));
+
+// Times are shown on the house's clock, which is the one the review keeps — not the clock of the device in hand.
+const houseClock = (rv, options) => (rv.zone ? { ...options, timeZone: rv.zone } : options);
+
+function reviewExchange(one, rv) {
+  const at = one.at ? new Date(`${one.at}Z`).toLocaleTimeString(undefined, houseClock(rv, { hour: 'numeric', minute: '2-digit' })) : '';
+  const facts = [one.who, rv.agents[one.agent] || one.agent, at, one.seconds ? `${Math.round(one.seconds)} s` : '',
+    (one.tools || []).length ? `used ${one.tools.join(', ')}` : 'no tools'].filter(Boolean).join(' · ');
+  const body = h('div', { class: 'main' });
+  if (one.mine && one.asked) add(body, h('div', { class: 'clamp2' }, `“${one.asked}”`));
+  add(body, h('div', { class: 'meta' }, facts));
+  if ((one.problems || []).length) add(body, h('div', { class: 'chips', style: { marginTop: '6px' } }, one.problems.map((code) =>
+    h('span', { class: 'chip', title: rv.codes[code] || '' }, PROBLEM[code] || code))));
+  if (one.mine && one.note) add(body, h('div', { class: 'small', style: { marginTop: '6px' } }, one.note));
+  if (one.mine && one.fix) add(body, h('div', { class: 'small muted' }, `What would help: ${one.fix}`));
+  if (one.mine && (one.errors || []).length) add(body, h('div', { class: 'tiny muted mono' }, one.errors.join(' · ')));
+  if (!one.mine && one.tool) add(body, h('div', { class: 'small muted' }, `A tool that fits: ${one.tool}`));
+  return h('div', { class: 'row' }, h('span', { class: `chip ${ratingClass(one.rating)} rating`, 'aria-label': one.rating ? `Rated ${one.rating} out of 5` : 'Not rated' },
+    one.rating ? String(one.rating) : '–'), body);
+}
+
+function reviewOfDay(rv) {
+  const review = rv.review;
+  if (!review) {
+    return h('div', { class: 'card empty', id: 'review-day' }, h('b', {}, 'No review yet'),
+      rv.settings.on ? 'The first one is made tonight. Or review yesterday now, with the button above.' : 'Turn the daily review on, or review a day now with the button above.');
+  }
+  const t = review.totals;
+  const table = (rows, name) => h('div', { class: 'rows' }, rows.map((row) => h('div', { class: 'row' },
+    h('div', { class: 'main' }, h('div', {}, name(row)), h('div', { class: 'meta' }, plural(row.exchanges, 'exchange'),
+      row.needs_a_look ? ` · ${row.needs_a_look} need${row.needs_a_look === 1 ? 's' : ''} a look` : '')),
+    h('b', {}, row.score === null ? '–' : Number(row.score).toFixed(1)))));
+  const poor = review.exchanges.filter((one) => one.rating && one.rating <= 3);
+  const rest = review.exchanges.filter((one) => !one.rating || one.rating > 3);
+  const card = h('div', { class: 'stack', id: 'review-day' },
+    h('div', { class: 'card stack' },
+      h('h3', {}, dayWords(review.day)),
+      h('div', { class: 'stats' },
+        h('div', { class: 'stat' }, h('b', {}, t.score === null ? '–' : Number(t.score).toFixed(1)), h('span', {}, 'out of 5')),
+        h('div', { class: 'stat' }, h('b', {}, String(t.exchanges)), h('span', {}, `exchange${t.exchanges === 1 ? '' : 's'} in ${plural(t.chats, 'chat')}`)),
+        h('div', { class: 'stat' }, h('b', {}, String(t.needs_a_look)), h('span', {}, t.needs_a_look === 1 ? 'needs a look' : 'need a look'))),
+      h('p', { class: 'small muted' }, `Rated 5: ${t.by_rating['5']} · 4: ${t.by_rating['4']} · 3: ${t.by_rating['3']} · 2: ${t.by_rating['2']} · 1: ${t.by_rating['1']}`
+        + (t.rated < t.exchanges ? ` · not rated: ${t.exchanges - t.rated}` : '') + (t.left_out ? ` · left out: ${t.left_out}` : '')
+        + (review.jobs && review.jobs.ran ? ` · background jobs: ${review.jobs.ran} ran, ${review.jobs.failed} failed` : '')
+        + ` · reviewed by ${review.model}`)));
+  if ((review.improve || []).length) {
+    add(card, h('div', { class: 'card stack' }, h('h3', {}, 'What to change'),
+      h('div', { class: 'rows' }, review.improve.map((item) => h('div', { class: 'row' },
+        h('div', { class: 'main' }, h('div', {}, item.what), h('div', { class: 'small muted' }, item.why),
+          h('div', { class: 'meta' }, KIND[item.kind] || item.kind, ` · ${plural(item.count, 'exchange')}`)))))));
+  }
+  if ((review.fixes || []).length) {
+    add(card, h('div', { class: 'card stack' }, h('h3', {}, 'From your own chats'),
+      h('p', { class: 'small muted' }, 'What the reviewer thinks would have helped, worst first. Only you see this.'),
+      h('div', { class: 'rows' }, review.fixes.map((fix) => h('div', { class: 'row' },
+        h('span', { class: `chip ${ratingClass(fix.rating)} rating` }, String(fix.rating)),
+        h('div', { class: 'main' }, h('div', {}, fix.fix), fix.asked ? h('div', { class: 'small muted clamp2' }, `“${fix.asked}”`) : null))))));
+  }
+  if (Object.keys(review.problems || {}).length) {
+    add(card, h('div', { class: 'card stack' }, h('h3', {}, 'What went wrong'), h('div', { class: 'chips' }, problemChips(review.problems, rv.codes))));
+  }
+  add(card, h('div', { class: 'card stack' }, h('h3', {}, 'By assistant'), table(review.agents, (row) => row.label)));
+  if ((review.people || []).length > 1) add(card, h('div', { class: 'card stack' }, h('h3', {}, 'By person'), table(review.people, (row) => row.label)));
+  if ((review.models || []).length > 1) add(card, h('div', { class: 'card stack' }, h('h3', {}, 'By model'), table(review.models, (row) => row.id || 'Not recorded')));
+  if (poor.length) add(card, h('div', { class: 'card stack' }, h('h3', {}, 'Needs a look'), h('div', { class: 'rows' }, poor.map((one) => reviewExchange(one, rv)))));
+  if (rest.length) {
+    add(card, h('details', { class: 'card' }, h('summary', {}, `The other ${plural(rest.length, 'exchange')}`),
+      h('div', { class: 'rows', style: { marginTop: '8px' } }, rest.map((one) => reviewExchange(one, rv)))));
+  }
+  return card;
+}
+
+function drawReview() {
+  const rv = state.review;
+  const s = rv.settings;
+  const running = rv.status.running;
+  const next = rv.next ? new Date(rv.next) : null;
+  const times = [];
+  for (let hour = 0; hour < 24; hour += 1) for (const minute of ['00', '30']) times.push(`${String(hour).padStart(2, '0')}:${minute}`);
+  if (!times.includes(s.time)) times.push(s.time);
+  const said = running ? `${rv.status.said || 'Working…'}`
+    : rv.status.error ? `The last run failed: ${rv.status.error}`
+    : !s.on ? 'Off. Nothing is read until it is turned on, or a day is reviewed with a button below.'
+    : next ? `Next: ${next.toLocaleString(undefined, houseClock(rv, { weekday: 'long', hour: 'numeric', minute: '2-digit' }))}, for the day before.` : '';
+  clear(view,
+    h('p', { class: 'small muted', style: { marginBottom: '10px' } }, 'Once a day the house’s own model reads the day’s chats and rates how the assistant did: what it got right, what went wrong, and what to change. It all happens on this server.'),
+    h('div', { class: 'stack' },
+      h('div', { class: 'card stack' },
+        h('h3', {}, 'Daily review'),
+        h('div', { class: 'rows' },
+          setting('Review the chats every day', 'The day before is reviewed at the time below. It gives way the moment anyone uses the app and carries on afterwards.',
+            keyed(toggle(s.on, (on) => saveReview({ on }, on ? 'The daily review is on' : 'The daily review is off'), 'Review the chats every day'), 'rv-on')),
+          setting('At', rv.zone ? `On this house’s clock (${rv.zone.replace(/_/g, ' ')}).` : 'On the server’s clock.',
+            select(times.sort().map((time) => [time, new Date(`2000-01-01T${time}`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })]), s.time,
+              { 'aria-label': 'Time of the daily review', dataset: { focus: 'rv-time' }, onchange: (event) => saveReview({ time: event.target.value }, 'Time saved') })),
+          setting('Tell the administrators', 'A notification on the phones that have them turned on: only when something needs a look, every day, or never.',
+            select(NOTIFY, s.notify, { 'aria-label': 'When to tell the administrators', dataset: { focus: 'rv-notify' },
+              onchange: (event) => saveReview({ notify: event.target.value }, 'Saved') }))),
+        h('p', { class: 'small muted', role: 'status' }, said),
+        h('div', { class: 'line', style: { flexWrap: 'wrap' } },
+          h('button', { class: 'btn', type: 'button', disabled: running, onclick: () => reviewNow('yesterday') }, 'Review yesterday now'),
+          h('button', { class: 'btn', type: 'button', disabled: running, onclick: () => reviewNow('today') }, 'Review today so far'))),
+      h('div', { class: 'card stack' },
+        h('h3', {}, 'Whose chats'),
+        h('p', { class: 'small muted' }, 'An administrator’s own chats keep a short excerpt of what was asked and the reviewer’s note, shown only to that administrator. Everyone else’s are kept as figures and categories only: how it went, never what was said.'),
+        h('div', { class: 'rows' }, rv.people.map((person) => setting(person.name, [person.admin ? 'Administrator' : '', person.family ? 'Family screen' : 'Full app'].filter(Boolean).join(' · '),
+          keyed(toggle(person.included, (on) => saveReview({ skip: rv.people.filter((p) => (p.username === person.username ? !on : !p.included)).map((p) => p.username) },
+            on ? `${person.name}’s chats are reviewed` : `${person.name}’s chats are left out`), `Review ${person.name}’s chats`), `rv-who-${person.username}`))))),
+      reviewOfDay(rv),
+      rv.history.length > 1 ? h('div', { class: 'card stack' }, h('h3', {}, 'Other days'),
+        h('div', { class: 'rows' }, rv.history.filter((day) => !rv.review || day.day !== rv.review.day).map((day) => h('button', { class: 'row tap', type: 'button', onclick: () => openReview(day.day) },
+          h('div', { class: 'main' }, h('div', {}, dayWords(day.day)), h('div', { class: 'meta' }, `${plural(day.exchanges, 'exchange')}${day.needs_a_look ? ` · ${day.needs_a_look} to look at` : ''}`)),
+          h('b', {}, day.score === null ? '–' : Number(day.score).toFixed(1)))))) : null));
+}
+
 // ── activity ───────────────────────────────────────────────────────────────
 
 async function loadActivity() {
@@ -1023,6 +1273,7 @@ function describe(e) {
     role_changed: ['shield', 'edit', `Role ${named}changed`],
     role_reset: ['undo', 'edit', `Role ${named}reset to its defaults`],
     role_deleted: ['trash', 'bad', `Role ${named}deleted`],
+    household_changed: ['home', 'edit', `Household settings changed${detail ? ` (${detail})` : ''}`],
   };
   const [symbol, tone, text] = known[e.event] || ['info', '', String(e.event || 'Something happened')];
   return { symbol, tone, text };

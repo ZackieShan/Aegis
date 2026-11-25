@@ -27,8 +27,13 @@ def abs_join(base_dir: str, rel: str) -> str:
     """Join paths and return absolute path."""
     return os.path.abspath(os.path.join(base_dir, rel))
 
-def serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
+def serve_html_with_nonce(request: Request, file_path: str, root_attrs: str = "") -> HTMLResponse:
     """Read an app-bundled HTML page and inject the CSP nonce into inline <script> tags.
+
+    ``root_attrs`` is written into the page's ``<html>`` tag where the template
+    says ``{{ROOT_ATTRS}}`` (the app shell uses it to say the viewer is an
+    administrator, so their controls are never drawn for anyone else). It is
+    server-chosen text, never anything a client sent.
 
     Callers pass fixed, server-owned template paths (index/login/backgrounds),
     never a client-supplied path. So any read failure here — a missing file
@@ -45,7 +50,7 @@ def serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         logger.exception("Failed to read page %s", file_path)
         raise HTTPException(500, "Internal server error")
     nonce = getattr(request.state, "csp_nonce", "")
-    html = html.replace("{{CSP_NONCE}}", nonce)
+    html = html.replace("{{CSP_NONCE}}", nonce).replace("{{ROOT_ATTRS}}", root_attrs)
     return HTMLResponse(html)
 
 

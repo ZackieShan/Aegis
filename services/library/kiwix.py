@@ -361,8 +361,13 @@ def suggest(book: str, term: str, count: int = 5) -> List[dict]:
 
 # ── Fetch ──────────────────────────────────────────────────────────────────
 
-def fetch(url: str, max_bytes: int = 8_000_000) -> Optional[Tuple[str, bytes]]:
-    """Return ``(content_type, body)`` for a library link, or None."""
+def fetch_final(url: str, max_bytes: int = 8_000_000, whole: bool = False) -> Optional[Tuple[str, bytes, str]]:
+    """Return ``(content_type, body, where it ended up)`` for a library link,
+    or None. The last part is the loopback URL after redirects — a collection's
+    front page and an article known by another name both answer from a
+    different address than the one asked for. With ``whole``, something larger
+    than ``max_bytes`` is refused instead of cut short (a PDF cut short is
+    not a PDF)."""
     internal = to_internal(url)
     if not internal:
         return None
@@ -374,12 +379,37 @@ def fetch(url: str, max_bytes: int = 8_000_000) -> Optional[Tuple[str, bytes]]:
             for chunk in response.iter_bytes():
                 size += len(chunk)
                 if size > max_bytes:
+                    if whole:
+                        return None
                     break
                 chunks.append(chunk)
-            return response.headers.get("content-type", ""), b"".join(chunks)
+            return response.headers.get("content-type", ""), b"".join(chunks), str(response.url)
     except Exception as exc:
         logger.warning("Kiwix fetch failed for %s: %s", url, exc)
         return None
+
+
+def fetch(url: str, max_bytes: int = 8_000_000) -> Optional[Tuple[str, bytes]]:
+    """Return ``(content_type, body)`` for a library link, or None."""
+    fetched = fetch_final(url, max_bytes)
+    return (fetched[0], fetched[1]) if fetched else None
+
+
+_BOOK_CARD = re.compile(r"/content/([^/]+)/index/book_(\d+)$")
+MAX_BOOK_BYTES = 24_000_000
+
+
+def book_text_path(book: str, number: str) -> str:
+    """Project Gutenberg collections keep each book as a card
+    (``index/book_N``, which only forwards to the collection's own viewer) and
+    its text under ``<title>.N``. Search finds the card; reading wants the
+    text. "" when the collection has no such book."""
+    fetched = fetch_final(f"{config.kiwix_url()}/content/{quote(book, safe='')}/books/{number}.json", 2_000_000)
+    try:
+        title = str(json.loads(fetched[1].decode("utf-8"))["title"]).strip() if fetched else ""
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+        title = ""
+    return f"{title}.{number}" if title else ""
 
 
 def fetch_article(url: str, query: str = "", budget: int = 4000) -> dict:
@@ -388,11 +418,25 @@ def fetch_article(url: str, query: str = "", budget: int = 4000) -> dict:
     Returns the same core keys as ``fetch_webpage_content`` so the web-search
     formatter can consume either: ``url``, ``title``, ``content``, ``success``,
     ``error``.
+
+    A Project Gutenberg book is found by its card, which holds only a blurb:
+    the passages are taken from the book's own text instead.
     """
     from .text import best_passages, html_to_text
 
     result = {"url": url, "title": "", "content": "", "success": False, "error": ""}
-    fetched = fetch(url)
+    fetched = None
+    internal = to_internal(url) or ""
+    card = _BOOK_CARD.search(urlsplit(internal).path) if internal else None
+    if card:
+        book = unquote(card.group(1))
+        text_path = book_text_path(book, card.group(2))
+        if text_path:
+            whole = fetch(f"{config.kiwix_url()}/content/{quote(book, safe='')}/{quote(text_path, safe='/')}", MAX_BOOK_BYTES)
+            if whole and "html" in whole[0].lower():
+                fetched = whole
+    if fetched is None:
+        fetched = fetch(url)
     if not fetched:
         result["error"] = "not available in the offline library"
         return result

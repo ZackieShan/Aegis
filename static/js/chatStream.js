@@ -132,10 +132,18 @@ export function handleUIControl(uiData) {
       // the 12s active-poll.
       var rsid = uiData.research_session_id || uiData.session_id;
       if (rsid) {
-        import('./research/jobs.js').then(function(mod) {
-          var fn = mod.adoptSession || (mod.default && mod.default.adoptSession);
-          if (fn) fn(rsid);
-        }).catch(function(){});
+        // Through the window's own module (app.js keeps the one copy) so the
+        // job lands in the list that window draws; a second import of jobs.js
+        // was a separate copy the window never looked at.
+        var sharedPanel = window.researchPanelModule;
+        if (sharedPanel && typeof sharedPanel.adoptSession === 'function') {
+          try { sharedPanel.adoptSession(rsid); } catch (_) {}
+        } else {
+          import('./research/jobs.js').then(function(mod) {
+            var fn = mod.adoptSession || (mod.default && mod.default.adoptSession);
+            if (fn) fn(rsid);
+          }).catch(function(){});
+        }
         // The clickable "Open in Deep Research" link is now emitted by the
         // agent loop as a `#research-<id>` markdown anchor in the assistant's
         // response text — it renders as a regular clickable chat link AND
@@ -166,10 +174,34 @@ export function handleUIControl(uiData) {
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'cookbook') {
+        // The Model Shopper (its code keeps the name "cookbook").
         import('./cookbook.js').then(function(mod) {
           var fn = mod.open || (mod.default && mod.default.open);
           if (fn) fn();
         }).catch(function(){});
+      } else if (panel === 'kitchen' || panel === 'reader') {
+        // The Kitchen and the Reader are pages of their own. Go there once the
+        // reply has finished, so the answer is not cut off part-way.
+        var pageFor = panel === 'kitchen' ? '/kitchen' : '/read';
+        var goThere = function() { window.location.href = pageFor; };
+        if (window.__aegisChatBusy) {
+          var onIdle = function(ev) {
+            if (ev && ev.detail && ev.detail.active) return;
+            window.removeEventListener('aegis:chat-busy-change', onIdle);
+            setTimeout(goThere, 1200);
+          };
+          window.addEventListener('aegis:chat-busy-change', onIdle);
+        } else {
+          setTimeout(goThere, 1200);
+        }
+      } else if (panel === 'automations') {
+        // Automations (the workflow builder; its code keeps the name "recipes").
+        if (window.recipesModule && typeof window.recipesModule.open === 'function') {
+          window.recipesModule.open();
+        } else {
+          var autoBtn = document.getElementById('tool-recipes-btn') || document.getElementById('rail-recipes');
+          if (autoBtn) autoBtn.click();
+        }
       } else if (panel === 'notes') {
         import('./notes.js').then(function(mod) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));

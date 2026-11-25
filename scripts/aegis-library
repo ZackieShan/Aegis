@@ -11,11 +11,21 @@
     aegis-library index --only armypubs_en_all # one collection
     aegis-library catalog survival             # find collections to download (needs internet)
     aegis-library catalog wikipedia_en_all --urls >> ~/library/zim-list.txt
+    aegis-library search "sourdough" --shelf Cooking          # one shelf only
+    aegis-library shelves                      # the tree: every shelf and how much is on it
+    aegis-library shelves "History/Ancient world"             # what is on one
+    aegis-library shelves --find "moby dick"   # a book or document by title or author
+    aegis-library shelve                       # (re)file everything: Gutenberg books, manuals, documents
+    aegis-library files                        # take in files copied into <library>/<any folder>
+    aegis-library files --ask-model            # …and let the local model file the unclear ones
+    aegis-library files --ocr                  # …and read scanned PDFs with OCR
 
 `status`, `search` and `read` talk to kiwix-serve (settings: kiwix_url) and
 read <library>/index/manuals.db. `index` reads the ZIM files in
 <library>/zim directly; it is resumable and safe to re-run after adding
-collections (unchanged ones are skipped).
+collections (unchanged ones are skipped), and it refreshes the shelves when
+it is done. `shelve` and `files` are just as repeatable. Full notes:
+docs/offline-library.md and docs/library-shelves.md.
 """
 
 from __future__ import annotations
@@ -45,12 +55,95 @@ def cmd_status(args):
 
 def cmd_search(args):
     query = " ".join(args.query)
-    results = library.library_search(query, count=args.count, scope=args.scope)
+    results = library.library_search(query, count=args.count, scope=args.scope, shelf=args.shelf or "")
     if args.text:
-        text, _sources = library.format_for_model(query, results, fetch=args.fetch)
+        text, _sources = library.format_for_model(query, results, fetch=args.fetch, shelf=args.shelf or "")
         sys.stdout.write(text + "\n")
         return
-    emit({"query": query, "count": len(results), "results": results}, args)
+    emit({"query": query, "shelf": args.shelf or "", "count": len(results), "results": results}, args)
+
+
+def _say(message: str) -> None:
+    sys.stderr.write(message + "\n")
+    sys.stderr.flush()
+
+
+def _shelve(force: bool = False, fetch: bool = False, only=None) -> dict:
+    """File everything that is filed one by one. Project Gutenberg's own
+    catalogue is fetched the first time a Gutenberg collection needs it."""
+    from services.library import catalogue, shelves
+
+    zim_dir = lib_config.zim_dir()
+    has_gutenberg = zim_dir.is_dir() and any(shelves.is_gutenberg(z.name) for z in zim_dir.glob("gutenberg_*.zim"))
+    if fetch or (has_gutenberg and not catalogue.pg_catalogue_path().exists()):
+        try:
+            catalogue.fetch_pg_catalogue(progress=_say)
+        except Exception as exc:
+            _say(f"Gutenberg's catalogue could not be fetched ({exc}); its books are filed by collection for now.")
+    return catalogue.build(force=force, only=only, progress=_say)
+
+
+def cmd_shelve(args):
+    emit(_shelve(force=args.force, fetch=args.fetch_catalogue, only=args.only), args)
+
+
+def cmd_shelves(args):
+    from services.library import catalogue, kiwix, shelves
+
+    if args.find:
+        place = shelves.resolve(" ".join(args.shelf)) if args.shelf else ""
+        found = catalogue.find(args.find, limit=args.count, scope=place, everything=args.all)
+        emit({"find": args.find, "count": len(found),
+              "items": [dict(item, shelf_name=shelves.display(item["shelf"]), url=catalogue.link(item["book"], item["key"]))
+                        for item in found]}, args)
+        return
+    books = kiwix.list_books() if kiwix.available() else []
+    if args.shelf:
+        place = shelves.resolve(" ".join(args.shelf))
+        if not place:
+            fail(f"no shelf called {' '.join(args.shelf)!r}; categories: {', '.join(shelves.categories())}", code=2)
+        found = catalogue.items(place, offset=args.offset, limit=args.count, everything=args.all)
+        emit({"shelf": place, "about": shelves.about(place), "hidden_by_the_cut": 0 if args.all else catalogue.hidden_under(place),
+              "collections": [book["id"] for book in catalogue.whole_collections(books, place)],
+              "total": found["total"], "items": found["items"]}, args)
+        return
+    tree = catalogue.overview(books)
+    if getattr(args, "json", False):
+        emit({"categories": tree}, args)
+        return
+    rule = catalogue.keeping()
+    if rule["min_rating"] > 0:
+        sys.stdout.write(f"Kept: Project Gutenberg books with a popularity of {rule['min_rating']:g} or more, classics, the best-read "
+                         f"{rule['keep_per_shelf']} of every shelf, and all of {', '.join(rule['keep_whole'])}. "
+                         f"{catalogue.hidden_under():,} books are left off (shown as +N).\n\n")
+    for category in tree:
+        sys.stdout.write(f"{category['name']}  ({category['collection_count']} collections, {category['items']:,} books and documents"
+                         + (f", +{category['hidden']:,} below the cut" if category.get("hidden") else "") + ")\n")
+        for shelf in category["shelves"]:
+            if shelf["collections"] or shelf["items"] or shelf.get("hidden"):
+                sys.stdout.write(f"    {shelf['items']:>7,}  {shelf['name']}" + (f"  (+{shelf['hidden']:,})" if shelf.get("hidden") else "") +
+                                 (f"   [{', '.join(shelf['collections'])}]" if shelf["collections"] else "") + "\n")
+        if category["collections"] or category["own_items"]:
+            sys.stdout.write(f"    {category['own_items']:>7,}  (in the category itself)" +
+                             (f"   [{', '.join(category['collections'])}]" if category["collections"] else "") + "\n")
+
+
+def cmd_files(args):
+    """Take in the owner's own files, shelve them, optionally ask the model."""
+    import asyncio
+    from services.library import classify, files
+
+    summary = files.scan(progress=_say, ocr=args.ocr, workers=args.workers, limit=args.limit)
+    if summary.get("busy"):
+        fail("another scan of the library folder is running", code=1)
+    if not args.no_shelve:
+        summary["shelves"] = _shelve()
+    if args.ask_model:
+        summary["model"] = asyncio.run(classify.run(limit=args.model_limit, redo=args.redo, everything=args.all, progress=_say))
+    summary["waiting_for_model"] = len(classify.pending())
+    summary["in_library"] = files.stats()
+    summary["problems"] = files.problems(limit=20)
+    emit(summary, args)
 
 
 def cmd_read(args):
@@ -74,7 +167,13 @@ def cmd_index(args):
         workers=args.workers, ocr=args.ocr, force=args.force, only=args.only, progress=progress,
     )
     with_pdfs = [r for r in results if r.get("pdfs") or r.get("error")]
-    emit({"collections_scanned": len(results), "with_pdfs": with_pdfs, "index": manuals.stats()}, args)
+    shelved = {}
+    if not args.only:
+        try:                                  # new collections go on their shelves in the same run
+            shelved = _shelve()
+        except Exception as exc:
+            progress(f"shelves not refreshed: {type(exc).__name__}: {exc}")
+    emit({"collections_scanned": len(results), "with_pdfs": with_pdfs, "index": manuals.stats(), "shelves": shelved}, args)
 
 
 CATALOG_URL = "https://library.kiwix.org/catalog/v2/entries"
@@ -147,7 +246,33 @@ def build_parser():
     pq.add_argument("--count", type=int, default=8)
     pq.add_argument("--text", action="store_true", help="Print the text block the model reads")
     pq.add_argument("--fetch", type=int, default=3, help="With --text: how many results to quote")
+    pq.add_argument("--shelf", default="", help="Only this category or shelf, e.g. Cooking or 'History/Ancient world'")
     pq.set_defaults(func=cmd_search)
+
+    pv = sub.add_parser("shelves", parents=parents, help="The shelves and what is on them")
+    pv.add_argument("shelf", nargs="*", help="A category or shelf to list (default: the whole tree)")
+    pv.add_argument("--find", default="", help="Books and documents by title or author")
+    pv.add_argument("--count", type=int, default=40)
+    pv.add_argument("--offset", type=int, default=0)
+    pv.add_argument("--all", action="store_true", help="Also the books the owner's rating cut leaves off the shelves")
+    pv.set_defaults(func=cmd_shelves)
+
+    pw = sub.add_parser("shelve", parents=parents, help="File books and documents on their shelves")
+    pw.add_argument("--force", action="store_true", help="Re-file collections even if unchanged")
+    pw.add_argument("--fetch-catalogue", action="store_true", help="Download Project Gutenberg's catalogue again (needs internet)")
+    pw.add_argument("--only", nargs="+", metavar="BOOK", help="Gutenberg collection ids")
+    pw.set_defaults(func=cmd_shelve)
+
+    pf = sub.add_parser("files", parents=parents, help="Take in files copied into the library folder")
+    pf.add_argument("--ocr", action="store_true", help="Read scanned PDFs with OCR (slow)")
+    pf.add_argument("--ask-model", action="store_true", help="Let the local model file what folder and title leave unclear")
+    pf.add_argument("--model-limit", type=int, default=0, help="With --ask-model: at most this many documents this run")
+    pf.add_argument("--redo", action="store_true", help="With --ask-model: ask again about documents the model already filed")
+    pf.add_argument("--all", action="store_true", help="With --ask-model: also the ones a folder or title already placed (for titles and authors)")
+    pf.add_argument("--limit", type=int, default=0, help="Read at most this many new files this run")
+    pf.add_argument("--workers", type=int, default=0, help="Parallel readers (default: CPUs - 2, max 8)")
+    pf.add_argument("--no-shelve", action="store_true", help="Do not refresh the shelves afterwards")
+    pf.set_defaults(func=cmd_files)
 
     pr = sub.add_parser("read", parents=parents, help="Extracted text of one library link")
     pr.add_argument("url")

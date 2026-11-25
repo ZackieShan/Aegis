@@ -290,9 +290,13 @@ def topic_names(memory_manager, owner: Optional[str]) -> List[str]:
 
 def add_notes(memory_manager, owner: Optional[str], name: str, notes: Iterable[str], kind: str = "other",
               keywords: Optional[Iterable[str]] = None, session_id: Optional[str] = None,
-              by: str = "auto") -> Tuple[Optional[dict], int]:
+              by: str = "auto", source: Optional[dict] = None) -> Tuple[Optional[dict], int]:
     """Add dated notes to a topic, creating it if needed. Notes that say what
-    an existing note already says are skipped. Returns (topic, how many added)."""
+    an existing note already says are skipped. Returns (topic, how many added).
+
+    ``source`` says where a note came from when that is not a chat — a passage
+    highlighted in the reader carries ``{"kind": "reading", "title", "url"}``
+    so it can be traced back to the page."""
     name = _squash(name)[:60]
     cleaned = [_squash(n)[:NOTE_CHARS] for n in notes or []]
     cleaned = [n for n in cleaned if len(n) >= 5]
@@ -328,6 +332,8 @@ def add_notes(memory_manager, owner: Optional[str], name: str, notes: Iterable[s
             note = {"id": uuid.uuid4().hex[:10], "text": text, "ts": now, "by": by}
             if session_id:
                 note["session_id"] = str(session_id)
+            if isinstance(source, dict) and source.get("kind"):
+                note["source"] = {key: str(source.get(key) or "")[:400] for key in ("kind", "title", "url")}
             topic.setdefault("notes", []).append(note)
             existing.append(text)
             added.append(note)

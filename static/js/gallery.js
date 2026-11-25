@@ -13,7 +13,8 @@ import fileHandlerModule from './fileHandler.js';
 import settingsModule from './settings.js';
 import { renderMovieTab, stopMovieTab } from './movieMaker.js';
 import { renderQueueTab, stopQueueTab } from './jobQueue.js';
-import { renderCreateTab, setCreateSource } from './studioCreate.js';
+import { renderCreateTab } from './studioCreate.js';
+import { renderStudioHome, setStudioSource, leaveStudioHome } from './studioHome.js';
 import { renderMusicTab, stopMusicTab } from './studioMusic.js';
 
 const API_BASE = window.location.origin;
@@ -1853,11 +1854,10 @@ function _openDetail(img) {
   // /api/video/generate from a window.prompt with a hardcoded 3s and no
   // model choice, which is exactly the control the user kept asking for.
   const _handToCreate = (kind) => {
-    setCreateSource({ id: img.id, url: img.url, prompt: img.prompt || '' }, kind);
+    setStudioSource({ id: img.id, url: img.url, prompt: img.prompt || '' }, kind);
     detail.style.display = 'none';
-    // Video creation lives in the Movie Maker; image edits in the Image Maker.
-    const tab = kind === 'video' ? 'movie' : 'create';
-    document.querySelector(`#gallery-modal .gallery-tab[data-tab="${tab}"]`)?.click();
+    // Both start on the Create screen, with this picture as what to begin from.
+    document.querySelector('#gallery-modal .gallery-tab[data-tab="create"]')?.click();
   };
   document.getElementById('gallery-animate-btn')?.addEventListener('click', () => _handToCreate('video'));
   document.getElementById('gallery-stylize-btn')?.addEventListener('click', () => _handToCreate('image'));
@@ -2158,41 +2158,50 @@ export function openGallery() {
         <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>Studio <span id="gallery-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal;margin-left:8px"></span></h4>
         <button class="modal-close" id="gallery-close">&times;</button>
       </div>
+      <!-- Three things up front; the rest one tap away under More. Every tab is
+           still a .gallery-tab with its data-tab, so code that switches tabs
+           by clicking one keeps working. -->
       <div class="gallery-tabs">
-        <button class="gallery-tab active" data-tab="images">
-          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
-          <span class="gallery-tab-label">Media</span>
-        </button>
-        <button class="gallery-tab" data-tab="albums">
-          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
-          <span class="gallery-tab-label">Albums</span>
-        </button>
-        <button class="gallery-tab" data-tab="editor" id="gallery-editor-tab">
-          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>
-          <span class="gallery-tab-label">Edit</span>
-          <span class="gallery-tab-close" id="gallery-editor-tab-close" title="Close edit" aria-label="Close edit">×</span>
-        </button>
-        <button class="gallery-tab" data-tab="create" title="Image Maker — every image control in one place">
+        <button class="gallery-tab active" title="Make a picture, a video, a song or a voice" data-tab="create">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg></span>
-          <span class="gallery-tab-label">Image</span>
+          <span class="gallery-tab-label">Create</span>
         </button>
-        <button class="gallery-tab" data-tab="music" title="Music Maker — compose songs, play your tracks, make AI voices">
-          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
-          <span class="gallery-tab-label">Music</span>
+        <button class="gallery-tab" title="Everything you have made or added" data-tab="images">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></span>
+          <span class="gallery-tab-label">Gallery</span>
         </button>
-        <button class="gallery-tab" data-tab="queue">
+        <button class="gallery-tab" title="What is being made right now, and what was made lately" data-tab="queue">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
           <span class="gallery-tab-label">Queue</span>
         </button>
-        <button class="gallery-tab" data-tab="movie">
-          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg></span>
-          <span class="gallery-tab-label">Movie</span>
+        <button type="button" class="gallery-tab-more" id="gallery-more-btn" aria-haspopup="menu" aria-expanded="false" title="Albums, the editor, the movie maker, music and voices, styles, settings">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></span>
+          <span class="gallery-tab-label" id="gallery-more-label">More</span>
         </button>
-        <button class="gallery-tab" data-tab="styles">
+      </div>
+      <div class="gallery-more-menu" id="gallery-more-menu" role="menu" hidden>
+        <button class="gallery-tab" title="Group your pictures" data-tab="albums">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+          <span class="gallery-tab-label">Albums</span>
+        </button>
+        <button class="gallery-tab" title="Crop, draw on and retouch a picture" data-tab="editor" id="gallery-editor-tab">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>
+          <span class="gallery-tab-label">Editor</span>
+          <span class="gallery-tab-close" id="gallery-editor-tab-close" title="Close edit" aria-label="Close edit">×</span>
+        </button>
+        <button class="gallery-tab" title="Join video clips into a film" data-tab="movie">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg></span>
+          <span class="gallery-tab-label">Movie maker</span>
+        </button>
+        <button class="gallery-tab" title="Covers, narration, your tracks, recording a voice" data-tab="music">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+          <span class="gallery-tab-label">Music &amp; voices</span>
+        </button>
+        <button class="gallery-tab" title="Looks you can reuse" data-tab="styles">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 4.8L20 8l-4 3.9.9 5.6L12 15l-4.9 2.5.9-5.6L4 8l5.6-1.2z"/></svg></span>
           <span class="gallery-tab-label">Styles</span>
         </button>
-        <button class="gallery-tab" data-tab="settings">
+        <button class="gallery-tab" title="Tagging and the models the Studio can use" data-tab="settings">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span class="gallery-tab-label">Settings</span>
         </button>
@@ -2204,7 +2213,7 @@ export function openGallery() {
           </div>
           <div id="gallery-upload-status" style="font-size:10px;opacity:0.5;margin-top:2px;"></div>
         </div>
-        <div class="gallery-images-container" id="gallery-images-container" style="margin-top:2px">
+        <div class="gallery-images-container" id="gallery-images-container" style="margin-top:2px;display:none">
         <div class="gallery-album-chips" id="gallery-album-chips"></div>
         <div class="gallery-album-chips gallery-people-chips" id="gallery-people-chips" style="display:none"></div>
         <div class="gallery-toolbar">
@@ -2238,7 +2247,7 @@ export function openGallery() {
         <div class="gallery-albums-container" id="gallery-albums-container" style="display:none;"></div>
         <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
         <div class="gallery-movie-container" id="gallery-movie-container" style="display:none;"></div>
-        <div class="gallery-create-container" id="gallery-create-container" style="display:none;"></div>
+        <div class="gallery-create-container" id="gallery-create-container"></div>
         <div class="gallery-create-container" id="gallery-music-container" style="display:none;"></div>
         <div class="gallery-queue-container" id="gallery-queue-container" style="display:none;"></div>
         <div class="gallery-styles-container" id="gallery-styles-container" style="display:none;">
@@ -2392,10 +2401,39 @@ export function openGallery() {
   }
 
   // ── Tab switching ──
+  // The More menu: the six tabs that are not needed every time.
+  const tabsMoreBtn = document.getElementById('gallery-more-btn');
+  const tabsMoreMenu = document.getElementById('gallery-more-menu');
+  const _closeMore = () => { if (tabsMoreMenu) tabsMoreMenu.hidden = true; if (tabsMoreBtn) tabsMoreBtn.setAttribute('aria-expanded', 'false'); };
+  if (tabsMoreBtn && tabsMoreMenu) {
+    tabsMoreBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!tabsMoreMenu.hidden) { _closeMore(); return; }
+      tabsMoreMenu.hidden = false;
+      // Placed under the button, inside the window (the tab strip itself clips what hangs out of it).
+      const at = tabsMoreBtn.getBoundingClientRect();
+      const base = (tabsMoreMenu.offsetParent || modal).getBoundingClientRect();
+      tabsMoreMenu.style.top = `${Math.round(at.bottom - base.top + 4)}px`;
+      tabsMoreMenu.style.left = `${Math.round(Math.max(8, Math.min(at.left - base.left, base.width - tabsMoreMenu.offsetWidth - 8)))}px`;
+      tabsMoreBtn.setAttribute('aria-expanded', 'true');
+    });
+    modal.addEventListener('click', (e) => { if (!tabsMoreMenu.hidden && !tabsMoreMenu.contains(e.target) && !tabsMoreBtn.contains(e.target)) _closeMore(); });
+    modal.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !tabsMoreMenu.hidden) { e.stopPropagation(); _closeMore(); tabsMoreBtn.focus(); } });
+  }
+  _syncMoreTab = () => {
+    const active = modal.querySelector('.gallery-tab.active');
+    const inMenu = !!(active && tabsMoreMenu && tabsMoreMenu.contains(active));
+    if (tabsMoreBtn) tabsMoreBtn.classList.toggle('active', inMenu);
+    const label = document.getElementById('gallery-more-label');
+    if (label) label.textContent = inMenu ? (active.querySelector('.gallery-tab-label')?.textContent || 'More') : 'More';
+  };
+
   modal.querySelectorAll('.gallery-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
+      _closeMore();
+      _syncMoreTab();
       const target = tab.dataset.tab;
       // Always close the photo detail when changing tabs — leaving it open
       // means it pops back the next time the user returns to Photos.
@@ -2451,7 +2489,7 @@ export function openGallery() {
           renderMovieTab(filmHost);
         }
       } else if (target === 'create') {
-        renderCreateTab(document.getElementById('gallery-create-container'), 'image');
+        _renderCreate();
       } else if (target === 'music') {
         renderMusicTab(document.getElementById('gallery-music-container'));
       } else if (target === 'queue') {
@@ -3099,7 +3137,38 @@ export function openGallery() {
   //    fetch fails or takes a moment, the cached view sticks around.
   _fetchAlbums();
   _fetchLibrary(false);
-  searchInput.focus();
+  // The Studio opens on Create (openGalleryImage and friends move on from there).
+  _renderCreate();
+}
+
+let _syncMoreTab = () => {};
+
+/** Draw the Create screen (the Studio's front door). */
+function _renderCreate() {
+  const host = document.getElementById('gallery-create-container');
+  if (!host) return;
+  renderStudioHome(host, {
+    openItem: (id) => { openGalleryImage(id); },
+    openTab: (name) => { document.querySelector(`#gallery-modal .gallery-tab[data-tab="${name}"]`)?.click(); },
+  });
+}
+
+/** Show one of the Studio's tabs without drawing into it — for code that
+ *  fills the tab itself (opening a chat picture in the editor). */
+export function showStudioTab(name) {
+  const modal = document.getElementById('gallery-modal');
+  if (!modal) return;
+  modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  const containers = {
+    images: 'gallery-images-container', albums: 'gallery-albums-container', editor: 'gallery-editor-container',
+    create: 'gallery-create-container', music: 'gallery-music-container', queue: 'gallery-queue-container',
+    movie: 'gallery-movie-container', styles: 'gallery-styles-container', settings: 'gallery-settings-container',
+  };
+  for (const [tab, id] of Object.entries(containers)) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = tab === name ? (tab === 'editor' ? 'flex' : '') : 'none';
+  }
+  _syncMoreTab();
 }
 
 function _showImagesTab() {
@@ -3107,6 +3176,7 @@ function _showImagesTab() {
   if (!modal) return;
   modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
   modal.querySelector('.gallery-tab[data-tab="images"]')?.classList.add('active');
+  _syncMoreTab();
   // Hide EVERY other container, not just the original three — this runs on the
   // programmatic path (chat image click → openGalleryImage) which bypasses the
   // tab-click handler, so anything missed here renders stacked under Photos.
@@ -3194,6 +3264,7 @@ function _doCloseGallery() {
   // the recorder).
   stopMovieTab();
   stopQueueTab();
+  leaveStudioHome();
   stopMusicTab();
   if (_galleryResizeHandler) {
     window.removeEventListener('resize', _galleryResizeHandler);
@@ -3262,6 +3333,7 @@ const galleryModule = {
   openGalleryImage,
   closeGallery,
   isGalleryOpen,
+  showStudioTab,
 };
 
 export default galleryModule;

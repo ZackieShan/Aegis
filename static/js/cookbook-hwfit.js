@@ -1002,7 +1002,7 @@ function _renderHwVisibilityWarning(sys) {
   box.querySelector('[data-hw-action="copy"]')?.addEventListener('click', () => {
     // Keep diagnostics copy/paste friendly for GitHub issues and Docker support.
     const text = [
-      'Aegis Cookbook hardware diagnostics',
+      'Aegis Model Shopper hardware diagnostics',
       `probe_scope=${sys?.probe_scope || ''}`,
       `containerized=${sys?.containerized === true}`,
       `backend=${sys?.backend || ''}`,
@@ -2330,7 +2330,7 @@ export function _hwfitInit() {
           const on = !!_envState.defaultServer && b.dataset.srvKey === _envState.defaultServer;
           b.classList.toggle('active', on);
           b.innerHTML = _serverDefaultHtml(on);
-          b.title = on ? 'Default server — Cookbook opens here' : 'Make this the default server';
+          b.title = on ? 'Default server — Model Shopper opens here' : 'Make this the default server';
         });
         // Apply immediately so the dropdowns reflect it without reopening
         // (inline — _applyServerSelection lives in cookbook.js and isn't imported here).

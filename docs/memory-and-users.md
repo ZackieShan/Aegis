@@ -98,7 +98,7 @@ Open **Brain → See everything & history**, the link under `/me`, or `/mind`.
 | **Overview** | Counts, the summary, the preview of what the model is given, the two switches. |
 | **Profile** | Every line, editable. A line you add or change is kept word for word; a line you remove never comes back, and you can forget the facts behind it in the same step. *Rewrite now* has the model write it again. |
 | **Facts** | Every fact with its kind, where it was learned (the chat, the date, your words), how often it was used and reaffirmed. Search, filter, edit, pin, forget. The clock opens that fact's own history. |
-| **Topics** | Each dossier: summary, where things stand, open questions, timeline, and every note with its date and source. Add or delete notes, edit or rewrite the digest, rename, merge two topics, delete. |
+| **Topics** | Each dossier: summary, where things stand, open questions, timeline, and every note with its date and source. Add or delete notes, edit or rewrite the digest, rename, merge two topics, delete. A passage you chose to *Remember* in the [Reader](reader.md) is a note here too, marked *Highlighted while reading*, with a link back to the page. |
 | **Conversations** | The digests. Deleting one does not delete the chat. |
 | **History** | Every change ever made, newest first: what it was before and after, when, and who or what caused it — *you*, *learned automatically* (with the chat), *the assistant*, *tidy-up*. Changes to facts can be undone. |
 | **Controls** | The switches, kinds of information never to keep (optionally deleting what is already stored of those kinds), download everything as JSON or text, and *Forget everything about me*. |
@@ -141,12 +141,12 @@ digest is cleared until it is rewritten from the notes that remain.
 | Role | For | The assistant may, for them |
 |---|---|---|
 | **Administrator** | whoever runs the server | everything, including the shell, server files, other machines, settings |
-| **Member** | the full app with their own data | keep lists, reminders, trackers and boards; remember on request; use their calendar |
-| **Household** | the [simple home screen](home.md) | the same, in plain language |
+| **Member** | the [family screen](home.md) and its pages (Kitchen, Reader, Translate, Almanac, Memory) | keep lists, reminders, trackers, boards and recipes; remember on request; use their calendar |
+| **Household** | the same screen, signing in with a PIN | the same, in plain language |
 | **Guest** | chat only | nothing; nothing is remembered |
 
 A role is a set of switches (assistant can act, browser, documents, research,
-images, memory, recipes, messages per day) plus the groups of things the
+images, memory, automations, messages per day) plus the groups of things the
 assistant may do on the person's behalf. You can adjust the built-in roles
 (not *Administrator*) and add your own. For one person you can override any
 switch; the override is shown as such and can be dropped to follow the role
@@ -160,8 +160,13 @@ email tools belong to administrators and cannot be granted.
 
 Per account, set by an administrator:
 
-- **Which app they get** — the simple home screen or the full app (and
-  whether a home-screen person may also open the full one).
+- **Which app they get** — the family screen (the default for everyone who
+  is not an administrator) or the full app. In the full app a person who is
+  not an administrator sees the everyday tools only: the model picker, the
+  engines, the shell, Deep Research, Automations, Scheduled, themes and
+  every other workshop tool are not drawn for them, not offered in the slash
+  list, and refused if typed. An administrator moves between the two with
+  the house button (full app) and *Switch to the workshop* (family screen).
 - **What they are called**, and **what the assistant is called** for them.
 - **How it should talk to them** — a note in your words ("Not technical. Keep
   it warm and short, one step at a time."). It becomes part of the
@@ -199,7 +204,8 @@ stored is a separate question, and you answer it in the same step:
   erases nothing and gives everything to the next account created with that
   username — the way to give the same person their account back.
 - **Erase it.** Chats, memory (facts, profile, topics, digests, history),
-  lists, reminders, trackers, boards and their pictures, notes, calendars,
+  lists, reminders, trackers, boards and their pictures, their reading shelf,
+  highlights and recipes, notes, calendars,
   tasks, documents, uploaded files, generated images, research reports and
   skills they wrote. Other people's data and anything shared are not
   touched. If part of it cannot be removed, the account is still deleted,

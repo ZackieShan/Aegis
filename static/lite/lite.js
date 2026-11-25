@@ -25,7 +25,9 @@ export async function api(path, { method = 'GET', body, form, signal } = {}) {
   try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { raw: text }; }
   if (!response.ok) {
     const detail = data.detail || data.error || data.message;
-    throw new Error(typeof detail === 'string' ? detail : `Something went wrong (${response.status})`);
+    const problem = new Error(typeof detail === 'string' ? detail : `Something went wrong (${response.status})`);
+    problem.status = response.status;
+    throw problem;
   }
   return data;
 }
@@ -88,6 +90,26 @@ const ICONS = {
   merge: 'M6 4v6a6 6 0 006 6h6M6 20v-4M15 13l3 3-3 3', camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 100-7 3.5 3.5 0 000 7z',
   heart: 'M12 20s-7-4.6-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.4-7 10-7 10z', repeat: 'M17 3l3 3-3 3M4 11V9a3 3 0 013-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 01-3 3H4',
   info: 'M12 21a9 9 0 100-18 9 9 0 000 18zM12 11v6M12 7.5h.01', filter: 'M4 5h16l-6 8v6l-4-2v-4L4 5z',
+  bookmark: 'M7 4h10v16l-5-3.5L7 20V4z', copy: 'M9 9h10v11H9zM5 15V4h10', forward: 'M9 6l6 6-6 6',
+  external: 'M14 5h5v5M19 5l-8 8M11 7H5v12h12v-6', up: 'M12 19V5M6 11l6-6 6 6',
+  pot: 'M5 11h14v5a4 4 0 01-4 4H9a4 4 0 01-4-4v-5zM3 11h18M9 7V5M12 7V4M15 7V5',
+  star: 'M12 4l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8L12 4z',
+  speaker: 'M5 10v4h3l4 4V6l-4 4H5zM16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11',
+  highlight: 'M4 20h7M14 4l6 6-8 8H8l-2-2v-4l8-8zM12 6l6 6', menu: 'M4 7h16M4 12h16M4 17h16',
+  mic: 'M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3zM6 11a6 6 0 0012 0M12 17v4M9 21h6',
+  swap: 'M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7', sun: 'M12 16.5a4.5 4.5 0 100-9 4.5 4.5 0 000 9zM12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6', stop: 'M7 7h10v10H7z',
+  globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z',
+  cloud: 'M7 18a4 4 0 01-.5-7.97A5.5 5.5 0 0117 8.5a4.5 4.5 0 010 9.5H7z',
+  'cloud-sun': 'M12 2.5v2M5.3 5.3l1.4 1.4M2.5 12h2M16.3 8a4.3 4.3 0 00-8 1.6M9 20.5a3.5 3.5 0 01-.4-6.98A5 5 0 0118 13a3.8 3.8 0 010 7.5H9z',
+  rain: 'M7 15a4 4 0 01-.5-7.97A5.5 5.5 0 0117 5.5a4.5 4.5 0 010 9.5H7zM8 18l-1 3M12 18l-1 3M16 18l-1 3',
+  snow: 'M7 15a4 4 0 01-.5-7.97A5.5 5.5 0 0117 5.5a4.5 4.5 0 010 9.5H7zM8 19h.01M12 19h.01M16 19h.01M10 21.5h.01M14 21.5h.01',
+  storm: 'M7 15a4 4 0 01-.5-7.97A5.5 5.5 0 0117 5.5a4.5 4.5 0 010 9.5H7zM13 15l-3 4h3l-2 3',
+  fog: 'M7 13a4 4 0 01-.5-7.97A5.5 5.5 0 0117 3.5a4.5 4.5 0 010 9.5H7zM4 17h16M6 21h12',
+  moon: 'M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z',
+  wind: 'M3 9h10a3 3 0 10-3-3M3 14h15a3 3 0 11-3 3M3 19h6',
+  alert: 'M12 4l9 16H3L12 4zM12 10v5M12 17.5h.01',
+  refresh: 'M20 11a8 8 0 10-2.3 6.3M20 5v6h-6',
+  wrench: 'M14.7 6.3a4 4 0 00-5.2 5.2L4 17l3 3 5.5-5.5a4 4 0 005.2-5.2l-2.7 2.7-2.5-2.5 2.2-3.2z',
 };
 
 export function icon(name, extra = '') {

@@ -90,6 +90,10 @@ def connect(readonly: bool = False) -> Optional[sqlite3.Connection]:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
+        from . import catalogue, files          # the shelves and the owner's files live in the same database
+        conn.executescript(catalogue.SCHEMA)
+        conn.executescript(files.SCHEMA)
+        catalogue.migrate(conn)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -102,8 +106,8 @@ def _fts_query(terms: Iterable[str], joiner: str) -> str:
 
 
 def pdf_url(book: str, path: str, page: int = 0) -> str:
-    if book == config.ADDED_BOOK:                       # kept and served by Aegis, not by Kiwix
-        return config.added_url(path, page)
+    if book in config.LOCAL_BOOKS:                      # kept and served by Aegis, not by Kiwix
+        return config.local_url(book, path, page)
     url = f"{config.kiwix_public_url()}/content/{quote(book, safe='')}/{quote(path, safe='/')}"
     return f"{url}#page={page}" if page else url
 
@@ -181,7 +185,33 @@ def _same_document_key(title: str, page: int) -> Tuple[str, int]:
     return re.sub(r"[^a-z0-9]+", "", (title or "").lower())[:80], page
 
 
-def search(query: str, count: int = 8, per_doc: int = 2) -> List[dict]:
+def _shelf_filter(conn: sqlite3.Connection, shelf: str, skip_fiction: bool) -> Tuple[str, list]:
+    """An SQL condition (and its values) that keeps the pages of documents on
+    ``shelf`` — or, with no shelf, leaves out imaginative writing. A document
+    filed one by one counts by its own shelf; any other by its collection's.
+    ("", []) when there is nothing to filter by, or no catalogue yet."""
+    from . import shelves
+
+    if not shelf and not skip_fiction:
+        return "", []
+    try:
+        conn.execute("SELECT 1 FROM shelf_items LIMIT 1")
+    except sqlite3.Error:
+        return "", []                                    # an index from before there were shelves
+    like = shelf.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + shelves.SEP + "%"
+    if not shelf:
+        fiction = shelves.FICTION_CATEGORY
+        return (f" AND rowid / {_PAGE_FACTOR} NOT IN (SELECT d.id FROM docs d JOIN shelf_items s ON s.book = d.book "
+                "AND s.key = d.path WHERE s.shelf = ? OR s.shelf LIKE ?)", [fiction, fiction + shelves.SEP + "%"])
+    whole = [row["book"] for row in conn.execute("SELECT DISTINCT book FROM docs")
+             if shelves.under(shelves.collection_shelf(row["book"]), shelf)]
+    marks = ",".join("?" for _ in whole) or "''"
+    return (f" AND rowid / {_PAGE_FACTOR} IN (SELECT d.id FROM docs d LEFT JOIN shelf_items s ON s.book = d.book "
+            "AND s.key = d.path WHERE (s.shelf IS NOT NULL AND (s.shelf = ? OR s.shelf LIKE ? ESCAPE '\\')) "
+            f"OR (s.shelf IS NULL AND d.book IN ({marks})))", [shelf, like] + whole)
+
+
+def search(query: str, count: int = 8, per_doc: int = 2, shelf: str = "", skip_fiction: bool = False) -> List[dict]:
     """Best-matching manual pages for a question.
 
     Pages that contain every term rank first. If there are too few, pages
@@ -189,6 +219,9 @@ def search(query: str, count: int = 8, per_doc: int = 2) -> List[dict]:
     least half of the question's *weight*, where rare terms weigh more than
     common ones. At most ``per_doc`` pages per manual, so one long document
     cannot crowd out the others.
+
+    ``shelf`` keeps the search to one shelf or category of the library;
+    ``skip_fiction`` (when no shelf is named) leaves novels and poems out.
     """
     terms = query_terms(query)
     if not terms:
@@ -196,9 +229,10 @@ def search(query: str, count: int = 8, per_doc: int = 2) -> List[dict]:
     conn = connect(readonly=True)
     if conn is None:
         return []
+    only, only_values = _shelf_filter(conn, shelf, skip_fiction)
     sql = (
         "SELECT rowid, snippet(pages, 0, '', '', ' … ', 48) AS snip, text, title, "
-        "bm25(pages, 1.0, 6.0) AS score FROM pages WHERE pages MATCH ? "
+        f"bm25(pages, 1.0, 6.0) AS score FROM pages WHERE pages MATCH ?{only} "
         "ORDER BY score LIMIT ?"
     )
     try:
@@ -215,7 +249,7 @@ def search(query: str, count: int = 8, per_doc: int = 2) -> List[dict]:
                 continue
             if floor and weights is None:
                 weights = _term_weights(conn, terms)
-            for row in conn.execute(sql, (match, count * 8)):
+            for row in conn.execute(sql, [match] + only_values + [count * 8]):
                 if row["rowid"] in seen:
                     continue
                 if floor and _weighted_coverage(f"{row['title']} {row['text']}", weights or {}) < floor:
@@ -266,6 +300,7 @@ def search(query: str, count: int = 8, per_doc: int = 2) -> List[dict]:
                 "url": pdf_url(doc["book"], doc["path"], page),
                 "snippet": re.sub(r"\s+", " ", row["snip"] or "").strip(),
                 "book": doc["book"],
+                "entry": doc["path"],
                 "page": page,
                 "pages": doc["pages"],
                 "doc_id": doc_id,
@@ -281,7 +316,7 @@ def search(query: str, count: int = 8, per_doc: int = 2) -> List[dict]:
 
 
 def is_manual_url(url: str) -> bool:
-    return urlsplit(url).path.lower().endswith(".pdf")
+    return urlsplit(url).path.lower().endswith(".pdf") or config.is_local_url(url)
 
 
 def passage(url: str, budget: int = 4000) -> dict:
@@ -289,8 +324,9 @@ def passage(url: str, budget: int = 4000) -> dict:
     before it while the budget lasts. Same keys as ``kiwix.fetch_article``."""
     result = {"url": url, "title": "", "content": "", "success": False, "error": ""}
     parts = urlsplit(url)
-    if parts.path.startswith(config.ADDED_URL_PREFIX):
-        book, path = config.ADDED_BOOK, unquote(parts.path[len(config.ADDED_URL_PREFIX):])
+    local = config.local_document(url)
+    if local:
+        book, path = local
     else:
         match = re.match(r"^/content/([^/]+)/(.+)$", parts.path)
         if not match:
@@ -346,6 +382,78 @@ def passage(url: str, budget: int = 4000) -> dict:
         conn.close()
 
 
+def document(book: str, path: str) -> Optional[dict]:
+    """``{"title", "pages", "text_pages"}`` for one indexed PDF, or None."""
+    conn = connect(readonly=True)
+    if conn is None:
+        return None
+    try:
+        row = conn.execute("SELECT title, pages, text_pages FROM docs WHERE book = ? AND path = ?", (book, path)).fetchone()
+        return {"title": row["title"], "pages": int(row["pages"] or 0), "text_pages": int(row["text_pages"] or 0)} if row else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def page_texts(book: str, path: str, first: int = 1, count: int = 6) -> List[Tuple[int, str]]:
+    """``[(page number, text)]`` for ``count`` pages of a document starting at
+    ``first`` — every page in the range, empty text for one that is an image."""
+    conn = connect(readonly=True)
+    if conn is None:
+        return []
+    try:
+        doc = conn.execute("SELECT id, pages FROM docs WHERE book = ? AND path = ?", (book, path)).fetchone()
+        if doc is None:
+            return []
+        total = int(doc["pages"] or 0)
+        first = max(1, min(int(first), max(total, 1)))
+        last = min(total, first + max(1, int(count)) - 1)
+        rows = {row["rowid"] - doc["id"] * _PAGE_FACTOR: row["text"] for row in conn.execute(
+            "SELECT rowid, text FROM pages WHERE rowid >= ? AND rowid <= ?",
+            (doc["id"] * _PAGE_FACTOR + first, doc["id"] * _PAGE_FACTOR + last))}
+        return [(number, (rows.get(number) or "").strip()) for number in range(first, last + 1)]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+
+def documents(book: str, query: str = "", offset: int = 0, limit: int = 60) -> dict:
+    """The indexed documents of one collection, by title:
+    ``{"total", "documents": [{"path", "title", "pages"}]}``. ``query`` keeps
+    the ones whose title has every word."""
+    conn = connect(readonly=True)
+    if conn is None:
+        return {"total": 0, "documents": []}
+    try:
+        where, values = "book = ?", [book]
+        for word in re.findall(r"[\w'-]+", query or "")[:6]:
+            where += " AND title LIKE ?"
+            values.append(f"%{word}%")
+        total = conn.execute(f"SELECT count(*) FROM docs WHERE {where}", values).fetchone()[0]
+        rows = conn.execute(f"SELECT path, title, pages FROM docs WHERE {where} ORDER BY title COLLATE NOCASE LIMIT ? OFFSET ?",
+                            values + [max(1, min(int(limit), 200)), max(0, int(offset))]).fetchall()
+        return {"total": int(total), "documents": [{"path": r["path"], "title": r["title"], "pages": int(r["pages"] or 0)} for r in rows]}
+    except sqlite3.Error:
+        return {"total": 0, "documents": []}
+    finally:
+        conn.close()
+
+
+def document_counts() -> Dict[str, int]:
+    """How many indexed documents each collection has."""
+    conn = connect(readonly=True)
+    if conn is None:
+        return {}
+    try:
+        return {row["book"]: int(row["n"]) for row in conn.execute("SELECT book, count(*) AS n FROM docs GROUP BY book")}
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
 def stats() -> dict:
     conn = connect(readonly=True)
     if conn is None:
@@ -364,7 +472,7 @@ def stats() -> dict:
             "text_pages": row["text_pages"] or 0,
             "scanned_documents": row["scanned"] or 0,
             "complete": (bool(sources[row["book"]]["complete"]) if row["book"] in sources
-                         else row["book"] == config.ADDED_BOOK),      # added one by one: never half-scanned
+                         else row["book"] in config.LOCAL_BOOKS),     # added one by one: never half-scanned
         } for row in docs]
         return {
             "built": True,
@@ -580,9 +688,10 @@ def _crashed(job: Tuple[str, str, bool]) -> dict:
             "error": "crashed the PDF reader (malformed file)"}
 
 
-def _extract_all(jobs: List[Tuple[str, str, bool]], workers: int, pool_factory=None):
-    """Run ``_extract_job`` over ``jobs`` in worker processes, yielding one
-    result per job, in order.
+def _extract_all(jobs: List[Tuple[str, str, bool]], workers: int, pool_factory=None, work=None):
+    """Run ``_extract_job`` (or ``work``, a function of the same shape: one
+    job in, one result dict out, never raising) over ``jobs`` in worker
+    processes, yielding one result per job, in order.
 
     A malformed PDF can segfault the PDF library. That kills the worker, and a
     process pool that loses a worker fails *every* job still in flight — so
@@ -594,12 +703,13 @@ def _extract_all(jobs: List[Tuple[str, str, bool]], workers: int, pool_factory=N
     from concurrent.futures.process import BrokenProcessPool
 
     factory = pool_factory or (lambda count: ProcessPoolExecutor(max_workers=count, initializer=_quiet_worker))
+    work = work or _extract_job
     window = max(8, workers * 4)
     pool = factory(workers)
     try:
         for offset in range(0, len(jobs), window):
             batch = jobs[offset:offset + window]
-            futures = [pool.submit(_extract_job, job) for job in batch]
+            futures = [pool.submit(work, job) for job in batch]
             unfinished: List[Tuple[int, Tuple[str, str, bool]]] = []
             results: Dict[int, dict] = {}
             for index, (job, future) in enumerate(zip(batch, futures)):
@@ -614,7 +724,7 @@ def _extract_all(jobs: List[Tuple[str, str, bool]], workers: int, pool_factory=N
                 for index, job in unfinished:
                     single = factory(1)
                     try:
-                        results[index] = single.submit(_extract_job, job).result()
+                        results[index] = single.submit(work, job).result()
                     except BrokenProcessPool:
                         results[index] = _crashed(job)
                     except Exception as exc:
@@ -687,6 +797,18 @@ def apply_titles(book: str, titles: Dict[str, str]) -> int:
     finally:
         conn.close()
     return changed
+
+
+def retitle(conn: sqlite3.Connection, book: str, path: str, title: str) -> bool:
+    """Give one document a better title (the page text stays as it is)."""
+    title = re.sub(r"\s+", " ", str(title or "")).strip()[:200]
+    row = conn.execute("SELECT id, title FROM docs WHERE book = ? AND path = ?", (book, path)).fetchone()
+    if row is None or not title or title == row["title"]:
+        return False
+    conn.execute("UPDATE docs SET title = ? WHERE id = ?", (title, row["id"]))
+    conn.execute("UPDATE pages SET title = ? WHERE rowid >= ? AND rowid < ?",
+                 (title, row["id"] * _PAGE_FACTOR, (row["id"] + 1) * _PAGE_FACTOR))
+    return True
 
 
 def _catalogued_titles(zim: Path) -> Dict[str, str]:

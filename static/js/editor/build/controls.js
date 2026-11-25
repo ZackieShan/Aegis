@@ -152,7 +152,7 @@ export function controlsHTML({ color, brushSize, wandTolerance }) {
         <select id="ge-ai-inpaint" class="ge-ai-model" title="Model for inpainting">
           <option value="">Auto</option>
           <option value="" disabled>──────────</option>
-          <option value="__serve_cookbook__">+ Serve a model in Cookbook…</option>
+          <option value="__serve_cookbook__">+ Serve a model in Model Shopper…</option>
         </select>
       </div>
       <div class="ge-control-row ge-eraser-row" style="margin-top:6px;">
@@ -263,7 +263,7 @@ export function controlsHTML({ color, brushSize, wandTolerance }) {
         <div class="ge-dep-notice-text">
           <strong>rembg not installed.</strong>
           Background Remove needs the <code>rembg</code> package on this
-          server. Click to install it from Cookbook → Dependencies.
+          server. Click to install it from Model Shopper → Dependencies.
         </div>
         <button type="button" class="ge-btn ge-btn-sm" id="ge-rembg-install-link">Install rembg</button>
       </div>

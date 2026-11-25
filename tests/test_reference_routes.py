@@ -74,11 +74,11 @@ def test_status_trims_the_catalog_and_hides_server_paths(client, monkeypatch):
 def test_search_validates_and_shapes_results(client, monkeypatch):
     seen = {}
 
-    def fake_search(query, count, scope):
+    def fake_search(query, count, scope, shelf=""):
         seen.update(query=query, count=count, scope=scope)
         return [{"title": "First Aid — page 46", "url": "https://lib/x.pdf#page=46", "snippet": "tourniquet",
                  "book": "armypubs_en_all", "book_title": "Army Publishing Directorate", "kind": "manual",
-                 "page": 46, "doc_id": 3}]
+                 "page": 46, "doc_id": 3, "shelf": "Survival/Medical & first aid"}]
 
     monkeypatch.setattr(library, "library_search", fake_search)
     monkeypatch.setattr(library, "available", lambda: True)
@@ -87,7 +87,9 @@ def test_search_validates_and_shapes_results(client, monkeypatch):
     assert seen == {"query": "tourniquet", "count": 25, "scope": "all"}
     assert data["results"] == [{"title": "First Aid — page 46", "url": "https://lib/x.pdf#page=46",
                                 "snippet": "tourniquet", "source": "Army Publishing Directorate",
-                                "kind": "manual", "page": 46}]
+                                "kind": "manual", "page": 46, "shelf": "Survival/Medical & first aid",
+                                "shelf_name": "Survival › Medical & first aid", "by": "", "dates": "", "form": ""}]
+    assert data["shelf"] == ""
 
 
 @pytest.mark.parametrize("path", [
@@ -100,7 +102,7 @@ def test_asset_proxy_takes_only_content_paths(client, monkeypatch, path):
     assert client.get("/api/reference/asset", params={"p": path}).status_code == 400
 
 
-def test_asset_proxy_serves_only_raster_images(client, monkeypatch):
+def test_asset_proxy_serves_only_images_and_nothing_that_can_run(client, monkeypatch):
     fetched = []
 
     def fake_fetch(url, max_bytes=0):
@@ -118,7 +120,19 @@ def test_asset_proxy_serves_only_raster_images(client, monkeypatch):
     assert ok.status_code == 200 and ok.content == b"\xff\xd8jpeg"
     assert ok.headers["content-type"] == "image/jpeg" and ok.headers["x-content-type-options"] == "nosniff"
     assert fetched == ["http://127.0.0.1:8095/content/w/_assets_/a/b.jpg"]      # internal base, query dropped
-    assert client.get("/api/reference/asset", params={"p": "/content/w/logo.svg"}).status_code == 415
+    # Every answer is inert if it is ever opened as a page.
+    assert ok.headers["content-security-policy"] == "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    # An SVG (a formula, a diagram) is a picture that can carry script: it is
+    # served to an <img>, never as a page of its own.
+    as_picture = client.get("/api/reference/asset", params={"p": "/content/w/logo.svg"}, headers={"Sec-Fetch-Dest": "image"})
+    assert as_picture.status_code == 200 and as_picture.headers["content-type"].startswith("image/svg+xml")
+    assert "sandbox" in as_picture.headers["content-security-policy"] and "default-src 'none'" in as_picture.headers["content-security-policy"]
+    assert as_picture.headers["x-content-type-options"] == "nosniff" and "Sec-Fetch-Dest" in as_picture.headers["vary"]
+    for destination in ("document", "iframe", "object", "embed", "empty"):
+        refused = client.get("/api/reference/asset", params={"p": "/content/w/logo.svg"}, headers={"Sec-Fetch-Dest": destination})
+        assert refused.status_code == 415, destination
+    old_browser = client.get("/api/reference/asset", params={"p": "/content/w/logo.svg"})        # says nothing about what it is loading
+    assert old_browser.status_code == 200 and "sandbox" in old_browser.headers["content-security-policy"]
     assert client.get("/api/reference/asset", params={"p": "/content/w/Article"}).status_code == 415
     assert client.get("/api/reference/asset", params={"p": "/content/w/missing.png"}).status_code == 404
 
@@ -126,8 +140,8 @@ def test_asset_proxy_serves_only_raster_images(client, monkeypatch):
 def test_identify_checks_the_upload_and_passes_the_owner(client, monkeypatch, uploads):
     seen = {}
 
-    async def fake_identify(path, hint="", owner=None):
-        seen.update(path=path, hint=hint, owner=owner)
+    async def fake_identify(path, hint="", owner=None, want=""):
+        seen.update(path=path, hint=hint, owner=owner, want=want)
         return {"markdown": "**Most likely:** Death cap", "sources": []}
 
     monkeypatch.setattr(identify, "identify_image", fake_identify)
@@ -137,6 +151,10 @@ def test_identify_checks_the_upload_and_passes_the_owner(client, monkeypatch, up
     assert seen["path"] == "/data/uploads/photo.jpg" and seen["owner"] == "alice"
     assert seen["hint"].startswith("under oaks") and len(seen["hint"]) <= 500
     assert uploads.asked[-1] == (photo, "alice")                     # owner-checked lookup
+    assert seen["want"] == ""                                        # nobody has to say what kind of photo it is
+    client.post("/api/reference/identify", json={"file_id": photo, "want": "text"})
+    assert seen["want"] == "text"                                    # …but they can correct the sorting
+    assert client.post("/api/reference/identify", json={"file_id": photo, "want": "x-ray"}).status_code == 400
 
     assert client.post("/api/reference/identify", json={}).status_code == 400
     assert client.post("/api/reference/identify", json=["x"]).status_code == 400
@@ -146,7 +164,7 @@ def test_identify_checks_the_upload_and_passes_the_owner(client, monkeypatch, up
 
 
 def test_identify_errors_keep_their_status(client, monkeypatch):
-    async def unavailable(path, hint="", owner=None):
+    async def unavailable(path, hint="", owner=None, want=""):
         raise identify.IdentifyError("No vision model is configured (Settings → Vision).", 503)
 
     monkeypatch.setattr(identify, "identify_image", unavailable)

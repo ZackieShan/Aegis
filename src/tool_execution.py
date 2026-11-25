@@ -847,7 +847,7 @@ async def _execute_tool_block_impl(
         desc = f"{tool}: {first_line}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
-    elif tool in ("manage_lists", "manage_reminders", "manage_trackers", "manage_boards"):
+    elif tool in ("manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_kitchen"):
         # Home tools act on the things of the account this chat belongs to.
         desc = f"{tool}: {' '.join(content.split())[:80]}"
         result = await _direct_fallback(tool, content, progress_cb=progress_cb,
@@ -1086,6 +1086,9 @@ _FORMATTER_HANDLED_KEYS = {
     "response", "results", "session_id", "name", "model", "session_name",
     "success", "path", "action", "title", "doc_id", "version", "applied",
     "error", "output",
+    # What a screen draws for this result (tiles, a large figure). It repeats
+    # the output in another shape, so the model is not shown it twice.
+    "card",
 }
 
 

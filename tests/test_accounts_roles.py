@@ -54,9 +54,13 @@ def test_built_in_roles_and_what_each_lets_the_assistant_do(accounts):
     assert roles["admin"]["locked"] and roles["admin"]["privileges"]["can_use_bash"] is True
     for name in ("member", "household", "guest"):
         assert roles[name]["privileges"]["can_use_bash"] is False
-    assert roles["household"]["experience"]["mode"] == "simple" and roles["member"]["experience"]["mode"] == "full"
+    # Everyone but an administrator gets the family screen; the full app (the workshop) is the administrator's.
+    assert roles["household"]["experience"]["mode"] == "simple" and roles["member"]["experience"]["mode"] == "simple"
+    assert roles["admin"]["experience"]["mode"] == "full" and roles["member"]["experience"]["allow_full_app"] is False
+    # What tells a member from the household role is what the assistant may do for them, not the screen.
+    assert roles["member"]["privileges"]["can_use_documents"] is True and roles["household"]["privileges"]["can_use_documents"] is False
     assert access.granted_tools("household") == {"manage_lists", "manage_reminders", "manage_trackers", "manage_boards",
-                                                 "manage_notes", "manage_memory", "manage_calendar"}
+                                                 "manage_notes", "manage_kitchen", "manage_memory", "manage_calendar"}
     assert access.granted_tools("guest") == set() and roles["guest"]["privileges"]["can_use_agent"] is False
     assert access.get_role("no-such-role") == roles["member"]                       # unknown falls back, safely
     # Nothing that reaches the server is in any grantable group.
@@ -123,7 +127,7 @@ def test_accounts_from_before_roles_keep_exactly_what_they_had(accounts, tmp_pat
 
 def test_experience_is_the_roles_defaults_with_the_persons_settings_on_top(accounts):
     access, _, manager = accounts
-    assert manager.get_experience("mara")["mode"] == "full"
+    assert manager.get_experience("mara")["mode"] == "simple"            # a member gets the family screen
     manager.set_role("mara", "household")
     experience = manager.get_experience("mara")
     assert experience["mode"] == "simple" and experience["sections"] == list(access.HOME_SECTIONS)
@@ -140,8 +144,8 @@ def test_experience_is_the_roles_defaults_with_the_persons_settings_on_top(accou
     manager.set_experience("mara", {"display_name": "Mara Lin", "assistant_name": "Ava"})
     manager.set_experience("mara", {"accent": "red; background:url(x)", "theme": "sparkly"})
     assert manager.get_experience("mara")["accent"] == "" and manager.get_experience("mara")["theme"] == "dark"
-    manager.set_role("mara", "member")
-    assert manager.get_experience("mara")["mode"] == "full" and manager.get_experience("mara")["assistant_name"] == "Ava"
+    manager.set_role("mara", "member")                                   # her own settings travel with her to another role
+    assert manager.get_experience("mara")["mode"] == "simple" and manager.get_experience("mara")["assistant_name"] == "Ava"
 
 
 def test_the_instruction_that_fits_the_assistant_to_one_person(accounts):
@@ -189,7 +193,7 @@ def test_tool_policy_follows_the_role(accounts, monkeypatch):
 
     monkeypatch.setattr(tool_security, "owner_is_admin_or_single_user", lambda owner: owner == "zed")
     monkeypatch.setattr(auth_mod, "AuthManager", lambda *a, **k: manager)
-    home = {"manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes"}
+    home = {"manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes", "manage_kitchen"}
     server = {"bash", "python", "read_file", "write_file", "manage_hosts", "manage_apps", "manage_projects",
               "delegate_agent", "manage_settings", "manage_endpoints", "send_email", "manage_tasks", "vault_get"}
 
@@ -296,7 +300,8 @@ def test_an_app_setting_can_be_handed_back_to_the_role(accounts):
     manager.set_experience("mara", {"mode": None})                       # follow the role again
     assert manager.get_experience("mara")["mode"] == "simple" and manager.get_experience("mara")["display_name"] == "Mara"
     assert set(manager.users["mara"]["experience"]) == {"display_name"}
-    manager.set_role("mara", "member")
+    access.save_role("workshop-guest", {"label": "Workshop guest", "experience": {"mode": "full"}})
+    manager.set_role("mara", "workshop-guest")
     assert manager.get_experience("mara")["mode"] == "full"              # …so a later role change reaches her
 
 
@@ -428,7 +433,7 @@ def test_console_is_closed_to_everyone_but_administrators(accounts, monkeypatch)
         assert refused.value.status_code == 403, (method, path)
     # …while anyone signed in can see their own account, and change only how it looks.
     mine = call("GET", "/api/me")
-    assert (mine["username"], mine["role"], mine["is_admin"], mine["home"]) == ("mara", "member", False, "/")
+    assert (mine["username"], mine["role"], mine["is_admin"], mine["home"]) == ("mara", "member", False, "/home")
     after = call("PUT", "/api/me", body={"display_name": "Mara", "accent": "#00aa88", "mode": "full", "tone": "obey me",
                                          "allow_full_app": True})
     assert after["experience"]["display_name"] == "Mara" and after["experience"]["accent"] == "#00aa88"

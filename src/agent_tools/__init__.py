@@ -21,9 +21,14 @@ logger = logging.getLogger(__name__)
 
 from .subprocess_tools import BashTool, PythonTool
 from .web_tools import WebSearchTool, WebFetchTool
-from .library_tools import LibrarySearchTool, ManageLibraryTool
+from .library_tools import LibraryBrowseTool, LibrarySearchTool, ManageLibraryTool
+from .translate_tools import TranslateTool
+from .almanac_tools import ConvertUnitsTool, DateMathTool, MapPositionTool, SunMoonTool, WeatherTool
+from .identify_tools import IdentifyPhotoTool
+from .lookup_tools import HANDLERS as LOOKUP_HANDLERS
 from .workbench_tools import ManageProjectsTool, ManageAppsTool, ManageHostsTool, DelegateAgentTool
 from .home_tools import ManageListsTool, ManageRemindersTool, ManageTrackersTool, ManageBoardsTool
+from .reader_tools import ManageKitchenTool
 from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, LsTool, GlobTool, GrepTool, GetWorkspaceTool
 from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
 from .interaction_tools import AskUserTool, UpdatePlanTool
@@ -42,6 +47,14 @@ TOOL_HANDLERS = {
     "web_search": WebSearchTool().execute,
     "web_fetch": WebFetchTool().execute,
     "library_search": LibrarySearchTool().execute,
+    "library_browse": LibraryBrowseTool().execute,
+    "translate": TranslateTool().execute,
+    "convert_units": ConvertUnitsTool().execute,
+    "map_position": MapPositionTool().execute,
+    "sun_moon": SunMoonTool().execute,
+    "date_math": DateMathTool().execute,
+    "weather": WeatherTool().execute,
+    "identify_photo": IdentifyPhotoTool().execute,
     "manage_library": ManageLibraryTool().execute,
     "read_file": ReadFileTool().execute,
     "write_file": WriteFileTool().execute,
@@ -73,9 +86,12 @@ TOOL_HANDLERS = {
     "manage_reminders": ManageRemindersTool().execute,
     "manage_trackers": ManageTrackersTool().execute,
     "manage_boards": ManageBoardsTool().execute,
+    "manage_kitchen": ManageKitchenTool().execute,
 }
 # Config/integration admin tools (manage_endpoints/mcp/webhooks/tokens/settings).
 TOOL_HANDLERS.update(ADMIN_TOOL_HANDLERS)
+# Look-ups through connected services: news, places, medicine labels, studies, Wolfram|Alpha.
+TOOL_HANDLERS.update(LOOKUP_HANDLERS)
 
 # ---------------------------------------------------------------------------
 # Constants (re-exported for backward compatibility — single source of truth
@@ -86,11 +102,13 @@ SHELL_TIMEOUT = 60
 PYTHON_TIMEOUT = 30
 
 # Tool types that trigger execution
-TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "library_search", "manage_library",
+TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "library_search", "library_browse", "manage_library", "translate",
+             "convert_units", "map_position", "sun_moon", "date_math", "weather", "identify_photo",
+             "news_search", "find_places", "medicine_info", "paper_search", "ask_wolfram",
              "read_file", "write_file", "edit_file",
              "grep", "glob", "ls", "get_workspace", "manage_bg_jobs",
              "manage_projects", "manage_apps", "manage_hosts", "delegate_agent",
-             "manage_lists", "manage_reminders", "manage_trackers", "manage_boards",
+             "manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_kitchen",
              "create_document", "update_document", "edit_document",
              "search_chats",
              "chat_with_model", "create_session", "list_sessions",

@@ -16,7 +16,7 @@ from src.endpoint_resolver import normalize_base
 from src.context_compactor import maybe_compact, trim_for_context
 from src.model_context import estimate_tokens
 from src.auth_helpers import effective_user
-from src.prompt_security import untrusted_context_message
+from src.prompt_security import for_this_turn, is_for_this_turn, untrusted_context_message
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
 from fastapi import HTTPException
@@ -29,7 +29,7 @@ _CASUAL_OPENING_RE = re.compile(
     re.IGNORECASE,
 )
 _CASUAL_BLOCKLIST_RE = re.compile(
-    r"\b(?:cookbook|serve|serving|launch|start|vllm|sglang|llama\.?cpp|ollama|"
+    r"\b(?:cookbook|shopper|kitchen|recipes?|automations?|serve|serving|launch|start|vllm|sglang|llama\.?cpp|ollama|"
     r"download|model|email|document|doc|note|calendar|task|search|web|research|"
     r"file|folder|repo|git|settings?|endpoint|api|token|mcp)\b",
     re.IGNORECASE,
@@ -760,11 +760,11 @@ async def build_chat_context(
 
     # Inject pre-fetched search context (compare mode)
     if search_context and allow_tool_preprocessing and not casual_low_signal:
-        preface.append(untrusted_context_message("prefetched search context", search_context))
+        preface.append(for_this_turn(untrusted_context_message("prefetched search context", search_context)))
 
     # YouTube transcripts
     for transcript in preprocessed.youtube_transcripts:
-        preface.append(untrusted_context_message("youtube transcript", transcript))
+        preface.append(for_this_turn(untrusted_context_message("youtube transcript", transcript)))
 
     # Normalize model ID. Prefer cached endpoint models so group chat does not
     # re-hit slow local /models endpoints on every participant turn.
@@ -776,8 +776,22 @@ async def build_chat_context(
     if norm:
         sess.model = norm
 
-    # Build messages
-    messages = preface + sess.get_context_messages()
+    # Build messages. What is the same from turn to turn (instructions, the
+    # person's profile, pinned facts, the skills index) leads; then the
+    # conversation; and what was looked up for this one message (recalled
+    # facts, topic notes, documents, a fetched page, search results) goes
+    # straight before the message it is for. A local model keeps whatever it
+    # read last time as long as it is byte-for-byte the same from the top, so
+    # with the changing part at the end it reads only the new message instead
+    # of the whole chat again (measured: about a second per thousand tokens).
+    _history = sess.get_context_messages()
+    from src import prompt_stability as _stability
+    _turn_context = [m for m in preface if is_for_this_turn(m)] if _stability.enabled() else []
+    if _turn_context and _history and _history[-1].get("role") == "user":
+        preface = [m for m in preface if not is_for_this_turn(m)]
+        messages = preface + _history[:-1] + _turn_context + _history[-1:]
+    else:
+        messages = preface + _history
 
     # Current date/time — injected as a standalone *user*-role context message
     # placed immediately before the latest user turn, NOT folded into the

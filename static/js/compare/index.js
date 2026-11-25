@@ -295,7 +295,7 @@ async function _buildCompareUI() {
 
   // 5. Save current mode and seed the toolbar for this compare type.
   const _toggleState = Storage.loadToggleState();
-  state._savedMode = _toggleState.mode || 'chat';
+  state._savedMode = _toggleState.mode || 'agent';
   const _targetMode = (state._compareMode === 'agent') ? 'agent' : 'chat';
   _setToolbarMode(_targetMode, false);
   const _ab = document.getElementById('mode-agent-btn'), _cb = document.getElementById('mode-chat-btn');

@@ -173,6 +173,26 @@ def _effective_provider_chain(primary: str) -> List[str]:
     return chain
 
 
+# How much of a search answer may be passages. The agent's tools cut any output at 10,000 characters;
+# the source list, the summary of results and the closing instructions need the rest.
+_PASSAGE_ROOM = 5200
+_PASSAGE_ROOM_PER_PAGE = 1800
+
+
+def _brave_passages(query: str, time_filter: Optional[str], pages: int):
+    """(results, {url: passages}) from Brave, or ([], {}) when it cannot give them — no key, switched
+    off, over this month's limit, the request failed, or it found nothing. Never raises."""
+    try:
+        from . import brave
+        if brave.why_not() is not None:
+            return [], {}
+        results, texts = brave.passages(query, time_filter, urls=max(3, min(pages, 6)), tokens=2048)
+        return (results, texts) if results and texts else ([], {})
+    except Exception as problem:
+        logger.warning("Brave passages not used: %s", problem)
+        return [], {}
+
+
 def _fetch_result_content(url: str, query: str) -> dict:
     """Fetch one search result: library links through the library (they are
     loopback/tailnet addresses the SSRF-guarded web fetcher rightly refuses),
@@ -347,7 +367,18 @@ def comprehensive_web_search(
     search_results = []
     provider_attempts = {}
     used_provider = ""
+    passages: Dict[str, List[str]] = {}
+    plain_filters = domain_whitelist is None and domain_blacklist is None and not content_type and not language
     for provider_name in provider_chain:
+        if provider_name == "brave" and plain_filters:
+            # Brave can hand back the passages that answer the question along with their pages: one
+            # request, no page fetching. When it has none, the ordinary search below takes its turn.
+            search_results, passages = _brave_passages(query, time_filter, max(max_pages, 3))
+            if search_results:
+                provider_attempts[provider_name] = f"ok ({len(search_results)}, with passages)"
+                logger.info(f"Comprehensive search: brave returned passages from {len(search_results)} pages")
+                used_provider = provider_name
+                break
         last_err = None
         empty = False
         for attempt in range(2):
@@ -394,7 +425,7 @@ def comprehensive_web_search(
         return (msg, []) if return_sources else msg
 
     from_library = used_provider == "kiwix"
-    if not from_library:
+    if not from_library and not passages:
         # Library hits arrive already ordered (exact titles first, then by how
         # much of the question they cover); the web ranker's domain/recency
         # signals mean nothing for them.
@@ -445,8 +476,15 @@ def comprehensive_web_search(
         r["url"]: i for i, r in enumerate(search_results, 1) if r.get("url")
     }
 
-    # Fetch content in parallel
+    # Fetch content in parallel — unless the provider already gave the passages
     fetched_content = []
+    if passages:
+        for result in search_results:
+            parts = passages.get(result["url"])
+            if parts:
+                fetched_content.append({"url": result["url"], "title": result["title"], "content": "\n\n".join(parts),
+                                        "success": True, "source_index": _url_index.get(result["url"]), "passages": True})
+        filtered_urls = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {
             executor.submit(_fetch_result_content, url, query): url
@@ -497,7 +535,10 @@ def comprehensive_web_search(
     else:
         output_parts.append("WEB SEARCH RESULTS AND FETCHED CONTENT")
     output_parts.append(f"Query: {query}")
-    output_parts.append(f"Searched {len(search_results)} results, fetched {len(fetched_content)} pages")
+    if passages:
+        output_parts.append(f"The parts of {len(fetched_content)} pages that bear on the question")
+    else:
+        output_parts.append(f"Searched {len(search_results)} results, fetched {len(fetched_content)} pages")
     output_parts.append("=" * 70)
     output_parts.append("")
 
@@ -510,7 +551,28 @@ def comprehensive_web_search(
         if result.get("age"):
             output_parts.append(f"    Age: {result['age']}")
 
-    if fetched_content:
+    if fetched_content and passages:
+        # Passages are already the relevant parts: no trimming to a page's first screens, and none of
+        # the guessed key points, quotes and statistics a whole page needs. The room is shared out in
+        # the provider's order, so the best page gets the most of it.
+        output_parts.append("\n" + "=" * 70)
+        output_parts.append("PASSAGES FROM THE PAGES (the parts that bear on the question):")
+        output_parts.append("-" * 50)
+        room = _PASSAGE_ROOM
+        for content in fetched_content:
+            if room < 300:
+                break
+            text = content["content"][: min(_PASSAGE_ROOM_PER_PAGE, room)]
+            if len(content["content"]) > len(text):
+                text = text.rsplit(" ", 1)[0] + " … [more on the page]"
+            room -= len(text)
+            _idx = content.get("source_index")
+            output_parts.append(f"\n{f'[CONTENT {_idx}]' if _idx else '[CONTENT]'} From: {content['url']}")
+            output_parts.append(f"Title: {content['title']}")
+            output_parts.append("-" * 30)
+            output_parts.append(text)
+            output_parts.append("")
+    elif fetched_content:
         output_parts.append("\n" + "=" * 70)
         output_parts.append("FETCHED PAGE CONTENT:")
         output_parts.append("-" * 50)
@@ -564,7 +626,8 @@ def comprehensive_web_search(
     instructions = (
         "\n\nIMPORTANT INSTRUCTIONS:\n"
         "1. Use the above web search results and fetched content to answer the user's question\n"
-        "2. Prioritize information from the FETCHED PAGE CONTENT section as it contains actual page data\n"
+        + ("2. Prioritize information from the PASSAGES section as it contains actual page text\n" if passages else
+           "2. Prioritize information from the FETCHED PAGE CONTENT section as it contains actual page data\n") +
         "3. Cross-reference multiple sources when possible\n"
         "4. If the information is time-sensitive, pay attention to the age of the results\n"
         "5. Be explicit if the search results don't contain sufficient information to fully answer the question"

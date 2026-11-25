@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""aegis-almanac — exact answers from the command line (the same code the assistant uses).
+
+    aegis-almanac convert "5 ft 10 in" cm          # a measurement in other units
+    aegis-almanac convert "30 mpg to L/100km"
+    aegis-almanac convert "2 cups"                 # no unit asked: the usual ones of the other system
+    aegis-almanac where "40.7484, -73.9857"        # one place in every notation (lat/long, UTM, MGRS)
+    aegis-almanac where "Tulsa, OK" "Wichita, KS"  # distance and bearing between two
+    aegis-almanac onward "Denver" 45 "5 km"        # where a bearing and distance lead
+    aegis-almanac sky "Denver" --date tomorrow     # sunrise, sunset, twilight, moon
+    aegis-almanac sky "64.84, -147.72" --days 7 --zone America/Anchorage
+    aegis-almanac date today --to "March 12 2027"  # days between
+    aegis-almanac date today --add "90 days"       # a date some time on
+    aegis-almanac date "July 4 1976"               # its weekday
+    aegis-almanac places                           # is the list of town names installed?
+    aegis-almanac places fetch                     # download it (GeoNames, about 11 MB) and build the lookup
+    aegis-almanac places find "Springfield, MO"
+
+Everything is arithmetic on this machine: no model and, apart from
+`places fetch`, no network. Without the place list, give places as
+coordinates. Full notes: docs/almanac.md.
+"""
+
+from __future__ import annotations
+import asyncio, json, os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "_lib"))
+from cli import quiet_logs, emit, fail, common_parser, run
+quiet_logs()
+
+try:
+    from services.almanac import gazetteer
+    from src.agent_tools.almanac_tools import ConvertUnitsTool, DateMathTool, MapPositionTool, SunMoonTool
+    quiet_logs()
+except ModuleNotFoundError as e:
+    fail(f"{e}\nhint: run from the repo root with the venv active.", code=2)
+
+
+def _ask(tool, args: dict) -> int:
+    found = asyncio.run(tool().execute(json.dumps({key: value for key, value in args.items() if value not in (None, "")}), {"owner": None}))
+    if found.get("exit_code"):
+        fail(str(found.get("error") or "that could not be worked out").split(": ", 1)[-1])
+    print(found.get("output") or "")
+    return 0
+
+
+def cmd_convert(args):
+    return _ask(ConvertUnitsTool, {"amount": " ".join(args.amount), "to": args.to})
+
+
+def cmd_where(args):
+    return _ask(MapPositionTool, {"from": args.place, "to": args.to} if args.to else {"place": args.place})
+
+
+def cmd_onward(args):
+    return _ask(MapPositionTool, {"from": args.place, "bearing": args.bearing, "distance": args.distance})
+
+
+def cmd_sky(args):
+    return _ask(SunMoonTool, {"place": args.place, "date": args.date, "time": args.time, "days": args.days, "zone": args.zone})
+
+
+def cmd_date(args):
+    return _ask(DateMathTool, {"date": args.date, "to": args.to, "add": args.add})
+
+
+def cmd_places(args):
+    target = gazetteer.path()
+    if args.action == "find":
+        if not args.name:
+            fail("give a name to look up: aegis-almanac places find \"Springfield, MO\"")
+        found = gazetteer.find(" ".join(args.name), args.count)
+        emit([{"place": place.label, "lat": place.lat, "lon": place.lon, "population": place.population, "elevation_m": place.elevation,
+               "zone": place.zone} for place in found], args)
+        return 0 if found else 1
+    if args.action in ("fetch", "build"):
+        source = target.parent / "geonames"
+        if args.action == "fetch":
+            import urllib.request, zipfile
+            source.mkdir(parents=True, exist_ok=True)
+            for name in ("cities1000.zip", "admin1CodesASCII.txt", "countryInfo.txt"):
+                print(f"fetching {name} …", file=sys.stderr)
+                request = urllib.request.Request(gazetteer.SOURCE + name, headers={"User-Agent": "aegis-almanac"})
+                with urllib.request.urlopen(request, timeout=120) as response, open(source / name, "wb") as out:
+                    while True:
+                        block = response.read(1 << 20)
+                        if not block:
+                            break
+                        out.write(block)
+            with zipfile.ZipFile(source / "cities1000.zip") as archive:
+                if archive.namelist() != ["cities1000.txt"]:
+                    fail(f"unexpected contents in cities1000.zip: {archive.namelist()[:5]}")
+                archive.extract("cities1000.txt", source)
+        try:
+            count = gazetteer.build(source)
+        except FileNotFoundError as problem:
+            fail(f"{problem}\nhint: aegis-almanac places fetch downloads them.")
+        emit({"places": count, "database": str(target), "megabytes": round(target.stat().st_size / 1e6, 1),
+              "source": "GeoNames cities1000 (https://www.geonames.org), CC BY 4.0"}, args)
+        return 0
+    emit({"installed": gazetteer.available(), "places": gazetteer.count(), "database": str(target),
+          "hint": "" if gazetteer.available() else "aegis-almanac places fetch downloads the list (about 11 MB) and builds it"}, args)
+    return 0
+
+
+def build_parser():
+    p = common_parser("aegis-almanac", "Exact answers: units, map positions, sun and moon, dates.")
+    parents = p._common_parents
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    pc = sub.add_parser("convert", parents=parents, help="A measurement in other units")
+    pc.add_argument("amount", nargs="+", help='The amount with its unit, e.g. "5 ft 10 in" (the unit wanted may follow: "… to cm")')
+    pc.add_argument("--to", default="", help="The unit wanted")
+    pc.set_defaults(func=lambda args: cmd_convert(_last_is_unit(args)))
+
+    pw = sub.add_parser("where", parents=parents, help="A place in every notation, or distance and bearing between two")
+    pw.add_argument("place", help="A town or coordinates (lat/long, UTM, MGRS)")
+    pw.add_argument("to", nargs="?", default="", help="A second place")
+    pw.set_defaults(func=cmd_where)
+
+    po = sub.add_parser("onward", parents=parents, help="Where a bearing and a distance lead")
+    po.add_argument("place")
+    po.add_argument("bearing", help="True bearing in degrees (or e.g. '800 mils')")
+    po.add_argument("distance", help="With its unit, e.g. '5 km'")
+    po.set_defaults(func=cmd_onward)
+
+    ps = sub.add_parser("sky", parents=parents, help="Sunrise, sunset, twilight and the moon")
+    ps.add_argument("place", help="A town or coordinates")
+    ps.add_argument("--date", default="today")
+    ps.add_argument("--time", default="", help="Also say where the sun and moon are at this time of day")
+    ps.add_argument("--days", type=int, default=1, help="A table for this many days")
+    ps.add_argument("--zone", default="", help="Time zone for the answer (default: the place's own)")
+    ps.set_defaults(func=cmd_sky)
+
+    pd = sub.add_parser("date", parents=parents, help="Days between dates, a date some time on, the weekday")
+    pd.add_argument("date")
+    pd.add_argument("--to", default="", help="A second date")
+    pd.add_argument("--add", default="", help="How far to move it: '90 days', '-3 months', '10 business days'")
+    pd.set_defaults(func=cmd_date)
+
+    pp = sub.add_parser("places", parents=parents, help="The list of town names: status, fetch, build, find")
+    pp.add_argument("action", nargs="?", default="status", choices=["status", "fetch", "build", "find"])
+    pp.add_argument("name", nargs="*", help="For find: the name to look up")
+    pp.add_argument("--count", type=int, default=5)
+    pp.set_defaults(func=cmd_places)
+    return p
+
+
+def _last_is_unit(args):
+    """`aegis-almanac convert "5 ft 10 in" cm` — a second argument is the unit wanted."""
+    if (not args.to and len(args.amount) == 2 and not any(char.isdigit() for char in args.amount[1])
+            and any(char.isalpha() for char in args.amount[0])):
+        args.amount, args.to = [args.amount[0]], args.amount[1]
+    return args
+
+
+if __name__ == "__main__":
+    sys.exit(run(build_parser()))

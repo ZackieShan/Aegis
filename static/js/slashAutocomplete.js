@@ -2,7 +2,7 @@
 // Lightweight popup that surfaces the existing /command registry as users
 // type. Reads COMMANDS from slashCommands.js — no command logic lives here.
 
-import { COMMANDS, LEGACY_ALIASES } from './slashCommands.js';
+import { COMMANDS, ADMIN_COMMANDS, viewerIsAdmin } from './slashCommands.js';
 
 const POPUP_ID = 'slash-autocomplete';
 const MAX_VISIBLE = 14;
@@ -14,23 +14,16 @@ const MAX_VISIBLE = 14;
 // eggs with no productivity value, or internal machinery).
 const EXCLUDED = new Set(['flip','roll','8ball','fortune','odyssey','ascii']);
 
-// Important legacy aliases to promote to their own rows in the popup. These
-// are the short forms people will actually type (/new, /clear, /web, etc.)
-// rather than the full /chats new, /toggle web equivalents.
-const PROMOTED_ALIASES = new Set([
-  'new','clear','rename','fork','export','archive','favorite','unfavorite',
-  'web','bash','research','doc',
-  'memories','forget',
-]);
-
 function _flatten() {
   const out = [];
   const seen = new Set();
 
   // 1. Top-level commands and their subcommands from COMMANDS
+  const admin = viewerIsAdmin();
   for (const [name, def] of Object.entries(COMMANDS)) {
     if (EXCLUDED.has(name)) continue;
     if (def.hidden) continue;
+    if (!admin && ADMIN_COMMANDS.has(name)) continue;      // not theirs to run: not offered
     if (def.handler) {
       seen.add(`/${name}`);
       out.push({
@@ -55,26 +48,6 @@ function _flatten() {
           usage: sdef.usage || '',
         });
       }
-    }
-  }
-
-  // 2. Promoted legacy aliases (/new, /clear, /web …) as convenient short rows
-  if (LEGACY_ALIASES) {
-    for (const [alias, { parent, sub }] of Object.entries(LEGACY_ALIASES)) {
-      if (!PROMOTED_ALIASES.has(alias)) continue;
-      const tok = `/${alias}`;
-      if (seen.has(tok)) continue;
-      const parentDef = COMMANDS[parent];
-      const subDef = parentDef?.subs?.[sub];
-      if (!subDef) continue;
-      seen.add(tok);
-      out.push({
-        token: tok,
-        aliases: [],
-        category: parentDef.category || '',
-        help: subDef.help || '',
-        usage: tok,
-      });
     }
   }
 

@@ -52,8 +52,22 @@ def _get_search_instance() -> str:
     return SEARXNG_INSTANCE
 
 
+def _kept_for(provider: str, field: str = "api_key") -> str:
+    """What an administrator typed in on Settings → Integrations for this provider, or ''."""
+    try:
+        from services.connections import catalog, store
+        service_id = catalog.SEARCH_PROVIDERS.get(provider)
+        return store.stored(service_id, field) if service_id else ""
+    except Exception:
+        return ""
+
+
 def _get_provider_key(provider: str) -> str:
-    """Return the API key for a specific provider, with legacy fallback."""
+    """Return the API key for a specific provider: the Integrations screen first, then the
+    older places it could be kept (the settings file, the environment)."""
+    kept = _kept_for(provider)
+    if kept:
+        return kept
     settings = _get_search_settings()
     key_map = {
         "brave": "brave_api_key",
@@ -328,73 +342,19 @@ def searxng_search(query, max_results=10):
 # ── Brave ──
 
 def brave_search(query: str, count: Optional[int] = None, time_filter: Optional[str] = None) -> List[dict]:
-    """Search using Brave API with key from admin settings or env var."""
+    """Search with Brave (services/search/brave.py). An empty list when it cannot be asked — no key,
+    switched off, this month's limit reached, or the request failed — so the chain moves on."""
+    from . import brave
+
     count = count if count is not None else _get_result_count()
-    api_key = _get_provider_key("brave") or os.environ.get("DATA_BRAVE_API_KEY") or ""
-    return _brave_search_impl(query, count, time_filter, search_config={"brave_api_key": api_key})
-
-
-def _brave_search_impl(query: str, count: int, time_filter: Optional[str] = None, search_config: dict = None) -> List[dict]:
-    """Core Brave API call. Returns a list of result dicts or an empty list on failure."""
-    enhanced_query = build_enhanced_query(query, time_filter)
-    config = search_config or {}
-
-    brave_api_key = config.get("brave_api_key")
-    if not brave_api_key:
-        brave_api_key = os.environ.get("DATA_BRAVE_API_KEY")
-
-    if not brave_api_key:
-        logger.warning("Brave API key not found, returning empty results for fallback")
-        return []
-
-    headers = {"X-Subscription-Token": brave_api_key, "Accept": "application/json"}
-    params = {
-        "q": enhanced_query,
-        "count": count,
-        "safesearch": _safesearch_for("brave"),
-    }
-    if time_filter:
-        time_map = {"day": "day", "week": "week", "month": "month", "year": "year"}
-        if time_filter in time_map:
-            params["freshness"] = time_map[time_filter]
-
-    logger.info(f"Executing Brave search with query: {enhanced_query}")
     try:
-        response = httpx.get(
-            "https://api.search.brave.com/res/v1/web/search",
-            headers=headers,
-            params=params,
-            timeout=REQUEST_TIMEOUT,
-        )
-        if response.status_code == 429:
-            raise RateLimitError("Brave rate limit hit")
-        response.raise_for_status()
-    except httpx.RequestError as e:
-        error_logger.error(f"NetworkError during Brave search: {e}")
+        results = brave.web(query, count, time_filter)
+    except brave.Problem as problem:
+        if problem.reason in ("key", "off"):
+            logger.warning("Brave search skipped: %s", problem)
+        else:
+            error_logger.error("Brave search: %s", problem)
         return []
-    except RateLimitError as e:
-        error_logger.error(str(e))
-        return []
-
-    try:
-        data = response.json()
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Brave API response: {e}")
-        return []
-
-    results = []
-    if "web" in data and "results" in data["web"]:
-        for item in data["web"]["results"][:count]:
-            url = item.get("url", "")
-            if not url:
-                continue
-            results.append({
-                "title": item.get("title", ""),
-                "url": url,
-                "snippet": item.get("description", "") or item.get("content", ""),
-                "age": item.get("date", "") if item.get("date") else "",
-            })
-
     logger.info(f"Brave search returned {len(results)} results")
     return results
 
@@ -509,7 +469,7 @@ def google_pse_search(query: str, count: Optional[int] = None, time_filter: Opti
     count = count if count is not None else _get_result_count()
     settings = _get_search_settings()
     api_key = _get_provider_key("google_pse") or os.environ.get("GOOGLE_API_KEY", "")
-    cx = (settings.get("google_pse_cx") or "").strip() or os.environ.get("GOOGLE_PSE_CX", "")
+    cx = _kept_for("google_pse", "cx") or (settings.get("google_pse_cx") or "").strip() or os.environ.get("GOOGLE_PSE_CX", "")
 
     if not api_key or not cx:
         logger.warning("Google PSE: missing API key or CX ID")

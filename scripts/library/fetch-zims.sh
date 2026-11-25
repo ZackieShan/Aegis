@@ -8,6 +8,9 @@
 #   - safe to re-run: finished files are skipped, partial ones resume
 #   - the list is re-read after every file, so lines can be appended while it runs
 #
+#   - a collection is left for later when taking it would leave less than
+#     $AEGIS_LIBRARY_MIN_FREE_GB (default 60) free on the library's disk
+#
 # Library folder: $AEGIS_LIBRARY_DIR or ~/library.
 # Status: <library>/zim-status.txt     Log: <library>/zim-download.log
 #
@@ -34,7 +37,28 @@ refresh() {
   fi
 }
 
+MIN_FREE_GB="${AEGIS_LIBRARY_MIN_FREE_GB:-60}"
+
+# Bytes still to download for a collection: its size (from the metalink) less
+# what is already on disk. Empty when the size cannot be read.
+remaining_bytes() {
+  local url="$1" file="$2" size have=0
+  size="$(curl -fsSL --max-time 30 "$url" 2>/dev/null | grep -o '<size>[0-9]*</size>' | head -n 1 | tr -dc '0-9')"
+  [ -z "$size" ] && return 0
+  [ -f "$LIB/zim/$file" ] && have="$(du -B1 "$LIB/zim/$file" 2>/dev/null | cut -f1)"
+  echo $(( size > ${have:-0} ? size - ${have:-0} : 0 ))
+}
+
+# True when the disk keeps its floor after this download.
+room_for() {
+  local need="$1" free
+  [ -z "$need" ] && return 0                   # size unknown: let aria2c find out
+  free="$(df -B1 --output=avail "$LIB" | tail -n 1 | tr -dc '0-9')"
+  [ $(( free - need )) -ge $(( MIN_FREE_GB * 1024 * 1024 * 1024 )) ]
+}
+
 declare -A TRIED=()
+declare -A HELD=()
 fetched=0
 while :; do
   next=""
@@ -46,10 +70,17 @@ while :; do
       continue                      # already complete
     fi
     [ -n "${TRIED[$url]:-}" ] && [ "${TRIED[$url]}" -ge 3 ] && continue
+    [ -n "${HELD[$url]:-}" ] && continue
     next="$url"; break
   done < "$LIST"
   [ -z "$next" ] && break
   file="$(basename "${next%.meta4}")"
+  need="$(remaining_bytes "$next" "$file")"
+  if ! room_for "$need"; then
+    HELD[$next]=1
+    note "HELD  $file — needs $(( need / 1073741824 )) GB more and would leave under ${MIN_FREE_GB} GB free; run again when there is room"
+    continue
+  fi
   TRIED[$next]=$(( ${TRIED[$next]:-0} + 1 ))
   note "START $file (attempt ${TRIED[$next]})"
   if aria2c --dir="$LIB/zim" --follow-metalink=mem --continue=true \

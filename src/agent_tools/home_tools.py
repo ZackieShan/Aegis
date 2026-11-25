@@ -66,6 +66,13 @@ async def _run(tool: str, work):
         return _fail(f"{tool} failed: {type(exc).__name__}: {exc}")
 
 
+def list_card(view: dict) -> dict:
+    """A list as a card: what is still to do, and the door to the list."""
+    still = [item["text"] for item in view.get("items") or [] if not item.get("done")]
+    return {"type": "list", "title": view.get("title") or "List", "open": view.get("open", len(still)), "done": view.get("done", 0),
+            "items": still[:8], "more": max(0, len(still) - 8), "href": f"/home#lists/{view.get('id')}"}
+
+
 def _list_text(view: dict, limit: int = 40) -> str:
     lines = [f"{view['title']} — {view['open']} to do, {view['done']} done. Link: [{view['title']}](/home#lists/{view['id']})"]
     for item in view["items"][:limit]:
@@ -98,17 +105,17 @@ class ManageListsTool:
                 found = lists.find_list(owner, name)
                 if found is None:
                     view = lists.create_list(owner, name, items, kind="plan" if (action == "plan" or args.get("kind") == "plan") else "list")
-                    return _ok(f"Created the list and added {len(items)} item(s).\n{_list_text(view)}")
+                    return {**_ok(f"Created the list and added {len(items)} item(s).\n{_list_text(view)}"), "card": list_card(view)}
                 if not items:
-                    return _ok(f"That list already exists.\n{_list_text(found)}")
+                    return {**_ok(f"That list already exists.\n{_list_text(found)}"), "card": list_card(found)}
                 view = lists.add_items(owner, found["id"], items)
-                return _ok(f"Added to {view['title']}.\n{_list_text(view)}")
+                return {**_ok(f"Added to {view['title']}.\n{_list_text(view)}"), "card": list_card(view)}
             found = lists.find_list(owner, name) if name else None
             if found is None:
                 titles = ", ".join(v["title"] for v in lists.all_lists(owner)) or "none yet"
                 raise HomeError(f"I could not tell which list you mean{f' by “{name}”' if name else ''}. Lists: {titles}.")
             if action in ("show", "view", "get", "read"):
-                return _ok(_list_text(found))
+                return {**_ok(_list_text(found)), "card": list_card(found)}
             if action in ("check", "done", "tick", "complete", "uncheck", "undo"):
                 if not items:
                     raise HomeError("Which items?")

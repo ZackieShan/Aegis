@@ -64,7 +64,7 @@ installs `faster-whisper` + `gguf` into the app venv, and writes a starter
 ## Adding models
 
 1. Drop a `.gguf` (or a folder with a GGUF + `mmproj` for vision) into the repo's
-   `models/` folder. It's auto-discovered by Cookbook.
+   `models/` folder. It's auto-discovered by the Model Shopper.
 2. Add a block to `engine/llama-swap.yaml` — copy an example from
    [`llama-swap.example.yaml`](llama-swap.example.yaml) and fix the paths. Because
    llama-swap runs with `-watch-config`, edits **hot-reload** (no restart).

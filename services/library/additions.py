@@ -286,6 +286,11 @@ def _download(url: str, max_bytes: int = MAX_BYTES, timeout: float = 60.0) -> Tu
     raise AdditionError("That link redirects too many times.")
 
 
+def download(url: str, max_bytes: int = MAX_BYTES, timeout: float = 60.0) -> Tuple[bytes, str, str]:
+    """The guarded download, for other services (a recipe from a web page)."""
+    return _download(url, max_bytes, timeout)
+
+
 def pdf_links(html: bytes, base_url: str, limit: int = 8) -> List[str]:
     """Links to PDF files found in a web page, in page order."""
     found: List[str] = []

@@ -9,6 +9,7 @@ import { sortModelIds } from './modelSort.js';
 import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
 import { bindMenuDismiss } from './escMenuStack.js';
+import connectionsModule from './connections.js';
 
 let initialized = false;
 let modalEl = null;
@@ -23,6 +24,10 @@ function safeRasterDataUrl(raw) {
 
 /* ── Tab switching ── */
 const ADMIN_TABS = new Set(['services', 'integrations', 'tools', 'users', 'system']);
+// What everyone gets: how it looks, notifications, their account. Everything about the
+// server — models, search, connections, e-mail — is the administrator's.
+const EVERYONE_TABS = new Set(['appearance', 'reminders', 'account']);
+const viewerIsAdmin = () => document.documentElement.dataset.admin === '1' || !!window._isAdmin;
 
 function initTabs() {
   modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
@@ -1483,6 +1488,18 @@ async function initSearchSettings() {
   var hint = el('set-searchHint');
   var msg = el('set-searchMsg');
   var _settings = {};
+  // provider → true when the server has a key for it. A key saved under Integrations → Services is
+  // kept encrypted and never sent back, so it is not in _settings; this is how this tab knows of it.
+  var _hasKey = {};
+
+  async function loadHasKey() {
+    try {
+      var r = await fetch('/api/search/providers', { credentials: 'same-origin' });
+      var list = await r.json();
+      _hasKey = {};
+      (Array.isArray(list) ? list : []).forEach(function (p) { _hasKey[p.id] = !!p.available; });
+    } catch (e) { /* this tab then goes by the settings alone, as before */ }
+  }
 
   function keyFieldFor(prov) { return _searchKeyFields[prov] || ''; }
 
@@ -1503,6 +1520,7 @@ async function initSearchSettings() {
     else if (prov === 'serper') keyInput.placeholder = 'Serper API key';
     else keyInput.placeholder = 'API key';
     loadKeyForProvider(prov);
+    if (_searchNeedsKey[prov] && !keyInput.value && _hasKey[prov]) keyInput.placeholder = 'Saved under Integrations \u2192 Services';
   }
 
   function updateCountDisplay() {
@@ -1526,6 +1544,7 @@ async function initSearchSettings() {
     if (_settings.search_url) urlInput.value = _settings.search_url;
     if (_settings.google_pse_cx) cxInput.value = _settings.google_pse_cx;
   } catch (e) { console.warn('Failed to load search settings', e); }
+  await loadHasKey();
 
   countSel.addEventListener('change', function() {
     if (this.value === 'custom') {
@@ -1547,7 +1566,8 @@ async function initSearchSettings() {
       var label = _searchLabels[active] || active;
       var extra = '';
       var kf = keyFieldFor(active);
-      var hasKey = kf ? ((s[kf] || '').trim() || (s.search_api_key || '').trim()) : false;
+      await loadHasKey();
+      var hasKey = kf ? ((s[kf] || '').trim() || (s.search_api_key || '').trim() || _hasKey[active]) : false;
       if (_searchNeedsKey[active]) {
         extra = hasKey ? ' (key set)' : ' (no key)';
       } else if (active === 'searxng' && (s.search_url || '').trim()) {
@@ -1581,7 +1601,8 @@ async function initSearchSettings() {
         google_pse_cx: cxInput.value.trim(),
       };
       var kf = keyFieldFor(prov);
-      if (kf) {
+      // An empty box clears a key this tab holds; it says nothing about one saved under Integrations.
+      if (kf && (keyInput.value.trim() || (_settings[kf] || '').trim())) {
         payload[kf] = keyInput.value.trim();
         _settings[kf] = keyInput.value.trim();
       }
@@ -2230,7 +2251,7 @@ const SHORTCUT_LABELS = {
   focus_input:    'Focus chat input',
   open_calendar:  'Open Calendar',
   open_compare:   'Open Compare',
-  open_cookbook:  'Open Cookbook',
+  open_cookbook:  'Open Model Shopper',
   open_research:  'Open Deep Research',
   open_gallery:   'Open Studio',
   open_library:   'Open Library',
@@ -2690,6 +2711,7 @@ function initAll() {
   initEmailAccountsSettings();
   initReminderSettings();
   initUnifiedIntegrations();
+  connectionsModule.init();
 }
 
 function notifyIntegrationsChanged() {
@@ -5432,8 +5454,32 @@ async function initUnifiedIntegrations() {
               <button class="admin-btn-add" id="uf-mcp-toggle" style="background:transparent;color:var(--accent, var(--red));border-color:color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));">${srv.is_enabled ? 'Disable' : 'Enable'}</button>
               <button class="admin-btn-add" id="uf-mcp-cancel" style="background:transparent;color:var(--accent, var(--red));border-color:color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));">Close</button>
             </div>
+            <label id="uf-mcp-share-row" style="display:flex;align-items:flex-start;gap:8px;font-size:11px;line-height:1.4;margin-bottom:8px;cursor:${srv.shareable === false ? 'default' : 'pointer'};opacity:${srv.shareable === false ? '0.6' : '1'}">
+              <input type="checkbox" id="uf-mcp-share" ${srv.shared ? 'checked' : ''} ${srv.shareable === false ? 'disabled' : ''} style="margin-top:2px">
+              <span>${srv.shareable === false
+                ? 'Administrators only. This one holds private data or acts on the server itself, so it cannot be opened to other accounts.'
+                : 'Everyone at home can use this. When off, only administrators\u2019 assistants can. It works for everyone with whatever account or token it was set up with.'}</span>
+            </label>
             <div id="uf-mcp-tools-panel"></div>
           </div>`;
+        // Open to every account, or administrators only
+        el('uf-mcp-share')?.addEventListener('change', async (ev) => {
+          const box = ev.target;
+          const msg = el('uf-mcp-msg');
+          box.disabled = true;
+          try {
+            const r = await fetch(`/api/mcp/servers/${srv.id}/shared`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shared: box.checked }) });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.detail || 'That could not be changed.');
+            srv.shared = d.shared;
+            if (msg) msg.textContent = d.shared ? 'Open to everyone at home.' : 'Administrators only.';
+          } catch (e) {
+            box.checked = !box.checked;
+            if (msg) msg.textContent = e.message || 'That could not be changed.';
+          } finally {
+            box.disabled = false;
+          }
+        });
         // Reconnect
         el('uf-mcp-reconnect').addEventListener('click', async () => {
           const msg = el('uf-mcp-msg'); msg.textContent = 'Reconnecting...';
@@ -5566,8 +5612,8 @@ async function initUnifiedIntegrations() {
       { key: 'calendar:write', label: 'Calendar write', detail: 'Create and update calendar events' },
       { key: 'memory:read', label: 'Memory', detail: 'Read memory when enabled' },
       { key: 'memory:write', label: 'Memory write', detail: 'Write memory when enabled' },
-      { key: 'cookbook:read', label: 'Cookbook', detail: 'List cookbook tasks + tail their tmux output (debug a model serve from outside the UI)' },
-      { key: 'cookbook:launch', label: 'Cookbook launch', detail: 'Launch and stop cookbook serve tasks. Powerful: runs SSH commands on your configured servers, bounded by the same allowlist the UI uses (vllm/python3/sglang/llama-server/...)' },
+      { key: 'cookbook:read', label: 'Model Shopper', detail: 'List Model Shopper tasks + tail their tmux output (debug a model serve from outside the UI)' },
+      { key: 'cookbook:launch', label: 'Model Shopper launch', detail: 'Launch and stop Model Shopper serve tasks. Powerful: runs SSH commands on your configured servers, bounded by the same allowlist the UI uses (vllm/python3/sglang/llama-server/...)' },
     ];
     // Strict name-prefix match keeps Codex and Claude tokens in their own forms.
     const agentTokens = (Array.isArray(tokens) ? tokens : []).filter(tok =>
@@ -6052,7 +6098,7 @@ async function initUnifiedIntegrations() {
 /* ── Admin visibility sync ── */
 function syncAdminVisibility() {
   if (!modalEl) return;
-  const isAdmin = !!window._isAdmin;
+  const isAdmin = viewerIsAdmin();
   modalEl.querySelectorAll('.admin-only').forEach(el => {
     el.style.display = isAdmin ? '' : 'none';
   });
@@ -6332,6 +6378,7 @@ export function initMediaStudio() {
 
 export function open(tab) {
   if (!initialized) initAll();
+  if (!viewerIsAdmin() && !EVERYONE_TABS.has(tab || '')) tab = 'appearance';
   syncAppearanceCheckboxes();
   // Bonzi state can change outside this modal (/bonzi, his Goodbye menu),
   // so re-read it on every open, not just at init.

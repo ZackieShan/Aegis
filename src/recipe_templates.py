@@ -284,7 +284,7 @@ def _b_inbox_declutter(model: str) -> Dict[str, Any]:
 # Order: model-only (simple → rich), then toolbox-gated, then previews.
 _CATALOG: List[Dict[str, Any]] = [
     {"id": "summarize", "name": "Summarize & extract", "category": "Analyze",
-     "description": "Any text in → 5 crisp bullets and a one-line takeaway. The simplest recipe.",
+     "description": "Any text in → 5 crisp bullets and a one-line takeaway. The simplest automation.",
      "sample_input": "Paste an article, email thread, or meeting notes here.",
      "expected_output": "Five bullet points and a takeaway line.",
      "needs_toolbox": None, "builder": _b_summarize},

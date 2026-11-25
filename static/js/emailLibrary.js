@@ -24,7 +24,7 @@ import {
 } from './emailLibrary/signatureFold.js';
 import { state } from './emailLibrary/state.js';
 import { collapseSidebarToRail } from './modalSnap.js';
-import { emailApiUrl } from './emailShared.js';
+import { emailApiUrl, EMAIL_ACCOUNTS_CHANGED, reportMissingEmailAccount } from './emailShared.js';
 import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 
 const API_BASE = window.location.origin;
@@ -1043,14 +1043,8 @@ async function _prewarmEmailViews() {
   } catch (_) {}
 
   const accounts = Array.isArray(state._libAccounts) ? state._libAccounts.filter(a => a && a.enabled !== false) : [];
-  const preferred = state._libAccountId
-    || (accounts.find(a => a.is_default)?.id)
-    || (accounts[0]?.id)
-    || '';
-  if (!state._libAccountId && preferred) {
-    state._libAccountId = preferred;
-    _publishActiveAccount();
-  }
+  _reconcileActiveAccount();
+  const preferred = state._libAccountId || '';
   const orderedAccountIds = [
     preferred,
     ...accounts.map(a => a.id).filter(id => id && id !== preferred),
@@ -1782,15 +1776,25 @@ export function openEmailLibrary(opts = {}) {
   })();
 }
 
+// Make the selected account one the server still has. A selection that is
+// gone (the account was deleted) falls back to the default account, then the
+// first one, then none. Returns true when the selection changed.
+function _reconcileActiveAccount() {
+  const accounts = Array.isArray(state._libAccounts) ? state._libAccounts.filter(Boolean) : [];
+  const current = state._libAccountId || null;
+  if (current && accounts.some(a => a.id === current)) return false;
+  const usable = accounts.filter(a => a.enabled !== false);
+  const next = (usable.find(a => a.is_default) || usable[0] || accounts[0] || {}).id || null;
+  state._libAccountId = next;
+  _publishActiveAccount();
+  return current !== next;
+}
+
 async function _loadAccounts({ force = false } = {}) {
   const hasCachedAccounts = Array.isArray(state._libAccounts) && state._libAccounts.length;
   const accountsFresh = _libAccountsLoadedAt && (Date.now() - _libAccountsLoadedAt) < _LIB_ACCOUNTS_TTL_MS;
   if (!force && hasCachedAccounts && accountsFresh) {
-    if (!state._libAccountId) {
-      const def = state._libAccounts.find(a => a.is_default) || state._libAccounts[0];
-      state._libAccountId = def?.id || null;
-      _publishActiveAccount();
-    }
+    _reconcileActiveAccount();
     _renderAccountsStrip();
     return;
   }
@@ -1806,14 +1810,33 @@ async function _loadAccounts({ force = false } = {}) {
   // The 'Default' chip is gone — pick an explicit account so the email
   // list and any per-email actions (open in new tab, mark read, etc.)
   // always carry an account_id and can't desync from the server's
-  // is_default state.
-  if (!state._libAccountId && state._libAccounts.length) {
-    const def = state._libAccounts.find(a => a.is_default) || state._libAccounts[0];
-    state._libAccountId = def.id;
-    _publishActiveAccount();
-  }
+  // is_default state. An account that was deleted cannot stay selected.
+  _reconcileActiveAccount();
   _renderAccountsStrip();
 }
+
+// Accounts were added, changed or removed somewhere (Settings, or the server
+// said the selected one no longer exists): load them again, and if that moved
+// the selection while the inbox is open, load that account's mail.
+let _libAccountsReloading = null;
+async function _onEmailAccountsChanged() {
+  if (_libAccountsReloading) return _libAccountsReloading;
+  _libAccountsReloading = (async () => {
+    const before = state._libAccountId || null;
+    _libAccountsLoadedAt = 0;
+    await _loadAccounts({ force: true });
+    const moved = before !== (state._libAccountId || null);
+    if (moved && document.getElementById('email-lib-grid')) {
+      try { _libListCache.clear(); } catch (_) {}
+      _resetEmailListForFreshLoad();
+      await _loadFolders({ resetMissing: true });
+      _loadEmails({ useCache: false });
+    }
+    return moved;
+  })();
+  try { return await _libAccountsReloading; } finally { _libAccountsReloading = null; }
+}
+try { window.addEventListener(EMAIL_ACCOUNTS_CHANGED, () => { _onEmailAccountsChanged(); }); } catch (_) {}
 
 function _renderAccountsStrip() {
   const strip = document.getElementById('email-lib-accounts');
@@ -2052,6 +2075,12 @@ async function _loadFolders({ resetMissing = false } = {}) {
   const accountAtStart = state._libAccountId || '';
   try {
     const res = await fetch(emailApiUrl('/api/email/folders'));
+    if (res.status === 404 && accountAtStart) {
+      // That account is gone: accounts are reloaded and the listener loads
+      // the folders of whichever account is left. (A 404 for an account that
+      // is still there after the reload is some other problem: fall through.)
+      if (reportMissingEmailAccount(accountAtStart) || accountAtStart !== (state._libAccountId || '')) return;
+    }
     let data = await res.json();
     if (seq !== _libFolderSeq || accountAtStart !== (state._libAccountId || '')) return;
     const sel = document.getElementById('email-lib-folder');
@@ -3299,6 +3328,14 @@ async function _loadEmails({ force = false, useCache = true } = {}) {
       // Refresh button passes `force: true` to add it back.
       const buster = force ? `&_=${Date.now()}` : '';
       const res = await fetch(`${API_BASE}/api/email/list?folder=${encodeURIComponent(folderAtStart)}${accountQS}&limit=100&offset=${offsetAtStart}&filter=${filterAtStart}${attQS}${buster}`);
+      if (res.status === 404 && accountAtStart
+          && (reportMissingEmailAccount(accountAtStart) || accountAtStart !== (state._libAccountId || ''))) {
+        // The selected account no longer exists. Accounts are being reloaded
+        // and the list is fetched again for whichever account is left.
+        if (sp) sp.destroy();
+        if (seq === _libLoadSeq) state._libLoading = false;
+        return;
+      }
       const data = await res.json();
       if (seq !== _libLoadSeq || accountAtStart !== (state._libAccountId || '')) return;
       if (data.error) throw new Error(data.error);

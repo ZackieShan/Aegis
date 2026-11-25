@@ -26,10 +26,31 @@ ADDED_BOOK = "aegis-added"
 ADDED_URL_PREFIX = "/api/reference/added/"
 
 
-def added_url(path: str, page: int = 0) -> str:
+# Files the owner put into the library folder themselves (services/library/files.py):
+# indexed where they lie, served by Aegis like the added documents.
+FILES_BOOK = "aegis-files"
+FILES_URL_PREFIX = "/api/reference/files/"
+
+# Collections whose documents are files on this server rather than entries of a ZIM.
+LOCAL_BOOKS = {ADDED_BOOK: ADDED_URL_PREFIX, FILES_BOOK: FILES_URL_PREFIX}
+
+
+def _local_url(prefix: str, path: str, page: int = 0) -> str:
     from urllib.parse import quote
-    url = ADDED_URL_PREFIX + quote(path, safe="/").replace("(", "%28").replace(")", "%29")
+    url = prefix + quote(path, safe="/").replace("(", "%28").replace(")", "%29")
     return f"{url}#page={page}" if page else url
+
+
+def added_url(path: str, page: int = 0) -> str:
+    return _local_url(ADDED_URL_PREFIX, path, page)
+
+
+def files_url(path: str, page: int = 0) -> str:
+    return _local_url(FILES_URL_PREFIX, path, page)
+
+
+def local_url(book: str, path: str, page: int = 0) -> str:
+    return _local_url(LOCAL_BOOKS[book], path, page)
 
 
 def is_added_url(url: str) -> bool:
@@ -38,6 +59,24 @@ def is_added_url(url: str) -> bool:
         return urlsplit(str(url or "")).path.startswith(ADDED_URL_PREFIX)
     except ValueError:
         return False
+
+
+def local_document(url: str):
+    """``(collection, path)`` when a link points at a document kept on this
+    server (an added one, or one of the owner's own files); None otherwise."""
+    from urllib.parse import unquote, urlsplit
+    try:
+        path = urlsplit(str(url or "")).path
+    except ValueError:
+        return None
+    for book, prefix in LOCAL_BOOKS.items():
+        if path.startswith(prefix):
+            return book, unquote(path[len(prefix):])
+    return None
+
+
+def is_local_url(url: str) -> bool:
+    return local_document(url) is not None
 
 
 def _settings() -> dict:

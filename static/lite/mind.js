@@ -410,7 +410,10 @@ async function renderTopic(id) {
     h('div', { class: 'card flush rows' }, t.notes.map((n) => h('div', { class: 'row' },
       h('div', { class: 'main' }, h('div', { class: 'pre' }, n.text),
         h('div', { class: 'meta' }, h('span', {}, when(n.ts)),
-          h('span', {}, n.by === 'you' ? 'You wrote this' : (n.origin && n.origin.name ? `From ${origin(n.origin)}` : 'Learned from a chat')))),
+          n.source && n.source.kind === 'reading'
+            ? h('span', {}, 'Highlighted while reading ', n.source.url
+              ? h('a', { href: n.source.url }, n.source.title || 'this page') : (n.source.title || ''))
+            : h('span', {}, n.by === 'you' ? 'You wrote this' : (n.origin && n.origin.name ? `From ${origin(n.origin)}` : 'Learned from a chat')))),
       iconButton('trash', 'Delete note', async () => {
         if (!await confirmSheet(`“${n.text}”`, { title: 'Delete this note?', ok: 'Delete', danger: true })) return;
         try { await api(`/api/mind/topics/${id}/notes/${n.id}`, { method: 'DELETE' }); toast('Note deleted — the summary will be rewritten without it'); refresh(); } catch (error) { oops(error); }

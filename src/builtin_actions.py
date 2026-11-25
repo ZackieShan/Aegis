@@ -2597,7 +2597,7 @@ async def action_cookbook_serve(
         preset_names = [(p.get("name") or "") for p in (state.get("presets") or []) if isinstance(p, dict)]
         hint = f" Saved presets: {preset_names!r}" if preset_names else ""
         return (f"No launchable config for {preset_name!r} (repo_id={repo_id!r}). "
-                f"Check Cookbook → Presets has a real cmd, not 'adopted'.{hint}", False)
+                f"Check Model Shopper → Presets has a real cmd, not 'adopted'.{hint}", False)
 
     # Resolve env_prefix etc. from the host's saved cookbook server entry,
     # matching the chat agent's serve_model path.

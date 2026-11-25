@@ -215,7 +215,8 @@ voice, coding-agent health) to confirm everything is green.
 | Image (sd.cpp Vulkan, 1024px) | ~10s per image (Flux-class) |
 | Video (Wan2.2 / LTX via sd.cpp + ComfyUI) | Functional, markedly slower than the 4090 |
 | TTS (Kokoro CPU) | 2-5x realtime |
-| TTS (Chatterbox/Qwen3 CPU) | Below realtime - use `--tts-rocm` if that hurts |
+| TTS (Chatterbox Turbo CPU) | ~2x realtime; needs `--tts-turbo` (a 4GB fetch) |
+| TTS (standard Chatterbox / Qwen3 CPU) | Below realtime (0.57x / 0.2x) |
 | STT (faster-whisper CPU int8) | Fine on 16 Zen 5 cores |
 
 Measured 2026-11-22 on the MS-S1 MAX (cold start each time - Aegis frees the
@@ -256,11 +257,17 @@ ComfyUI Lightning graph needs a quarter of the passes.
   the models/ tree and do not migrate with it. Pre-fetch them while online
   or the feature fails the first time the network is down:
   `ResembleAI/chatterbox` (cloned-voice TTS, 3.2GB),
+  `ResembleAI/chatterbox-turbo` (the faster cloned-voice model, 4GB; only
+  ever fetched by `--tts-turbo` or by hand, never on first use),
   `Systran/faster-whisper-base` (local STT), and for the HQ foley op
   `google/siglip2-base-patch16-512` + `laion/larger_clap_general`. They land
   in `~/.cache/huggingface/hub` of the user the service runs as.
-- CPU TTS is slower than realtime here (Chatterbox ~0.45x, Qwen3-TTS ~0.2x
-  measured 2026-11-22); `--tts-rocm` is the fix if voice replies matter.
+- CPU TTS with the standard models is slower than realtime here (Chatterbox
+  ~0.45-0.57x, Qwen3-TTS ~0.2x, measured 2026-11-22). Chatterbox Turbo is
+  about 2x realtime on the same processor (measured 2026-11-23) and is the
+  fix if voice replies matter: `--tts-turbo` fetches it, and the chatterbox
+  server uses it from then on (see docs/studio.md, "The faster model").
+  `--tts-rocm` is the other way.
 - Smart App Control / Defender workarounds, the Start Menu launcher, and
   the other Windows-only shims simply do not exist here.
 

@@ -87,14 +87,34 @@ The other paths, whichever fits:
 - **Local server you already run** — pick **Ollama (local)**, **LM Studio
   (local)**, or **llama.cpp / vLLM (local)**; no API key needed. Or hit
   **Scan for Servers** and Aegis finds anything listening on the usual ports.
-- **Nothing installed yet?** Open **Cookbook** in the sidebar — it reads your
+- **Nothing installed yet?** Open **Model Shopper** in the sidebar — it reads your
   actual hardware (GPU/VRAM/RAM), recommends models that fit, and handles the
   download and serving for you.
 - **Have GGUF files already?** Drop them into the app's **`models/` folder**
-  (one subfolder per model) and they appear in Cookbook → Serve automatically —
+  (one subfolder per model) and they appear in Model Shopper → Serve automatically —
   see [models/README.md](models/README.md).
 
 Then pick your model in the chat's **Select model** menu and start talking.
+
+### What will my machine run?
+
+Aegis itself is light — the app, memory, library and tools run on anything.
+What scales with your hardware is the model. Model Shopper measures your GPU
+memory and RAM and marks each model **perfect / good / marginal / too tight**, so
+you do not have to work it out. As a rough guide:
+
+| Your machine | What fits |
+|---|---|
+| No GPU, or a laptop | A hosted API key, or a small 3–4B local model for simple chat |
+| 8 GB graphics card | 7–9B models fully on the card |
+| 16 GB card + 64 GB RAM (e.g. RTX 5080) | 9–15B models fully on the card (fastest); 30–35B "A3B" mixture-of-experts models shared between card and RAM (smarter, slower); image generation |
+| 24 GB card | 20–30B models on the card; larger ones shared with RAM |
+| 64–128 GB unified memory (Apple Silicon, Ryzen AI Max) | 70–120B models |
+
+Start with one model that Model Shopper rates **perfect**, confirm chat and
+tools work, then try a larger one. Every feature that needs an extra engine
+(voice, translation, photo identification, the offline library) is optional
+and simply stays switched off until you install it.
 
 ## 4. Optional extras
 
@@ -105,7 +125,7 @@ gracefully:
 |---|---|---|
 | **ChromaDB** | Vector search for document RAG and semantic memory (otherwise keyword fallback) | Started automatically by the native launchers and Docker — nothing to do |
 | **SearXNG** | Self-hosted web search for Deep Research | `docker compose up -d searxng`, or point Settings → Search at any instance |
-| **Git Bash** (Windows native) | Cookbook background downloads + agent shell tool | [git-scm.com](https://git-scm.com/download/win) |
+| **Git Bash** (Windows native) | Model Shopper background downloads + agent shell tool | [git-scm.com](https://git-scm.com/download/win) |
 | **Node.js** | Browser-automation MCP tools | [nodejs.org](https://nodejs.org), then restart Aegis |
 | **ntfy** | Push notifications for reminders | `docker compose up -d ntfy` |
 | **.env** | Email (IMAP/SMTP), CalDAV sync, ports, pre-seeded admin credentials | copy `.env.example` → `.env` and edit |

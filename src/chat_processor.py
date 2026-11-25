@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from src.chat_helpers import extract_urls
 from src.youtube_handler import is_youtube_url
 from src.search import comprehensive_web_search, fetch_webpage_content
-from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
+from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, for_this_turn, untrusted_context_message
 
 logger = logging.getLogger(__name__)
 
@@ -86,24 +86,34 @@ _persona_cache: Dict[str, Tuple[float, str]] = {}
 
 def _persona_for(owner: Optional[str]) -> str:
     """The extra system instruction for this account (see
-    core.access.persona_prompt), or "" when nothing was customised.
-    Re-read at most every 20 seconds."""
-    if not owner or not isinstance(owner, str) or os.environ.get("AEGIS_PERSONA_DISABLED"):
+    core.access.persona_prompt) and for this household (its home, units and
+    language: services.household.prompt_line), or "" when nothing was
+    customised. Re-read at most every 20 seconds."""
+    if os.environ.get("AEGIS_PERSONA_DISABLED"):
         return ""
+    owner = owner if isinstance(owner, str) else ""
     now = time.time()
     hit = _persona_cache.get(owner)
     if hit and now - hit[0] < 20:
         return hit[1]
     text = ""
-    try:
-        from core import access
-        from core.auth import AuthManager
+    if owner:
+        try:
+            from core import access
+            from core.auth import AuthManager
 
-        manager = AuthManager()
-        if owner in manager.users:
-            text = access.persona_prompt(manager.get_experience(owner), owner)
+            manager = AuthManager()
+            if owner in manager.users:
+                text = access.persona_prompt(manager.get_experience(owner), owner)
+        except Exception as exc:
+            logger.debug("persona not added: %s", exc)
+    try:
+        from services import household
+        shared = household.prompt_line()
+        if shared:
+            text = f"{text}\n{shared}".strip()
     except Exception as exc:
-        logger.debug("persona not added: %s", exc)
+        logger.debug("household line not added: %s", exc)
     _persona_cache[owner] = (now, text)
     return text
 
@@ -250,7 +260,10 @@ class ChatProcessor:
         In order: the profile and the latest other conversations (the same
         from turn to turn), pinned facts, facts recalled for this message,
         the dossiers of the subjects it is about, and earlier conversations
-        that bear on it. ``count_uses=False`` leaves the use counters alone —
+        that bear on it. The last three are looked up for this one message
+        and are marked ``for_this_turn``: the chat builder places them behind
+        the conversation, next to the message, so that what stays the same
+        stays at the top of the prompt where a local model keeps it cached. ``count_uses=False`` leaves the use counters alone —
         the memory inspector calls it that way to show a person exactly what
         the model would be given.
         """
@@ -314,13 +327,13 @@ class ChatProcessor:
                 relevant = self._hybrid_retrieve(message, extended, k=3)
                 if relevant:
                     ext_text = "\n".join([f"- {m['text']}" for m in relevant])
-                    out.append(untrusted_context_message(
+                    out.append(for_this_turn(untrusted_context_message(
                         "saved memory: retrieved context",
                         (
                             "Memory context. Do not reference unless the user asks "
                             f"about these topics.\n{ext_text}"
                         ),
-                    ))
+                    )))
                     for m in relevant:
                         used.append({"text": m["text"], "category": m.get("category", "fact"), "type": "recalled"})
                         if m.get("id"):
@@ -345,7 +358,7 @@ class ChatProcessor:
                     _topics = _mind.relevant_topics(self.memory_manager, owner, _query, k=2)
                     _topics_text = _mind.render_topics_for_prompt(_topics)
                     if _topics_text:
-                        out.append(untrusted_context_message("deep memory: topic notes", _topics_text))
+                        out.append(for_this_turn(untrusted_context_message("deep memory: topic notes", _topics_text)))
                         for _t in _topics:
                             used.append(
                                 {"text": f"Topic: {_t['name']}", "category": "topic", "type": "topic"})
@@ -354,7 +367,7 @@ class ChatProcessor:
                         exclude=[getattr(session, "id", None)] + _recent_ids, k=2)
                     _earlier_text = _mind.render_episodes_for_prompt(_earlier, _mind.EARLIER_HEADING)
                     if _earlier_text:
-                        out.append(untrusted_context_message("deep memory: earlier conversations", _earlier_text))
+                        out.append(for_this_turn(untrusted_context_message("deep memory: earlier conversations", _earlier_text)))
                         for _e in _earlier:
                             used.append(
                                 {"text": f"Earlier conversation: {_e.get('title')}", "category": "conversation",
@@ -459,7 +472,7 @@ class ChatProcessor:
                         )
                         if len(rag_content) > 10000:
                             rag_content = rag_content[:10000] + "\n[Truncated]"
-                        preface.append(untrusted_context_message("retrieved documents", rag_content))
+                        preface.append(for_this_turn(untrusted_context_message("retrieved documents", rag_content)))
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {e}")
 
@@ -521,7 +534,7 @@ class ChatProcessor:
                     web_context, web_sources = comprehensive_web_search(
                         search_query, time_filter=time_filter, return_sources=True
                     )
-                    preface.append(untrusted_context_message("web search results", web_context))
+                    preface.append(for_this_turn(untrusted_context_message("web search results", web_context)))
             except Exception as e:
                 logger.error(f"Web search failed: {e}")
                 preface.append({"role": "system", "content": "Web search encountered an error and could not retrieve results."})
@@ -540,10 +553,10 @@ class ChatProcessor:
                 result = fetch_webpage_content(url)
                 if result.get('success'):
                     content = result.get('content', '')[:10000]
-                    preface.append(untrusted_context_message(
+                    preface.append(for_this_turn(untrusted_context_message(
                         f"web page: {url}",
                         f"Content from {url}:\n\n{content}",
-                    ))
+                    )))
 
         # Skills index — progressive disclosure. Only injected when the
         # model has the `manage_skills` tool available (agent_mode), and

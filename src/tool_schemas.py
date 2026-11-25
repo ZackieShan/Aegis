@@ -23,10 +23,17 @@ _REQUIRED_NATIVE_TOOL_ARGS = {
     "web_search": ("query", "queries"),
     "web_fetch": ("url",),
     "library_search": ("query",),
+    "translate": ("text",),
+    "convert_units": ("amount",),
     "read_file": ("path",),
     "write_file": ("path",),
     "edit_file": ("path",),
     "generate_image": ("prompt",),
+    "news_search": ("query", "about", "topic"),
+    "find_places": ("query", "what", "find"),
+    "medicine_info": ("name", "medicine", "drug"),
+    "paper_search": ("query", "about", "topic"),
+    "ask_wolfram": ("question", "query", "input"),
 }
 
 # ---------------------------------------------------------------------------
@@ -80,14 +87,221 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "library_search",
-            "description": "Search the OFFLINE reference library stored on this server: a full Wikipedia snapshot, medical references, Army field manuals and other survival / first-aid / repair manuals (PDFs, searched page by page), Stack Exchange archives and how-to collections. Needs no internet. Use for established knowledge and how-to questions, and whenever web_search fails or the internet is down. Keyword search: pass key terms or an exact name, not a full sentence. NOT for news or anything recent.",
+            "description": "Search the OFFLINE reference library stored on this server: a full Wikipedia snapshot, medical references, Army field manuals and other survival / first-aid / repair manuals (PDFs, searched page by page), cookbooks, histories, philosophy and the Bible, Stack Exchange archives, how-to collections and the owner's own documents. Needs no internet. Use for established knowledge and how-to questions, and whenever web_search fails or the internet is down. Keyword search: pass key terms or an exact name, not a full sentence. Everything is filed on shelves (Survival, Medicine, Cooking, History, Literature, …): give shelf to search only one, and ALWAYS give shelf \"Literature\" to search inside novels, poetry and plays, which are otherwise left out. NOT for news or anything recent.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Two to five key terms or an exact name, e.g. 'tourniquet application', 'bleach drops gallon water' or 'Amanita phalloides'"},
+                    "shelf": {"type": "string", "description": "Optional: search only this category or shelf, e.g. 'Cooking', 'Cooking/Baking & desserts', 'History/Ancient world', 'Survival/Medical & first aid', 'Literature' (library_browse lists them)"},
                     "max_results": {"type": "integer", "description": "How many matches to return (default 8, max 20)"}
                 },
                 "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "news_search",
+            "description": "The news on a subject: recent articles from the press, each with where it ran and the date it was published. Use it for anything happening now or lately — 'what is the latest on…', 'what happened with…', 'any news about…', today's headlines on a topic, an election, a storm, a company, a team, a court case — instead of web_search, because it returns dated news articles rather than general pages. Give the date with whatever you report from it. NOT for the weather (use weather) or for facts that do not change.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The subject, in a few words: 'Artemis moon mission', 'Springfield school budget vote', 'interest rates'"},
+                    "when": {"type": "string", "description": "How far back: 'day', 'week', 'month' or 'year'. Leave out for the most relevant recent articles."},
+                    "count": {"type": "integer", "description": "How many articles (default 8, max 15)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_places",
+            "description": "Find real places near the user's home or a town they name — a pharmacy, a restaurant, a pizza place, a hardware store, a vet, a petrol station, a locksmith — with each one's address, phone number, today's opening hours, whether it is open right now, its rating and website, nearest first. Use it for 'where is the nearest…', 'is there a … near me', 'what time does … close', 'find a … in <town>', 'somewhere to eat', '… open now'. Never give an address, a phone number or opening hours from memory. Leave 'near' out for the user's home. If it says no home is saved, ask which town.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The kind of place, or its name: 'pharmacy', 'thai restaurant', 'tire shop', 'Ace Hardware'"},
+                    "near": {"type": "string", "description": "A town ('Madison, WI') or coordinates. Omit for the user's home."},
+                    "open_now": {"type": "boolean", "description": "true to list only places open right now"},
+                    "count": {"type": "integer", "description": "How many places (default 6, max 12)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "medicine_info",
+            "description": "Look a medicine up in its official US label (the maker's label filed with the FDA): what it is for, the dose and schedule, side effects and how common each is, warnings and who should not take it, interactions with other medicines, pregnancy and breastfeeding, overdose, storage. Works for prescription and over-the-counter medicines, by brand name or ingredient; a misspelt name is corrected. Use it for ANY question about a medicine, drug, pill, injection or supplement sold as a medicine — never answer those from memory. One call gives one part of the label: say which in 'about'. Report its figures as written and say they come from the label.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The medicine: a brand name ('Zepbound', 'Advil') or the ingredient ('tirzepatide', 'ibuprofen')"},
+                    "about": {"type": "string", "description": "What is wanted: 'uses', 'dose', 'side effects', 'warnings', 'interactions', 'pregnancy', 'overdose', 'storage', 'how it works', 'ingredients', 'for patients', 'studies'. Leave out for an overview."},
+                    "page": {"type": "integer", "description": "For a long section: 2, 3… for the pages after the first"},
+                    "kind": {"type": "string", "description": "Only for a medicine sold both ways: 'otc' or 'prescription' to choose that label"}
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "paper_search",
+            "description": "Find published scientific studies on a question, in every field: each paper's title, authors, journal, year, how many times it has been cited, its abstract and a link (with the free full text when there is one). Use it when the user asks what the research or the evidence says, for studies, trials, a meta-analysis or a review on something, or to check a health, science or technology claim against the literature — instead of web_search, which finds pages ABOUT studies. Say what kind of study each was and its year; one paper is not a consensus.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The subject in a few key terms: 'creatine cognition older adults', 'heat pump cold climate efficiency'"},
+                    "since": {"type": "string", "description": "Only papers from this year on ('2021'), or 'last 5 years'"},
+                    "sort": {"type": "string", "description": "'newest' or 'cited' (most cited first). Leave out for the best match."},
+                    "count": {"type": "integer", "description": "How many papers (default 6, max 10)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_wolfram",
+            "description": "Ask Wolfram|Alpha: mathematics worked out exactly (algebra, calculus, equations, statistics, number theory), physics and chemistry calculations, finance (loan payments, compound interest), and facts from curated data (distances, populations, nutrition of a food, properties of an element or material, dates). Use it when a question needs calculation beyond simple arithmetic or an exact figure, instead of working it out in your head. One question per call, in plain words or as an expression. NOT for unit conversions (use convert_units), dates (date_math), the weather or the news.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The question or expression: 'integrate x^2 sin(x) dx', 'monthly payment on $320,000 at 6.5% for 30 years', 'calories in 6 oz cooked salmon'"}
+                },
+                "required": ["question"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "translate",
+            "description": "Translate text from one language into another with the translator on this server (works with no internet; 160 languages). Use it whenever the user asks for a translation, how to say something in another language, or what something in another language means. Give the text exactly as it is — do not translate it yourself first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to translate, exactly as written"},
+                    "to": {"type": "string", "description": "The language to translate into: a name or a code, e.g. 'Spanish', 'fr', 'Chinese (Traditional)', 'pt-BR'"},
+                    "from": {"type": "string", "description": "The language it is written in, when known (default: detected)"}
+                },
+                "required": ["text", "to"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "convert_units",
+            "description": "Convert a measurement into other units, exactly (arithmetic on the units' definitions, not memory): length, area, volume, weight, temperature, speed, pressure, energy, torque, power, flow, density, fuel economy, data, angles, radiation. Handles compound amounts (5 ft 10 in), compound units (lb/acre, gal/min, kWh/day) and answers in two units (ft in, lb oz). Use it for ANY unit conversion instead of working it out yourself. US gallons/pints/cups unless 'imp'; 'ton' is the US short ton.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "string", "description": "The number with its unit, e.g. '5 ft 10 in', '72 F', '30 mpg', '2.5 kg', '40 lb/acre'"},
+                    "to": {"type": "string", "description": "The unit wanted, e.g. 'cm', 'C', 'L/100km', 'ft in'. Leave out to get the usual units of the other system."}
+                },
+                "required": ["amount"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "map_position",
+            "description": "Map positions, worked out exactly and offline: (1) one place in every notation — latitude/longitude (decimal and degrees-minutes-seconds), UTM and MGRS grid reference, with its elevation and time zone; (2) straight-line distance and true bearing between two places; (3) where you end up going a distance on a bearing. A place may be a town ('Tulsa, OK'), coordinates in any notation ('40.7484, -73.9857', '18T 585632 4511326', '18TWL8563211326'), or 'home' for the user's saved position. Use it for converting coordinates, MGRS/UTM, 'how far is it from A to B', bearings and azimuths.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "place": {"type": "string", "description": "One place to describe in every notation"},
+                    "from": {"type": "string", "description": "Starting place, for a distance and bearing"},
+                    "to": {"type": "string", "description": "Destination place"},
+                    "bearing": {"type": "string", "description": "With 'from' and 'distance': the true bearing to travel, in degrees (or e.g. '800 mils')"},
+                    "distance": {"type": "string", "description": "With 'from' and 'bearing': how far, with its unit, e.g. '5 km', '2 mi'"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sun_moon",
+            "description": "Sunrise, sunset, first and last light (civil, nautical and astronomical twilight), length of daylight, solar noon, moonrise, moonset and the moon's phase for any place and date — computed offline, good to a minute or two. Also where the sun and moon are in the sky at a given time, and the dates of the next new, quarter and full moons. Use it for 'when does the sun set', 'when does it get dark', 'how much daylight', 'is there a moon tonight', 'when is the next full moon'. Leave 'place' out for the user's saved home position.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "place": {"type": "string", "description": "A town ('Denver', 'Paris, TX') or coordinates. Omit for the user's home position."},
+                    "date": {"type": "string", "description": "The day: '2026-12-21', 'tomorrow', 'next Friday', 'June 21 2027'. Default: today."},
+                    "time": {"type": "string", "description": "Optional time of day ('14:30', '9 pm') to also say where the sun and moon are then"},
+                    "days": {"type": "integer", "description": "Optional: a table for this many days (2-14) starting at 'date'"},
+                    "zone": {"type": "string", "description": "Optional time zone for the answer (e.g. 'America/Denver', 'UTC', '-07:00'). Default: the place's own."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "date_math",
+            "description": "Calendar arithmetic done by the calendar, not from memory: the number of days (and weeks, months, weekdays) between two dates; the date so many days, weeks, months, years or business days before or after a date; and the day of the week, day of the year and week number of a date. Use it for 'how many days until…', 'what day of the week was…', '90 days from today', 'how old is someone born on…'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "A date: '2027-03-12', 'March 12 2027', 'today', 'next Friday'. Alone: describes that date."},
+                    "to": {"type": "string", "description": "A second date: gives the time between 'date' and this one"},
+                    "add": {"type": "string", "description": "How far to move 'date': '90 days', '6 weeks', '-3 months', '10 business days', '1 year 2 months'"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "identify_photo",
+            "description": "Identify what a photo the user sent shows, properly: a plant, mushroom, insect, spider, snake, bird, animal, track or other sign is put through the species identifier and checked against the offline library (likely name, how sure, dangerous lookalikes, whether it is edible or hazardous); a label, sign or page is read; anything else is described. Use it whenever the user sends or mentions a photo and asks what it is, whether it is safe, edible, poisonous or venomous, or what it says — never name a living thing from a photo yourself. Leave 'photo' out for the picture they sent most recently.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "photo": {"type": "string", "description": "The id of the image from the uploaded-files list. Omit for the photo sent most recently."},
+                    "note": {"type": "string", "description": "What the user said about it: where and when it was found, what they are asking"},
+                    "as": {"type": "string", "description": "Only to correct the sorting: 'text' (it is a label or page — read it), 'describe' (just describe it), 'living' (identify it as a living thing)"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "weather",
+            "description": "The weather forecast for the user's home or a named place, from a live weather service: conditions right now, the day's high and low, chance of rain or snow, wind, morning / afternoon / evening, the next 7 days, weather alerts in effect (United States) and air quality. Use it for ANY question about the weather, rain, snow, wind, the temperature outside, a storm, or what to plan or wear for outdoors — instead of web_search. Leave 'place' out for the user's home. If it reports that there is no forecast (the internet is down, or it is switched off), say so plainly; never guess the weather.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "place": {"type": "string", "description": "A town ('Denver', 'Paris, TX') or coordinates. Omit for the user's home."},
+                    "when": {"type": "string", "description": "'now', 'today', 'tonight', 'tomorrow', a weekday ('Saturday'), a date ('2026-11-28'), 'weekend' or 'week'. Default: today."}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "library_browse",
+            "description": "See what the OFFLINE library holds, without searching its text: with no arguments, every category and shelf with how much is on it; with shelf, the collections, books and documents filed there; with find, books and documents by title or author. Use for 'what do you have on …', 'do we have <a book>', 'anything by <an author>', 'show me the cookbooks / the history shelf', and to pick the shelf for library_search. Needs no internet.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shelf": {"type": "string", "description": "A category or shelf to look at, e.g. 'History', 'Cooking/Baking & desserts'"},
+                    "find": {"type": "string", "description": "Words from a title or an author's name, e.g. 'moby dick', 'dickens', 'canning'"},
+                    "page": {"type": "integer", "description": "Further pages of a long shelf (40 titles a page)"},
+                    "all": {"type": "boolean", "description": "true also lists the less-read books the owner's rating cut leaves off the shelves"}
+                }
             }
         }
     },
@@ -445,13 +659,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ui_control",
-            "description": "Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), open_email_reply (open an email reply draft document; DOES NOT send. For 'write/draft a reply saying X', include body with the drafted reply), set_mode, switch_model, set_theme (built-in presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the built-in preset list, ALWAYS use create_theme.",
+            "description": "Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, gallery, email, sessions, notes, memories/brain, skills, settings, model_shopper, automations, kitchen), open_email_reply (open an email reply draft document; DOES NOT send. For 'write/draft a reply saying X', include body with the drafted reply), set_mode, switch_model, set_theme (built-in presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the built-in preset list, ALWAYS use create_theme.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["toggle", "open_panel", "open_email_reply", "set_mode", "switch_model", "set_theme", "create_theme", "get_toggles"],
                                "description": "The UI action. Use set_theme for presets, create_theme to build a custom theme with any hex colors"},
-                    "name": {"type": "string", "description": "For toggle: web, bash, research, incognito, document_editor (aliases: shell, search, deepresearch, documents). For open_panel: documents, gallery, email, sessions, notes, brain/memories, skills, settings, cookbook. For open_email_reply: email UID. For set_theme: a preset theme name. For create_theme: the custom theme name."},
+                    "name": {"type": "string", "description": "For toggle: web, bash, research, incognito, document_editor (aliases: shell, search, deepresearch, documents). For open_panel: documents, gallery, email, sessions, notes, brain/memories, skills, settings, model_shopper, automations, kitchen. For open_email_reply: email UID. For set_theme: a preset theme name. For create_theme: the custom theme name."},
                     "value": {"type": "string", "description": "Value: on/off for toggle, agent/chat for set_mode, model name for switch_model, theme name for set_theme, or folder for open_email_reply"},
                     "uid": {"type": "string", "description": "Email UID for open_email_reply"},
                     "folder": {"type": "string", "description": "Email folder for open_email_reply (default INBOX)"},
@@ -817,12 +1031,12 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "download_model",
-            "description": "Download a HuggingFace model to a server. If `host` is omitted, defaults to the cookbook's currently-selected server (NOT localhost) — call list_cookbook_servers first if you're unsure where it should go.",
+            "description": "Download a HuggingFace model to a server. If `host` is omitted, defaults to the Model Shopper's currently-selected server (NOT localhost) — call list_cookbook_servers first if you're unsure where it should go.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "repo_id": {"type": "string", "description": "HuggingFace repo (e.g. 'Qwen/Qwen3-8B')"},
-                    "host": {"type": "string", "description": "Target server — use the friendly NAME from list_cookbook_servers (e.g. 'gpu-box', 'workstation') or a raw user@host. Omit to use the cookbook's selected default server."},
+                    "host": {"type": "string", "description": "Target server — use the friendly NAME from list_cookbook_servers (e.g. 'gpu-box', 'workstation') or a raw user@host. Omit to use the Model Shopper's selected default server."},
                     "local": {"type": "boolean", "description": "Force download to THIS machine (localhost) instead of the default remote server."},
                     "include": {"type": "string", "description": "Glob filter for specific files (e.g. '*Q4_K_M*')"},
                 },
@@ -834,13 +1048,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "serve_model",
-            "description": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, or Diffusers. If `host` is omitted, defaults to the cookbook's selected server (not localhost). For image/inpainting/diffusion models use the built-in command `python3 scripts/diffusion_server.py --model <repo> --port 8100` rather than inventing a custom diffusers API server. After launching, call list_served_models to check readiness/errors; if it reports a diagnosis with retry suggestions, retry via serve_model using the suggested adjusted cmd.",
+            "description": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, or Diffusers. If `host` is omitted, defaults to the Model Shopper's selected server (not localhost). For image/inpainting/diffusion models use the built-in command `python3 scripts/diffusion_server.py --model <repo> --port 8100` rather than inventing a custom diffusers API server. After launching, call list_served_models to check readiness/errors; if it reports a diagnosis with retry suggestions, retry via serve_model using the suggested adjusted cmd.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "repo_id": {"type": "string", "description": "Model repo (e.g. 'Qwen/Qwen3-8B')"},
                     "cmd": {"type": "string", "description": "Full serve command (e.g. 'vllm serve Qwen/Qwen3-8B --port 8000 --tp 2', 'python3 -m sglang.launch_server --model-path Qwen/Qwen3-8B --port 30000', or for inpainting/image models: 'python3 scripts/diffusion_server.py --model diffusers/stable-diffusion-xl-1.0-inpainting-0.1 --port 8100')"},
-                    "host": {"type": "string", "description": "Target server — friendly NAME from list_cookbook_servers (e.g. 'gpu-box', 'workstation') or raw user@host. Omit to use the cookbook's selected default."},
+                    "host": {"type": "string", "description": "Target server — friendly NAME from list_cookbook_servers (e.g. 'gpu-box', 'workstation') or raw user@host. Omit to use the Model Shopper's selected default."},
                     "local": {"type": "boolean", "description": "Force serve on THIS machine instead of the default remote server."},
                 },
                 "required": ["repo_id", "cmd"]
@@ -851,7 +1065,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_served_models",
-            "description": "List currently running model servers with status, model name, port, throughput, and structured Cookbook diagnoses. If a serve failed, this includes recent logs plus retry suggestions/adjusted commands the agent can use with serve_model.",
+            "description": "List currently running model servers with status, model name, port, throughput, and structured Model Shopper diagnoses. If a serve failed, this includes recent logs plus retry suggestions/adjusted commands the agent can use with serve_model.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -873,7 +1087,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "tail_serve_output",
-            "description": "Read the last N lines of a cookbook serve/download task's tmux pane. Use ONLY in this exact sequence: (1) the user asked to serve a model, (2) you launched it via serve_model, (3) list_served_models reports the NEW task as crashed/error, (4) call tail_serve_output on the new sessionId to find the root cause, (5) call serve_model again with adjusted flags. DO NOT call this on old stopped/completed download tasks — they are historical and won't tell you anything about the current attempt. DO NOT investigate past failures before launching; the environment may have changed since.",
+            "description": "Read the last N lines of a Model Shopper serve/download task's tmux pane. Use ONLY in this exact sequence: (1) the user asked to serve a model, (2) you launched it via serve_model, (3) list_served_models reports the NEW task as crashed/error, (4) call tail_serve_output on the new sessionId to find the root cause, (5) call serve_model again with adjusted flags. DO NOT call this on old stopped/completed download tasks — they are historical and won't tell you anything about the current attempt. DO NOT investigate past failures before launching; the environment may have changed since.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -888,7 +1102,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_downloads",
-            "description": "List in-progress model downloads in the Cookbook. Shows each download's model name, phase, percent (if available), session ID, and remote host.",
+            "description": "List in-progress model downloads in the Model Shopper. Shows each download's model name, phase, percent (if available), session ID, and remote host.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -925,7 +1139,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_cookbook_servers",
-            "description": "List the cookbook's configured servers (remote GPU boxes + local) and the current default host. Call this before download_model/serve_model when the user didn't specify a host, so models go to the right machine (where the GPUs and model cache are) instead of localhost. If multiple servers and intent is ambiguous, show them and ask the user which.",
+            "description": "List the Model Shopper's configured servers (remote GPU boxes + local) and the current default host. Call this before download_model/serve_model when the user didn't specify a host, so models go to the right machine (where the GPUs and model cache are) instead of localhost. If multiple servers and intent is ambiguous, show them and ask the user which.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -933,7 +1147,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_serve_presets",
-            "description": "List saved Cookbook serve presets. Each preset is a launch template (name, model, host, port, tmux cmd) the user previously saved from the UI. Call this BEFORE serve_model when the user asks to launch a model by name — there's almost always a working preset for it.",
+            "description": "List saved Model Shopper serve presets. Each preset is a launch template (name, model, host, port, tmux cmd) the user previously saved from the UI. Call this BEFORE serve_model when the user asks to launch a model by name — there's almost always a working preset for it.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -941,7 +1155,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "adopt_served_model",
-            "description": "Register an existing tmux model server (started manually or outside the cookbook flow) into Cookbook tracking, AND add it as a chat endpoint. Use when the user (or you) launched something via ssh+tmux and now want it visible in the UI / stoppable via stop_served_model / usable in the model picker. Verifies the tmux session + port respond before adding.",
+            "description": "Register an existing tmux model server (started manually or outside the Model Shopper) into Model Shopper tracking, AND add it as a chat endpoint. Use when the user (or you) launched something via ssh+tmux and now want it visible in the UI / stoppable via stop_served_model / usable in the model picker. Verifies the tmux session + port respond before adding.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -960,7 +1174,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "serve_preset",
-            "description": "Launch a saved Cookbook serve preset by name. Reuses the exact tmux command + host the user saved before. This is the preferred way to start a known model (SD3.5, vLLM presets, etc.) — don't fabricate launch commands when a preset exists.",
+            "description": "Launch a saved Model Shopper serve preset by name. Reuses the exact tmux command + host the user saved before. This is the preferred way to start a known model (SD3.5, vLLM presets, etc.) — don't fabricate launch commands when a preset exists.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -974,11 +1188,11 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_cached_models",
-            "description": "List models already cached on disk locally or on a remote server. `host` accepts friendly Cookbook server names from list_cookbook_servers (for example ajax) or raw user@host. Also reports completed Cookbook download tasks when the filesystem cache scan cannot locate the HF cache path.",
+            "description": "List models already cached on disk locally or on a remote server. `host` accepts friendly Model Shopper server names from list_cookbook_servers (for example ajax) or raw user@host. Also reports completed Model Shopper download tasks when the filesystem cache scan cannot locate the HF cache path.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string", "description": "Friendly Cookbook server name (e.g. 'ajax', 'gpu-box') or raw remote host (e.g. 'user@gpu-box'). Omit for local."},
+                    "host": {"type": "string", "description": "Friendly Model Shopper server name (e.g. 'ajax', 'gpu-box') or raw remote host (e.g. 'user@gpu-box'). Omit for local."},
                     "model_dir": {"type": "string", "description": "Comma-separated additional model directories to scan beyond ~/.cache/huggingface/hub"},
                     "ssh_port": {"type": "string", "description": "SSH port for remote host (default 22)"},
                     "platform": {"type": "string", "enum": ["linux", "windows"], "description": "Remote platform"}
@@ -991,7 +1205,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "app_api",
-            "description": "Generic loopback to allowed internal Aegis endpoints. Use this when there's no named tool for what the user wants. Hits the same routes the UI buttons hit (cookbook, gallery, library/documents, memory, notes, calendar, tasks, settings, themes, research, compare, etc.). action='endpoints' returns the OpenAPI surface (use `filter` to narrow). action='call' (default) takes method+path+body. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked for safety. Do not use for shell commands; use named command tooling instead. Do not use for package installs, engine rebuilds, PID signalling, or email account discovery; use list_email_accounts for email accounts because /api/email/accounts is owner-filtered in tool context.",
+            "description": "Generic loopback to allowed internal Aegis endpoints. Use this when there's no named tool for what the user wants. Hits the same routes the UI buttons hit (the Model Shopper under /api/cookbook, gallery, library/documents, memory, notes, calendar, tasks, settings, themes, research, compare, etc.). action='endpoints' returns the OpenAPI surface (use `filter` to narrow). action='call' (default) takes method+path+body. Sensitive auth/user/admin/shell paths and host-control Model Shopper mutation routes are blocked for safety. Do not use for shell commands; use named command tooling instead. Do not use for package installs, engine rebuilds, PID signalling, or email account discovery; use list_email_accounts for email accounts because /api/email/accounts is owner-filtered in tool context.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1193,7 +1407,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bulk_email",
-            "description": "Perform one action on many emails at once. Use this for 'delete all those', 'archive these', 'mark all read', or any bulk operation after list_emails. Always pass account when the listed emails came from a named account such as Gmail.",
+            "description": "Perform one action on many emails at once. Use this for 'delete all those', 'archive these', 'mark all read', or any bulk operation after list_emails. Always pass account when the listed emails came from a named account such as Gmail. Spam is in the folder 'Spam': list that folder and act on its messages; never treat INBOX messages as spam because the spam folder could not be opened. Deleting more than 20 messages in one call needs the person's say-so: say how many and what they are, ask, and only then pass confirmed_count.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1202,6 +1416,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "all_unread": {"type": "boolean", "description": "Operate on all unread messages in folder instead of explicit UIDs"},
                     "folder": {"type": "string", "description": "IMAP folder (default: INBOX)"},
                     "permanent": {"type": "boolean", "description": "For delete: hard-delete instead of moving to Trash"},
+                    "confirmed_count": {"type": "integer", "description": "For delete of more than 20 messages: the number of messages, passed only after the person was told how many and which, and said yes"},
                     "account": {"type": "string", "description": "Account name/email/id from list_email_accounts, e.g. Gmail or user@example.com"},
                 },
                 "required": ["action"]
@@ -1271,6 +1486,24 @@ FUNCTION_TOOL_SCHEMAS = [
                     "items": {"type": "array", "items": {"type": "string"}, "description": "One entry per item, e.g. ['milk', 'eggs']"},
                     "kind": {"type": "string", "enum": ["list", "plan"], "description": "add: 'plan' for a step-by-step plan toward something"},
                     "new_name": {"type": "string", "description": "rename: the new name"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_kitchen",
+            "description": "The user's kitchen cookbook: food recipes to cook from. save sets a recipe out for cooking: kept as written, measures worked out for today (old measures and oven words translated and marked as estimates; cups also in grams, Fahrenheit also in Celsius), the method broken into steps to follow one at a time; returns the ingredients, the steps and a link to the follow-along view. show reads a saved recipe back, list names them, delete removes one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["save", "show", "list", "delete"]},
+                    "text": {"type": "string", "description": "save: the recipe exactly as written, unchanged"},
+                    "url": {"type": "string", "description": "save: a link to the recipe instead of its text (a web page, or a library link)"},
+                    "title": {"type": "string", "description": "save: what to call it, if the recipe has no name of its own"},
+                    "recipe": {"type": "string", "description": "show / delete: the recipe's name"}
                 },
                 "required": ["action"]
             }
@@ -1402,17 +1635,18 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_library",
-            "description": "Add documents to the offline reference library (the survival library) so library_search finds them: PDF files from links on the internet (urls) or PDFs the user uploaded in this chat (files). Also list what was added, or remove one. Each added document is read page by page and is searchable at once; scanned ones are read with OCR in the background.",
+            "description": "Add documents to the offline reference library (the survival library) so library_search finds them: PDF files from links on the internet (urls) or PDFs the user uploaded in this chat (files). Also list what was added, or remove one. Each added document is read page by page and is searchable at once; scanned ones are read with OCR in the background. scan takes in files the owner copied into the library folder on the server and files them on shelves; move puts a book or document on another shelf; shelves lists the shelves.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["add", "list", "remove", "sections"]},
+                    "action": {"type": "string", "enum": ["add", "list", "remove", "sections", "scan", "shelves", "move"]},
                     "urls": {"type": "array", "items": {"type": "string"}, "description": "add: direct links to PDF files (a link to a web page is refused, with the PDF links found on it)"},
                     "as_page": {"type": "boolean", "description": "add: true keeps the web pages at urls themselves (their text, saved as documents) instead of expecting PDF files"},
                     "files": {"type": "array", "items": {"type": "string"}, "description": "add: uploaded PDFs, each by the path or id shown in the uploaded-files list"},
                     "section": {"type": "string", "description": "add: shelf to file it under, e.g. medical, survival, plants (action sections lists them); default general"},
                     "title": {"type": "string", "description": "add: title to file a single document under (otherwise taken from the document)"},
-                    "document": {"type": "string", "description": "remove: the document's title or path"}
+                    "document": {"type": "string", "description": "remove / move: the document's title or path"},
+                    "shelf": {"type": "string", "description": "move: the shelf it should go on, e.g. 'History/Ancient world'"}
                 },
                 "required": ["action"]
             }

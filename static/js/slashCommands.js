@@ -1349,7 +1349,7 @@ async function _cmdToggleSidebar(args, ctx) {
 async function _cmdOpen(args, ctx) {
   const target = (args[0] || '').trim().toLowerCase();
   if (!target) {
-    slashReply('Open what? Try /open Cookbook, /open Settings, /open Studio, /open Notes, /open Tasks, /open Library, /open Research, or /open Compare.');
+    slashReply('Open what? Try /open Shopper, /open Automations, /open Settings, /open Studio, /open Notes, /open Tasks, /open Library, /open Research, or /open Compare.');
     return true;
   }
   const clickFirst = (...ids) => {
@@ -1360,7 +1360,10 @@ async function _cmdOpen(args, ctx) {
     return false;
   };
   try {
-    if (target === 'cookbook' || target === 'cook') {
+    if (target === 'kitchen') { window.location.href = '/kitchen'; return true; }
+    if (target === 'reader') { window.location.href = '/read'; return true; }
+    // "Model Shopper" is the model catalogue's name; it was called Cookbook.
+    if (['shopper', 'model', 'models', 'modelshopper', 'model-shopper', 'cookbook', 'cook'].includes(target)) {
       if (cookbookModule && typeof cookbookModule.open === 'function') await cookbookModule.open({ tab: 'Download' });
       else clickFirst('tool-cookbook-btn', 'rail-cookbook');
       return true;
@@ -1384,7 +1387,9 @@ async function _cmdOpen(args, ctx) {
       memories: ['tool-memory-btn', 'rail-memory'],
       research: ['tool-research-btn', 'rail-research'],
       compare: ['tool-compare-btn', 'rail-compare'],
-      recipes: ['tool-recipes-btn', 'rail-recipes'],
+      automations: ['tool-recipes-btn', 'rail-recipes'],
+      automation: ['tool-recipes-btn', 'rail-recipes'],
+      recipes: ['tool-recipes-btn', 'rail-recipes'],        // their old name
       theme: ['tool-theme-btn', 'rail-theme'],
     };
     const ids = targets[target];
@@ -1394,6 +1399,11 @@ async function _cmdOpen(args, ctx) {
   }
   slashReply(`I don't know how to open "${ctx.esc(target)}" yet.`);
   return true;
+}
+
+/** A command typed under a feature's old name: do it, and say what it is called now. */
+function _renamed(was, now, command) {
+  try { uiModule.showToast(`${was} is now called ${now} (${command}). Food recipes are in the Kitchen (/kitchen).`, 7000); } catch (_) { /* a hint only */ }
 }
 
 async function _cmdToolPanel(tool, args, ctx) {
@@ -1418,7 +1428,7 @@ async function _cmdToolPanel(tool, args, ctx) {
           document.getElementById('tool-cookbook-btn')?.click();
         }
       } catch (e) {
-        slashReply(`Could not open Cookbook Serve${e?.message ? `: ${ctx.esc(e.message)}` : ''}`);
+        slashReply(`Could not open Model Shopper Serve${e?.message ? `: ${ctx.esc(e.message)}` : ''}`);
       }
       return true;
     }
@@ -1570,40 +1580,6 @@ async function _cmdTraces(args) {
     slashReplyMd(lines.join('\n'));
   } catch (e) {
     slashReplyMd('Could not read traces: ' + e.message);
-  }
-  return true;
-}
-
-// Local knowledge-graph memory. `/graph <term>` recalls connected facts;
-// `/graph build` extracts a graph from your saved memories; `/graph stats`.
-async function _cmdGraph(args) {
-  const sub = (args[0] || '').toLowerCase();
-  try {
-    if (sub === 'build') {
-      await typewriterReply('Extracting a knowledge graph from your saved memories…');
-      const r = await fetch('/api/graph/build', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const d = await r.json().catch(() => ({}));
-      if (d.ok) slashReplyMd(`Built the graph: **${d.triples_added}** new facts from ${d.processed} memories (total ${d.total}). Try \`/graph <term>\`.`);
-      else slashReplyMd('Build failed: ' + (d.error || 'unknown'));
-      return true;
-    }
-    if (sub === 'stats' || !args.length) {
-      const d = await (await fetch('/api/graph/stats', { credentials: 'same-origin' })).json();
-      const ent = (d.entities || []).slice(0, 8).map(e => `\`${e.name}\` (${e.count})`).join(', ');
-      slashReplyMd(`**Knowledge graph** — ${d.total || 0} facts${ent ? '\n\nTop entities: ' + ent : ''}` +
-                 (d.total ? '\n\nRecall with `/graph <term>`.' : '\n\nEmpty — run `/graph build` to extract from your memories.'));
-      return true;
-    }
-    const term = args.join(' ');
-    const d = await (await fetch('/api/graph/query?q=' + encodeURIComponent(term), { credentials: 'same-origin' })).json();
-    const facts = d.facts || [];
-    if (!facts.length) { slashReplyMd(`No graph facts about \`${term}\`. (Run \`/graph build\` if you haven't.)`); return true; }
-    const lines = [`**Knowledge graph — ${term}**`];
-    facts.slice(0, 20).forEach(f => lines.push(`• ${f.subject} — *${f.relation}* — ${f.object}`));
-    slashReplyMd(lines.join('\n'));
-  } catch (e) {
-    slashReplyMd('Graph memory error: ' + e.message);
   }
   return true;
 }
@@ -3307,7 +3283,7 @@ async function _cmdCodeMode(args) {
   const wanted = String(args || '').trim();
   if (/^(off|stop|exit|quit|agent)$/i.test(wanted)) {
     setMode('agent');
-    slashReplyMd('Code mode is off. Back in Agent mode.');
+    slashReplyMd('Code mode is off. Back in Auto mode.');
     return true;
   }
   try {
@@ -3923,7 +3899,7 @@ async function _cmdDemo(args, ctx) {
     { sel: '#sidebar-new-chat-btn', text: 'Start a new chat here. <b>Click it.</b> You can do it!', mode: 'click',
       before() { if (sidebar?.classList.contains('hidden')) sidebar.classList.remove('hidden'); } },
     { sel: '#model-picker-btn',   text: 'Pick your LLM, Local or API.', advanceOnClick: true },
-    { sel: '#mode-agent-btn',     text: '<b>Agent mode</b> gives Aegis more control of the app when your model supports tools: create a theme, download a model, make a daily task, organize things, and more.', mode: 'click' },
+    { sel: '#mode-agent-btn',     text: '<b>Auto</b> (agent mode) uses tools when your message calls for them and answers directly when it is plain conversation. Tools give Aegis more control of the app when your model supports them: create a theme, download a model, make a daily task, organize things, and more.', mode: 'click' },
     { sel: '#web-toggle-btn',     text: 'Toggle tools like <b>web search</b>. Aegis comes with private built-in <b>SearXNG</b> search.', mode: 'click' },
     { sel: '#overflow-plus-btn',  text: 'More tools can be found here, or in your sidebar. <b>Click to peek.</b>',
       advanceOnClick: true, pulseNext: true, afterDelay: 2200 },
@@ -4286,7 +4262,7 @@ async function _cmdTourCookbook(args, ctx) {
     }
   }
   if (!modal || modal.classList.contains('hidden')) {
-    slashReply('Could not open Cookbook. Try clicking the Cookbook tool first.');
+    slashReply('Could not open Model Shopper. Try clicking the Model Shopper tool first.');
     return true;
   }
 
@@ -4413,7 +4389,7 @@ async function _cmdTourCookbook(args, ctx) {
   // without having to navigate manually. Keep copy tight — no walls of text.
   const steps = [
     { sel: '#cookbook-modal .modal-content',
-      text: '<b>Welcome to Cookbook!</b> Download / Cook / Serve models here!',
+      text: '<b>Welcome to the Model Shopper!</b> Find, download and serve models here.',
       placement: 'center-above' },
     { sel: '#cookbook-modal .cookbook-tab[data-backend="Settings"]',
       text: 'Hosting on another machine? Configure it under <b>Settings</b>.' },
@@ -4463,7 +4439,7 @@ async function _cmdTourCookbook(args, ctx) {
   // Leave Cookbook on the Download tab so the user can start downloading immediately.
   _clickTab('Search');
   _clear();
-  await typewriterReply('That’s Cookbook. Pick a model that catches your eye and let it cook.');
+  await typewriterReply('That’s the Model Shopper. Pick a model that catches your eye and try it out.');
   return true;
 }
 
@@ -6544,8 +6520,8 @@ async function _setupEasyChoice(choice) {
     '<div class="setup-guide-no-censor" style="display:grid;gap:8px;">' +
       '<div style="font-weight:700;">No running model servers found</div>' +
       '<div>Three easy ways to get one:</div>' +
-      '<div class="setup-easy-cookbook" style="' + _SETUP_EASY_CARD + '" title="Open Cookbook">' +
-        '<div style="font-weight:600;">&#128218; Open the Cookbook</div>' +
+      '<div class="setup-easy-cookbook" style="' + _SETUP_EASY_CARD + '" title="Open Model Shopper">' +
+        '<div style="font-weight:600;">&#128218; Open the Model Shopper</div>' +
         '<div style="opacity:.75;font-size:.92em;">Aegis reads your hardware, recommends models that fit, and downloads + serves them for you.</div>' +
       '</div>' +
       '<div>&#8226; Install <a href="https://ollama.com/download" target="_blank" rel="noopener">Ollama</a> or <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a>, start a model, then run <code>/setup easy</code> again.</div>' +
@@ -7434,12 +7410,14 @@ const COMMANDS = {
     handler: _cmdTourCompare,
     usage: '/tour-compare'
   },
-  'tour-cookbook': {
-    alias: ['cookbook-tour'],
+  // Was /tour-cookbook; that name still works (tourAutoplay.js fires it, and
+  // its "already seen" marker is stored under the old name).
+  'tour-shopper': {
+    alias: ['shopper-tour', 'tour-cookbook', 'cookbook-tour'],
     category: 'Tours',
-    help: 'Cookbook tour: hardware, downloads, serving',
+    help: 'Model Shopper tour: hardware, downloads, serving',
     handler: _cmdTourCookbook,
-    usage: '/tour-cookbook'
+    usage: '/tour-shopper'
   },
   'tour-research': {
     alias: ['research-tour'],
@@ -7524,14 +7502,51 @@ const COMMANDS = {
     hidden: true,
     help: 'Open a tool panel',
     handler: _cmdOpen,
-    usage: '/open Cookbook'
+    usage: '/open Shopper'
   },
-  cookbook: {
-    alias: ['cook'],
+  shopper: {
+    alias: ['model-shopper', 'modelshopper'],
     category: 'Tools',
-    help: 'Open Cookbook; use "serve" to jump to model serving',
+    help: 'Open the Model Shopper: find, download and serve models; use "serve" to jump to model serving',
     handler: (args, ctx) => _cmdToolPanel('cookbook', args, ctx),
-    usage: '/cookbook  ·  /cookbook serve qwen'
+    usage: '/shopper  ·  /shopper serve qwen'
+  },
+  // The Model Shopper's old name. Kept so the habit still works — and says where things went.
+  cookbook: {
+    hidden: true,
+    category: 'Tools',
+    help: 'Old name for the Model Shopper (/shopper). Food recipes are in the Kitchen (/kitchen)',
+    handler: (args, ctx) => { _renamed('Cookbook', 'Model Shopper', '/shopper'); return _cmdToolPanel('cookbook', args, ctx); },
+    usage: '/shopper'
+  },
+  kitchen: {
+    alias: ['cooking', 'cook'],
+    category: 'Tools',
+    help: 'Open the Kitchen: food recipes set out for cooking, one step at a time',
+    handler: () => { window.location.href = '/kitchen'; return true; },
+    usage: '/kitchen'
+  },
+  translate: {
+    alias: ['translator', 'tr'],
+    category: 'Tools',
+    help: 'Open Translate: type, speak or photograph something and read it in another language (give words to translate them straight away)',
+    handler: (args) => {
+      const words = (Array.isArray(args) ? args.join(' ') : String(args || '')).trim();
+      window.location.href = words ? `/translate?text=${encodeURIComponent(words)}` : '/translate';
+      return true;
+    },
+    usage: '/translate [words]'
+  },
+  almanac: {
+    alias: ['convert', 'units'],
+    category: 'Tools',
+    help: 'Open the Almanac: unit conversion, map positions (lat/long, UTM, MGRS), sun and moon times, date arithmetic (give an amount to convert it straight away)',
+    handler: (args) => {
+      const words = (Array.isArray(args) ? args.join(' ') : String(args || '')).trim();
+      window.location.href = words ? `/almanac?convert=${encodeURIComponent(words)}` : '/almanac';
+      return true;
+    },
+    usage: '/almanac [5 ft 10 in to cm]'
   },
   email: {
     alias: ['mail', 'inbox'],
@@ -7564,6 +7579,7 @@ const COMMANDS = {
   bonzi: {
     alias: ['buddy'],
     category: 'Tools',
+    hidden: true,                 // an easter egg: it works when typed and is offered nowhere
     help: 'Summon or dismiss Bonzi Buddy (/bonzi, /bonzi off, /bonzi fact)',
     handler: (args) => _cmdBonzi(args),
     usage: '/bonzi'
@@ -7571,6 +7587,7 @@ const COMMANDS = {
   winamp: {
     alias: ['amp'],
     category: 'Tools',
+    hidden: true,                 // an easter egg: it works when typed and is offered nowhere
     help: 'Toggle the Aegis Amp — a Y2K-skinned floating player for Studio songs (/winamp, /winamp off)',
     handler: (args) => _cmdWinamp(args),
     usage: '/winamp'
@@ -7578,6 +7595,7 @@ const COMMANDS = {
   win98: {
     alias: ['98', 'desktop', 'windows98'],
     category: 'Tools',
+    hidden: true,                 // an easter egg: it works when typed and is offered nowhere
     help: 'Boot Aegis 98 — the full Windows 98 desktop mode (/win98, /win98 off)',
     handler: (args) => _cmdWin98(args),
     usage: '/win98'
@@ -7589,16 +7607,10 @@ const COMMANDS = {
     handler: (args) => _cmdTraces(args),
     usage: '/traces'
   },
-  graph: {
-    alias: ['kg', 'knowledge'],
-    category: 'Tools',
-    help: 'Knowledge-graph memory: /graph <term>, /graph build, /graph stats',
-    handler: (args) => _cmdGraph(args),
-    usage: '/graph build'
-  },
   code: {
     alias: ['aider'],
     category: 'Tools',
+    hidden: true,                 // Code mode (/codemode) is the one door to code; this still works when typed
     help: 'Local coding agent: /code ws <path>, /code <task>, /code status',
     handler: (args) => _cmdCode(args),
     usage: '/code <task>'
@@ -7606,6 +7618,7 @@ const COMMANDS = {
   wiki: {
     alias: ['deepwiki', 'repowiki'],
     category: 'Tools',
+    hidden: true,
     help: 'Repo → wiki: /wiki <path>, /wiki list, /wiki show <name>',
     handler: (args) => _cmdWiki(args),
     usage: '/wiki <path>'
@@ -7705,6 +7718,7 @@ const COMMANDS = {
   canvas: {
     alias: ['editor'],
     category: 'Tools',
+    hidden: true,
     help: 'Code Canvas — write/edit code with AI: /canvas, /canvas <what to build>',
     handler: (args) => {
       try {
@@ -7758,16 +7772,25 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('compare', args, ctx),
     usage: '/compare'
   },
+  automations: {
+    alias: ['automation'],
+    category: 'Tools',
+    help: 'Open Automations: ready-made and build-your-own workflows of tools and models, to run or to schedule',
+    handler: (args, ctx) => _cmdToolPanel('recipes', args, ctx),
+    usage: '/automations'
+  },
+  // Their old name. Kept so the habit still works — and says where food recipes are.
   recipes: {
+    hidden: true,
     alias: ['recipe'],
     category: 'Tools',
-    help: 'Open Recipes (visual tool + model workflows)',
-    handler: (args, ctx) => _cmdToolPanel('recipes', args, ctx),
-    usage: '/recipes'
+    help: 'Old name for Automations (/automations). Food recipes are in the Kitchen (/kitchen)',
+    handler: (args, ctx) => { _renamed('Recipes', 'Automations', '/automations'); return _cmdToolPanel('recipes', args, ctx); },
+    usage: '/automations'
   },
   // Toolbox opt-in: `/osint <query>` scopes ONE chat message to a toolbox's
   // tools (handled in chat.js before dispatch — these entries are for
-  // autocomplete + a usage hint when typed bare). Toolboxes are also in Recipes.
+  // autocomplete + a usage hint when typed bare). Toolboxes are also in Automations.
   osint: {
     alias: ['recon', 'intel'],
     category: 'Toolboxes',
@@ -7901,6 +7924,8 @@ const COMMANDS = {
 // ── Legacy aliases ────────────────────────────────────────────────
 // Maps old flat command names to { parent, sub } so `/new` still works.
 
+// Older names for some commands. They still work for whoever types them, and
+// are offered nowhere: the list is the current commands only.
 export const LEGACY_ALIASES = {
   'new':         { parent: 'chats', sub: 'new' },
   'create':      { parent: 'chats', sub: 'new' },
@@ -7941,6 +7966,24 @@ export const LEGACY_ALIASES = {
   'mkdir':       { parent: 'chats', sub: 'new' },
   'status':      { parent: 'toggle', sub: '_show' }
 };
+
+// Commands that belong to whoever runs the server: engines and models, the
+// workshop's tools, tours of them. Everyone else is not offered them, and is
+// told so on typing one. (The server enforces the real permissions; this keeps
+// the list honest about what a person can do.)
+export const ADMIN_COMMANDS = new Set([
+  'toggle', 'workspace', 'skills', 'reload-skills', 'rag', 'setup', 'model', 'models', 'theme', 'sh', 'stats',
+  'shopper', 'cookbook', 'email', 'tasks', 'doctor', 'traces', 'code', 'wiki', 'engine', 'project', 'apps',
+  'codemode', 'hosts', 'remote', 'style', 'control', 'canvas', 'brain', 'library', 'research', 'compare',
+  'automations', 'recipes', 'mcp', 'osint', 'market', 'troubleshoot',
+  'demo', 'tour-compare', 'tour-shopper', 'tour-research', 'tour-library', 'tour-theme', 'tour-settings',
+  'tour-gallery', 'tour-brain', 'tour-task-1', 'tour-task-2',
+]);
+
+/** Whether the person looking at this page runs the server (app.py puts it on <html>). */
+export function viewerIsAdmin() {
+  return typeof document === 'undefined' || document.documentElement.dataset.admin === '1';
+}
 
 // ── Dispatch helpers ──────────────────────────────────────────────
 
@@ -8031,6 +8074,14 @@ async function handleSlashCommand(input) {
     // --- 1. Try direct command resolution ---
     let cmdKey = _resolveCommand(rawCmd);
     let cmdDef = cmdKey ? COMMANDS[cmdKey] : null;
+
+    // An administrator's command typed by someone else: say so, plainly, and do nothing.
+    const _adminKey = cmdKey || (LEGACY_ALIASES[rawCmd] && LEGACY_ALIASES[rawCmd].parent);
+    if (_adminKey && ADMIN_COMMANDS.has(_adminKey) && !viewerIsAdmin()) {
+      _showUser();
+      slashReply('That command is for whoever runs this server.');
+      return true;
+    }
 
     // --- 2. Try legacy alias ---
     if (!cmdDef && LEGACY_ALIASES[rawCmd]) {

@@ -7,10 +7,19 @@ the assistant is called and how it talks to them, which sections they see.
 Both are set by an administrator, per account; a role supplies the defaults.
 
 Built-in roles
-    admin      everything, including the server itself (not editable)
-    member     the full app with their own data; no access to the server
-    household  the simple home screen: chat, lists, reminders, trackers, boards
+    admin      everything, including the server itself (not editable): the
+               full app — the workshop — and the family screen, switched
+               between at will
+    member     the family screen and its pages (Kitchen, Reader, Translate,
+               Almanac, their memory), with everything the assistant can do
+               for a person; no access to the server
+    household  the family screen with the everyday abilities: chat, lists,
+               reminders, trackers, boards
     guest      chat only; nothing is remembered
+
+The full app is the administrator's. An administrator can still open it for
+one person (``allow_full_app``), who then gets it without the server's
+controls: no model picker, engine, model shopper or connection forms.
 
 An administrator can adjust the built-in ones (except ``admin``) and add
 their own. Definitions live in ``<data>/roles.json``; an account's role,
@@ -35,9 +44,9 @@ logger = logging.getLogger(__name__)
 # people's data is never grantable: it stays with administrators.
 TOOL_GROUPS: Dict[str, Dict[str, Any]] = {
     "home": {
-        "label": "Lists, reminders, trackers and boards",
-        "description": "Keep lists, set reminders, log trackers and pin things to boards when asked.",
-        "tools": ["manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes"],
+        "label": "Lists, reminders, trackers, boards and recipes",
+        "description": "Keep lists, set reminders, log trackers, pin things to boards and set recipes out for cooking when asked.",
+        "tools": ["manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes", "manage_kitchen"],
     },
     "memory": {
         "label": "Remember on request",
@@ -76,7 +85,7 @@ _PRIVILEGE_LABELS = {
     "can_use_research": ("Deep research", "Long multi-step web research."),
     "can_generate_images": ("Image generation", "Make images."),
     "can_manage_memory": ("Memory", "Add to and manage what is remembered about them."),
-    "can_use_recipes": ("Recipes", "Run saved workflows."),
+    "can_use_recipes": ("Automations", "Run saved workflows."),
 }
 
 
@@ -92,13 +101,14 @@ def _builtin_roles() -> Dict[str, Dict[str, Any]]:
         },
         "member": {
             "label": "Member", "builtin": True,
-            "description": "The full app with their own chats, memory and files. No access to the server.",
+            "description": "The family screen and its pages, with their own chats, memory and files, and everything the "
+                           "assistant can do for a person. No access to the server.",
             "privileges": dict(DEFAULT_PRIVILEGES), "tools": ["home", "memory", "calendar"],
-            "experience": {"mode": "full"},
+            "experience": {"mode": "simple"},
         },
         "household": {
             "label": "Household", "builtin": True,
-            "description": "A simple home screen — chat, lists, reminders, trackers and boards — in plain language.",
+            "description": "The family screen with the everyday abilities — chat, lists, reminders, trackers and boards — in plain language.",
             "privileges": {**DEFAULT_PRIVILEGES, "can_use_browser": False, "can_use_documents": False,
                            "can_use_recipes": False},
             "tools": ["home", "memory", "calendar"],

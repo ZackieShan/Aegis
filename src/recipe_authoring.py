@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA = """A recipe is a directed graph of nodes wired by edges. Node types:
+_SCHEMA = """An automation is a directed graph of nodes wired by edges. Node types:
 - input   → emits the run-time input text.        config: {"label": "..."}
 - tool    → calls a tool with args.               config: {"tool": "<name>", "args": {"k": "v"}}
 - model   → runs a prompt through the model.       config: {"model": "<MODEL>", "prompt": "...", "label": "..."}
@@ -35,7 +35,7 @@ The graph must be acyclic and have exactly one input and at least one output."""
 def build_generate_prompt(description: str, model: str, tool_names: List[str]) -> Tuple[str, str]:
     tools = ", ".join(sorted(tool_names)) or "(none connected)"
     system = (
-        "You design Aegis 'recipe' workflows — small graphs of tools and a local model. "
+        "You design Aegis automations — small workflows: graphs of tools and a local model. "
         f"{_SCHEMA}\n\n"
         f"Use this exact model id for every model and loop node: {model!r}.\n"
         f"Only these tools are available: {tools}. Do not invent tool names — if none fit, "
@@ -43,7 +43,7 @@ def build_generate_prompt(description: str, model: str, tool_names: List[str]) -
         "Return EXACTLY ONE JSON object and nothing else: "
         '{"name": "...", "nodes": [...], "edges": [...]}. No prose, no markdown fences.'
     )
-    user = f"Build a recipe for:\n\n{description.strip()}"
+    user = f"Build an automation for:\n\n{description.strip()}"
     return system, user
 
 
@@ -69,7 +69,7 @@ def parse_recipe_json(raw: str) -> Optional[Dict[str, Any]]:
     if not isinstance(obj, dict) or not isinstance(obj.get("nodes"), list):
         return None
     obj.setdefault("edges", [])
-    obj.setdefault("name", "Generated recipe")
+    obj.setdefault("name", "Generated automation")
     return obj
 
 
@@ -91,7 +91,7 @@ async def generate_recipe(description: str, models: List[str], tools, owner: str
 
     description = (description or "").strip()
     if not description:
-        return {"ok": False, "error": "Describe what the recipe should do."}
+        return {"ok": False, "error": "Describe what the automation should do."}
     model = best_model(models or [])
     if not model:
         return {"ok": False, "error": "No capable model is served — add one in Settings first."}
@@ -126,7 +126,7 @@ async def generate_recipe(description: str, models: List[str], tools, owner: str
         if err is None:
             return {"ok": True, "recipe": recipe}
         return {"ok": False, "error": f"the model produced an invalid graph ({err}) — try rephrasing."}
-    return {"ok": False, "error": "the model didn't return a usable recipe — try rephrasing."}
+    return {"ok": False, "error": "the model didn't return a usable automation — try rephrasing."}
 
 
 def describe_graph(recipe: Dict[str, Any]) -> str:
@@ -161,7 +161,7 @@ async def explain_recipe(recipe: Dict[str, Any], models: List[str], owner: str) 
     model = best_model(models or [])
     if not model:
         return {"ok": False, "error": "No model available."}
-    system = ("You explain Aegis recipe workflows to a non-technical user. Given the node graph, "
+    system = ("You explain Aegis automations (small workflows) to a non-technical user. Never call one a recipe. Given the node graph, "
               "write 2–4 short sentences describing, in plain English, what this workflow does "
               "end to end — what goes in, what each step contributes, and what comes out. No jargon, "
               "no node ids, no bullet lists.")

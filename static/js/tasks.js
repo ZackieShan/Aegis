@@ -15,6 +15,7 @@ const API_BASE = window.location.origin;
 let _open = false;
 let _tasksCascadeNext = false;   // play the domino-in entrance on the next render
 let _tasks = [];
+let _autos = [];             // automations that run by themselves (on a schedule, or when mail arrives): shown in this same list
 let _tasksFetched = false;   // first-fetch sentinel — `false` → show loading row instead of "No tasks yet"
 let _escHandler = null;
 let _viewingRuns = null; // task id when viewing run history
@@ -40,7 +41,84 @@ async function _fetchTasks() {
     console.error('Failed to fetch tasks:', e);
     _tasks = [];
   }
+  // Everything that runs by itself is one list: automations with a schedule
+  // (or that wake on new mail) are shown here beside the tasks.
+  try {
+    const res = await fetch(`${API_BASE}/api/jobs`, { credentials: 'same-origin' });
+    const data = res.ok ? await res.json() : {};
+    _autos = (data.jobs || []).filter((job) => job && job.trigger && (job.trigger.kind === 'schedule' || job.trigger.kind === 'email'));
+  } catch (e) {
+    _autos = [];
+  }
   _tasksFetched = true;
+}
+
+/** When an automation runs, in words: "every 2 hours", "at 7:00 every day", "when new mail arrives". */
+function _autoScheduleLabel(job) {
+  const trigger = job.trigger || {};
+  if (trigger.kind === 'email') return 'when new mail arrives';
+  const schedule = trigger.schedule || {};
+  if (schedule.kind === 'interval') {
+    const seconds = Number(schedule.interval_seconds) || 3600;
+    if (seconds % 86400 === 0) return seconds === 86400 ? 'every day' : `every ${seconds / 86400} days`;
+    if (seconds % 3600 === 0) return seconds === 3600 ? 'every hour' : `every ${seconds / 3600} hours`;
+    return `every ${Math.round(seconds / 60)} minutes`;
+  }
+  const parts = String(schedule.cron || '').trim().split(/\s+/);
+  if (parts.length === 5 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1]) && parts[2] === '*' && parts[3] === '*') {
+    const at = `${String(parts[1]).padStart(2, '0')}:${String(parts[0]).padStart(2, '0')}`;
+    if (parts[4] === '*') return `at ${at} every day`;
+    if (parts[4] === '1-5') return `at ${at} on weekdays`;
+    const days = { 0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday' };
+    if (days[parts[4]]) return `at ${at} every ${days[parts[4]]}`;
+  }
+  return `on the schedule ${schedule.cron || ''}`.trim();
+}
+
+/** The automations that run by themselves, as rows of this list. */
+function _appendAutomations(list) {
+  if (!_autos.length) return;
+  const head = document.createElement('div');
+  head.className = 'tasks-autos-head';
+  head.textContent = _autos.length === 1 ? 'Automation that runs by itself' : 'Automations that run by themselves';
+  list.appendChild(head);
+  for (const job of _autos) {
+    const row = document.createElement('div');
+    row.className = 'tasks-auto-row' + (job.enabled ? '' : ' off');
+    const next = job.enabled && job.next_run ? new Date(job.next_run * 1000).toISOString() : '';
+    const last = (job.history && job.history[0]) || job.last_run || null;
+    const lastFailed = last && last.ok === false;
+    row.innerHTML = `
+      <div class="tasks-auto-main">
+        <div class="tasks-auto-name">${_esc(job.name || 'Automation')}</div>
+        <div class="tasks-auto-when">${_esc(_autoScheduleLabel(job))}${next ? (new Date(next).getTime() <= Date.now() ? ' · due now' : ` · next ${_esc(_relativeTime(next))}`) : (job.enabled ? '' : ' · paused')}${lastFailed ? ' · <span class="tasks-auto-failed">the last run failed</span>' : ''}</div>
+      </div>`;
+    const actions = document.createElement('div');
+    actions.className = 'tasks-auto-actions';
+    const toggle = _btn(job.enabled ? 'Pause' : 'Resume', async () => {
+      try {
+        await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(job.id)}/toggle`, { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !job.enabled }) });
+        if (uiModule) uiModule.showToast(job.enabled ? 'Automation paused' : 'Automation resumed');
+      } catch (e) { console.error('Failed to toggle automation:', e); }
+      await _fetchTasks();
+      _renderList();
+    });
+    const run = _btn('Run now', async () => {
+      if (uiModule) uiModule.showToast('Running…');
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(job.id)}/run`, { method: 'POST', credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (uiModule) uiModule.showToast(res.ok && data.ok !== false ? 'Done' : `It did not finish${data.error ? ': ' + data.error : ''}`);
+      } catch (e) { if (uiModule) uiModule.showToast('It could not be run'); }
+      await _fetchTasks();
+      _renderList();
+    });
+    const open = _btn('Edit', () => document.getElementById('tool-recipes-btn')?.click());
+    actions.append(toggle, run, open);
+    row.appendChild(actions);
+    list.appendChild(row);
+  }
 }
 
 async function _runFirstOpenOnboarding() {
@@ -604,13 +682,13 @@ const _CATEGORY_MAP = {
   ssh_command:          'System',
   run_script:           'System',
   run_local:            'System',
-  cookbook_serve:       'Cookbook',
+  cookbook_serve:       'Model Shopper',
 };
 // Cookbook serves listed FIRST so a just-saved schedule shows at the
 // top instead of scrolling off the bottom of the list. The remaining
 // order is preserved for backwards-compatibility with users who've
 // learned where things are.
-const _CATEGORY_ORDER = ['Cookbook', 'Other', 'Calendar', 'Email', 'Chats', 'Documents', 'Memory', 'Research', 'Skills', 'Assistant', 'System'];
+const _CATEGORY_ORDER = ['Model Shopper', 'Other', 'Calendar', 'Email', 'Chats', 'Documents', 'Memory', 'Research', 'Skills', 'Assistant', 'System'];
 const _CATEGORY_ICONS = {
   Calendar:  '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   Email:     '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
@@ -621,8 +699,8 @@ const _CATEGORY_ICONS = {
   Skills:    '<path d="M9 11l3 3L22 4"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v15H6.5A2.5 2.5 0 0 0 4 19.5z"/>',
   Assistant: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 18a5 5 0 0 1 10 0"/>',
   System:    '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
-  // Cookbook icon — matches the recipe-book glyph used on the sidebar.
-  Cookbook:  '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  // Model Shopper icon — matches the glyph used on the sidebar.
+  'Model Shopper':  '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
   Other:     '<circle cx="12" cy="12" r="3"/>',
 };
 
@@ -730,7 +808,10 @@ function _renderList() {
   const _tabCount = document.getElementById('tasks-tab-count');
   if (_tabCount) _tabCount.textContent = _tasks.length;
   const _headCount = document.getElementById('tasks-head-count');
-  if (_headCount) _headCount.textContent = _tasks.length ? `${_tasks.length} task${_tasks.length !== 1 ? 's' : ''}` : '';
+  if (_headCount) {
+    _headCount.textContent = [_tasks.length ? `${_tasks.length} task${_tasks.length !== 1 ? 's' : ''}` : '',
+      _autos.length ? `${_autos.length} automation${_autos.length !== 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+  }
 
   if (_tasks.length === 0) {
     // Differentiate "still loading" from "really empty" so the first paint
@@ -738,6 +819,8 @@ function _renderList() {
     // misleading "No tasks yet" message before the fetch completes.
     if (!_tasksFetched) {
       list.appendChild(spinnerModule.createLoadingRow('Loading…'));
+    } else if (_autos.length) {
+      _appendAutomations(list);
     } else {
       list.innerHTML = '<div style="opacity:0.4;font-size:12px;text-align:center;padding:24px 0;">No tasks yet. Create one to get started.</div>';
     }
@@ -950,6 +1033,7 @@ function _renderList() {
     card.appendChild(content);
     list.appendChild(card);
   }
+  if (!_taskFilter && !q) _appendAutomations(list);
   // Domino-in cascade on the first render-with-cards after opening — same
   // staggered entrance the gallery / document library uses. We consume the
   // flag here OR in the early-return branches above so subsequent re-renders
@@ -2383,7 +2467,7 @@ function _classifyResult(text) {
 const _CATEGORY_HUES = [
   { hue: 210, kw: /\b(email|inbox|mail|smtp|imap|reply|summary|spam|urgency)\b/i },     // blue   — email
   { hue: 280, kw: /\b(research|web ?search|deep[-_ ]research|sources?|investigate)\b/i },// purple — research
-  { hue:  35, kw: /\b(cookbook|model[-_ ]?(serve|download)|hf|huggingface|vllm|llama|ollama)\b/i }, // amber — cookbook
+  { hue:  35, kw: /\b(cookbook|model[-_ ]?(shopper|serve|download)|hf|huggingface|vllm|llama|ollama)\b/i }, // amber — Model Shopper
   { hue: 150, kw: /\b(calendar|event|meeting|appointment|schedule)\b/i },                // green  — calendar
   { hue: 330, kw: /\b(reminder|note|notify|alert)\b/i },                                 // pink   — reminders
   { hue:  10, kw: /\b(check[-_ ]?in|morning|evening|daily|standup)\b/i },                // red    — check-ins
@@ -2410,7 +2494,7 @@ function _categoryHue(taskName, kind) {
 const _CATEGORY_LABELS = [
   { label: 'email',     kw: /\b(email|inbox|mail|smtp|imap|reply|spam|urgency)\b/i },
   { label: 'research',  kw: /\b(research|web ?search|deep[-_ ]research|sources?|investigate)\b/i },
-  { label: 'cookbook',  kw: /\b(cookbook|model[-_ ]?(serve|download)|hf|huggingface|vllm|llama|ollama)\b/i },
+  { label: 'models',    kw: /\b(cookbook|model[-_ ]?(shopper|serve|download)|hf|huggingface|vllm|llama|ollama)\b/i },
   { label: 'calendar',  kw: /\b(calendar|event|meeting|appointment|schedule)\b/i },
   { label: 'reminders', kw: /\b(reminder|note|notify|alert)\b/i },
   { label: 'check-in',  kw: /\b(check[-_ ]?in|morning|evening|daily|standup)\b/i },
@@ -2656,10 +2740,10 @@ function _renderMainView() {
   body.innerHTML = `
     <div class="admin-card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;top:-2px;">
       <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;">
-        <h2 style="margin:0;padding:0;line-height:1;position:relative;top:-4px;">Ongoing Tasks <span id="tasks-head-count" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal"></span></h2>
+        <h2 style="margin:0;padding:0;line-height:1;position:relative;top:-4px;">Scheduled <span id="tasks-head-count" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal"></span></h2>
         <button class="memory-toolbar-btn" id="tasks-pause-all-btn" title="Pause all active tasks" style="margin-left:auto;">Pause all</button>
       </div>
-      <p class="memory-desc" style="position:relative;top:-4px;">Scheduled prompts and actions that run automatically. Results appear in a dedicated session.</p>
+      <p class="memory-desc" style="position:relative;top:-4px;">Everything that runs by itself: scheduled prompts and actions, and automations with a schedule. Results appear in a dedicated session.</p>
       <div class="memory-toolbar">
         <div class="memory-category-filters" style="display:flex;align-items:center;gap:6px;">
           <select class="memory-sort-select" id="tasks-sort" aria-label="Sort tasks" title="Sort tasks" style="position:relative;top:-4px;width:86px;font-size:11px;height:24px;">

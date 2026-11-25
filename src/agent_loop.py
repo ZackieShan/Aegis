@@ -175,8 +175,8 @@ _API_AGENT_RULES = """\
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate. `manage_tasks` is for RECURRING background AI jobs, NOT for one-off user reminders.
 - "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
-- "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
-- "Open/show <panel>" (documents, library, gallery, email, inbox, sessions, brain/memories, skills, settings, notes, cookbook) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, mail/inbox/emails→email, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
+- "Research X" / "do deep research on X" / "deep dive on Z" → when `trigger_research` is available this turn, call it with `topic` (the subject in the user's words, plus any angle they gave). It is available only when the user asked for research by name. This starts a live job in the Deep Research window (it streams progress and ends in a report with sources). **Do NOT use `web_search` instead** — "research X" is a deep-research request, not a quick lookup. After starting, say in one or two sentences that it is running and keep the `[topic](#research-<id>)` link from the tool result in your reply exactly as given. If `trigger_research` is NOT available, never say a research job was started: answer with what you have. When a long sourced report would serve better, the screen offers one under your answer by itself — do not describe buttons or tell the user how to start one. Do NOT POST /api/research/start via app_api — blocked.
+- "Open/show <panel>" (documents, library, gallery, email, inbox, sessions, brain/memories, skills, settings, notes, model_shopper, automations, kitchen) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, mail/inbox/emails→email, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open model shopper" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
 - "Write/draft a reply saying X" for an open/read email → call `ui_control` with `action="open_email_reply"`, the email `uid`/`folder`, `mode="reply"`, and `body` containing the drafted reply. This opens the same email compose document as clicking Reply and DOES NOT send. Do NOT call `reply_to_email` unless the user explicitly says to send immediately.
 - "Open/start a reply", "open a reply to <sender>", "draft a reply window" with no requested body → find/read the email if needed, then call `ui_control` with `open_email_reply <uid> <folder> reply`.
 - Bulk email actions ("delete all those", "archive these", "mark all read") require a real email tool call. Use `bulk_email` once with UIDs from the latest `list_emails` result and the same `account`; never claim success without the tool result.
@@ -187,19 +187,19 @@ _API_AGENT_RULES = """\
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
 - You are running INSIDE Aegis — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
 - After `list_sessions`, preserve the returned `[Chat title](#session-<id>)` links in your user-facing reply. Do not rewrite chat lists as plain tables with non-clickable titles.
-- "Cookbook" = the LLM-serving subsystem (NOT chat sessions, NOT a recipe app). Routing:
-  • "What's running" / "what's serving" / "show my cookbook" / "is anything up" → **first action MUST be `list_served_models` (no args)**. The tool is ALWAYS available. Do not run `ps aux`, do not `curl localhost:8000`, do not `which vllm`. Even if you don't remember seeing the tool listed, it IS available — call it. The output IS the source of truth (it tracks diffusion models, vLLM, SGLang, llama.cpp, Ollama, etc. — anything spawned via the cookbook, including remote hosts that `ps aux` here can't see).
+- "Model Shopper" = the part of Aegis that finds, downloads and serves models (NOT chat sessions). It used to be called "Cookbook": tool names and /api paths still say `cookbook`, but call it the Model Shopper when you talk to the user. "Automations" = the workflow builder (it used to be called "Recipes"). The plain words "cookbook" and "recipe(s)" from the user now mean FOOD — the Kitchen (`manage_kitchen`) — unless they are plainly talking about serving a model. Model routing:
+  • "What's running" / "what's serving" / "show the model shopper" / "is anything up" → **first action MUST be `list_served_models` (no args)**. The tool is ALWAYS available. Do not run `ps aux`, do not `curl localhost:8000`, do not `which vllm`. Even if you don't remember seeing the tool listed, it IS available — call it. The output IS the source of truth (it tracks diffusion models, vLLM, SGLang, llama.cpp, Ollama, etc. — anything started from the Model Shopper, including remote hosts that `ps aux` here can't see).
   • "What's downloading" / "show downloads" → `list_downloads` (always available).
   • "What models do I have" → `list_cached_models` (always available).
   • "Kill / stop / shut down" → `stop_served_model` (or `cancel_download`) with the session_id from the list.
   • Searching for a model → `search_hf_models`.
-  • Downloading or serving a model → these run on a SERVER. If the user names one ("on gpu-box", "on the gpu box") pass `host=`. If they DON'T name one, the tool defaults to the cookbook's currently-selected server (NOT localhost). When there are multiple servers and it's genuinely ambiguous which they mean, call `list_cookbook_servers` and ask. Only download to localhost when the user explicitly says "locally" / "on this machine" (pass `local=true`).
-  • Image/inpainting/diffusion serve requests ("serve inpaint", "SDXL inpainting", "image model") → use `serve_model` with the built-in Diffusers command: `python3 scripts/diffusion_server.py --model <repo> --port 8100` (or another free port). Do NOT invent modules like `diffusers_api_server`, and do NOT use bash/ssh/pip directly. The Cookbook route copies `scripts/diffusion_server.py` to remote hosts and registers the image endpoint.
+  • Downloading or serving a model → these run on a SERVER. If the user names one ("on gpu-box", "on the gpu box") pass `host=`. If they DON'T name one, the tool defaults to the Model Shopper's currently-selected server (NOT localhost). When there are multiple servers and it's genuinely ambiguous which they mean, call `list_cookbook_servers` and ask. Only download to localhost when the user explicitly says "locally" / "on this machine" (pass `local=true`).
+  • Image/inpainting/diffusion serve requests ("serve inpaint", "SDXL inpainting", "image model") → use `serve_model` with the built-in Diffusers command: `python3 scripts/diffusion_server.py --model <repo> --port 8100` (or another free port). Do NOT invent modules like `diffusers_api_server`, and do NOT use bash/ssh/pip directly. The Model Shopper route copies `scripts/diffusion_server.py` to remote hosts and registers the image endpoint.
   • Launching a known model ("run SD 3.5", "start the inpaint model", "serve qwen") → **FIRST** `list_serve_presets` to find the saved launch template, **THEN** `serve_preset {name: "..."}`. Do NOT fabricate a tmux command — the user already saved working ones from the UI. Only fall back to raw `serve_model` if no preset matches.
-  • Launching a model the user names ("serve minimax m2.7 on gpu-box") with NO preset → `serve_model {repo_id, cmd, host}`. The cookbook route OWNS tmux session creation AND state-file registration AND UI live-refresh — bypassing it produces an orphan the UI can never see. After launching, call `list_served_models` to verify readiness. If it reports a diagnosis and suggested adjusted command, retry with `serve_model` using that command instead of asking the user to debug raw tmux logs.
-  • Adopting an already-running tmux session (someone or a prior bash launch started a server, but it's not in the cookbook) → `adopt_served_model {host, tmux_session, model, port}`. This registers it in cookbook_state.json AND adds it as a chat endpoint so the user can pick it in the model dropdown. Use this whenever you find a running server that the cookbook doesn't know about.
-  • After ANY successful serve (preset or raw or adopted), the cookbook's serve flow auto-adds the model as an endpoint. If for some reason it didn't (e.g. the launch was external), call `adopt_served_model` to fix both at once, or `manage_endpoints` with action=add to register the URL manually.
-  **Anti-pattern (CRITICAL — saw the agent do this and it produced an orphan session invisible to the UI):** `ssh <host> 'tmux new-session ... vllm serve ...'` via bash. THIS IS WRONG even when it "works". The launch must go through `serve_model` so the cookbook route creates the tmux session AND writes the task to cookbook_state.json. If the user asks for a launch and you reach for bash/ssh/tmux, STOP — call `serve_model` instead. Bash launches don't show up in the Cookbook UI, can't be `stop_served_model`'d, and don't survive a UI refresh.
+  • Launching a model the user names ("serve minimax m2.7 on gpu-box") with NO preset → `serve_model {repo_id, cmd, host}`. The Model Shopper route OWNS tmux session creation AND state-file registration AND UI live-refresh — bypassing it produces an orphan the UI can never see. After launching, call `list_served_models` to verify readiness. If it reports a diagnosis and suggested adjusted command, retry with `serve_model` using that command instead of asking the user to debug raw tmux logs.
+  • Adopting an already-running tmux session (someone or a prior bash launch started a server, but it's not in the Model Shopper) → `adopt_served_model {host, tmux_session, model, port}`. This registers it in cookbook_state.json AND adds it as a chat endpoint so the user can pick it in the model dropdown. Use this whenever you find a running server that the Model Shopper doesn't know about.
+  • After ANY successful serve (preset or raw or adopted), the Model Shopper's serve flow auto-adds the model as an endpoint. If for some reason it didn't (e.g. the launch was external), call `adopt_served_model` to fix both at once, or `manage_endpoints` with action=add to register the URL manually.
+  **Anti-pattern (CRITICAL — saw the agent do this and it produced an orphan session invisible to the UI):** `ssh <host> 'tmux new-session ... vllm serve ...'` via bash. THIS IS WRONG even when it "works". The launch must go through `serve_model` so the Model Shopper route creates the tmux session AND writes the task to cookbook_state.json. If the user asks for a launch and you reach for bash/ssh/tmux, STOP — call `serve_model` instead. Bash launches don't show up in the Model Shopper, can't be `stop_served_model`'d, and don't survive a UI refresh.
   Anti-pattern (DO NOT do this — saw it twice): "I don't see list_served_models in my tool list, let me try bash ps aux." → wrong. The tool IS available. Just call it.
   Anti-pattern: POSTing to `/api/cookbook/state` via `app_api` — that overwrites the whole state file (presets and all). Blocked. Use serve_preset / serve_model / stop_served_model.
 
@@ -280,11 +280,11 @@ _DOMAIN_RULES = {
 - Bulk email actions use `bulk_email` once with explicit UIDs; do not loop one message at a time.
 - "Write/draft a reply saying X" means open a pre-filled draft via `ui_control open_email_reply ... <body>` / structured `body`; only `reply_to_email` when the user clearly wants to send now.""",
     "cookbook": """\
-## Cookbook/model-serving rules
-- Cookbook is the LLM-serving subsystem.
+## Model Shopper / model-serving rules
+- The Model Shopper is the part of Aegis that downloads and serves models (it used to be called "Cookbook"; tool names and /api paths still say `cookbook`).
 - "What's running/serving" starts with `list_served_models`. "What's downloading" uses `list_downloads`.
 - Launch known models by checking `list_serve_presets` before raw `serve_model`.
-- Downloads/serves run on a Cookbook server; pass the named `host` when the user names one.
+- Downloads/serves run on a Model Shopper server; pass the named `host` when the user names one.
 - Do not launch model servers manually with bash/ssh/tmux. Use `serve_model`/`serve_preset` so the UI can track and stop them.
 - After a successful serve, verify with `list_served_models`; if an external server is running but invisible, use `adopt_served_model`.""",
     "notes_calendar_tasks": """\
@@ -322,8 +322,9 @@ _DOMAIN_RULES = {
 - "What do I have coming up / today / this week" is about reminders: `manage_reminders` list. It is not a list called "reminders".
 - A reminder needs a time. If none was given, ask for it in one short question instead of guessing. Pass the time as the user said it ("tomorrow at 3pm") or as ISO on their clock.
 - What is on a list, which reminders exist and what a tracker shows change outside this chat (the user ticks things off on their phone). Never answer those from memory or from an earlier conversation: read it with the tool (`show` / `list`) first, every time.
-- When a tool result contains a "Link:", include that link in your reply so the user can open the thing.
-- To collect ideas on a board, search the web first, then pin the few best pages; do not pin search-result pages themselves.""",
+- When a tool result contains a "Link", include that link in your reply so the user can open the thing — exactly as given, with the same address (`/home#…`, `/kitchen?r=…`). These are real pages: never rewrite one as a `#document-…` or other anchor.
+- To collect ideas on a board, search the web first, then pin the few best pages; do not pin search-result pages themselves.
+- A food recipe the user wants to cook from, follow along with, keep, or have converted to modern measures goes to `manage_kitchen` save: pass the recipe's own words unchanged in `text` (or its link in `url`). Do not convert the measures yourself. Then give the Link so they can follow along step by step, list the ingredients as the tool returned them, and say which amounts are estimates.""",
     "workbench": """\
 ## Building, hosting and other machines
 - A coding task starts with a project: `manage_projects` create / clone / open. Once a project is open in this chat, the file tools and the shell work inside it; use them (and `git`, `gh` in the shell) for the actual work. Commit when a unit of work is done.
@@ -337,7 +338,33 @@ _DOMAIN_RULES = {
 - Asked to go and find material: search the web for it, prefer whoever issued the document (the agency, university, publisher or author), and add the link to the PDF file itself. Never invent a link (no adding `?format=pdf` to a page address): when you give a page, the tool answers with the PDF links found on it — use one of those. When the useful thing is the web page itself, add it with `"as_page": true` and its text is kept as a document.
 - Say a document was added only when the tool result says `Added` (or `Already in the library`). When it says `NOT added`, it is not in the library: say so and why.
 - Pick the section that fits; `manage_library` sections lists them. Afterwards say what was added, how many pages, and give its link. If a document is scanned, say its text becomes searchable when the background OCR finishes.
-- The tool says when a document is already there. Do not add it again.""",
+- The tool says when a document is already there. Do not add it again.
+- Files the user copied onto the server themselves ("I dropped some books in the library folder", "sort my new files") are taken in with `manage_library` scan: it reads them, files each on a shelf and says what it could not read. Do not use the shell to move or rename their files.
+- "That is on the wrong shelf" / "put X under Y" is `manage_library` move with the document's title and the shelf. `library_browse` shows the shelves and what is on them.""",
+    "almanac": """\
+## Exact answers: units, map positions, sun and moon, dates
+- Do not work these out yourself, however easy they look: counting days, converting units and reading grid references in your head goes wrong. Call the tool and report what it says — a unit conversion is `convert_units`; coordinates, a grid reference, a distance or a bearing is `map_position`; sunrise, sunset, when it gets dark, daylight or the moon is `sun_moon`; days between dates, a date some time on, a weekday or an age is `date_math`.
+- A question in several parts takes a call for each part (a height and a weight are two conversions). One `date_math` call for two dates already gives days, weeks, months and weekdays.
+- Give the tool's figures as they are, rounded sensibly for the question, in the units it used. Only state what a line of the result says: a line about where a position lies is not its height.
+- `sun_moon` answers for one calendar date. When it says the moon sets "the end of the night before" and then rises, the moon that rises that evening sets the NEXT day, at the time it gives.
+- A bearing from `map_position` is true, not magnetic; say so when someone is going to follow it with a compass.
+- If `sun_moon` or `weather` says no home position is saved, ask where they are — a town is enough.
+- The weather — a forecast, rain, snow, wind, how hot or cold, a storm, weather alerts, air quality — is `weather`, not `web_search`: it is a real forecast for the user's home unless they name a place. Report its figures as given. If it says there is no forecast (the internet is down, or it is switched off), say that in one line and offer to try again later; never guess the weather or fill it in from memory.""",
+    "photo": """\
+## Photos
+- A photo the user sent that shows a plant, mushroom, berry, insect, spider, snake, bird, other animal, or a track or other sign — or that they ask "what is this", "is it safe", "can I eat it", "is it poisonous" about — goes to `identify_photo`. Do not name a living thing from a photo yourself, and do not say whether it is edible or dangerous from your own knowledge: the tool checks it against the library and names the lookalikes.
+- Give its answer as it stands: the likely name, how sure it is, the dangerous lookalike and the check that separates them, and what it says about eating or touching it. Keep its cautions. If it is not sure, say that it is not sure.
+- When a message already carries "[This photo was put through the species identifier …]", that identification has been done: use it, and do not call the tool again for the same photo.
+- A label, sign or page is read by the same tool (`"as": "text"` if it sorted it wrongly); a recipe it reads can be set out for cooking with `manage_kitchen` save.""",
+    "lookups": """\
+## Looking things up (the news, places, medicines, studies, exact calculation)
+- These tools ask the place that keeps the answer. When one fits, use it rather than your memory or a general web search, and report what it returns.
+- Something happening now or lately — "the latest on…", "any news about…", "what happened with…" — is `news_search`. Give each thing you report its date; a headline is not the whole story.
+- A real place — the nearest pharmacy, somewhere to eat, a shop's hours or phone number — is `find_places`. Never give an address, phone number or opening hours from memory. It looks near the user's home unless a town is named; if it says no home is saved, ask which town.
+- ANY question about a medicine — what it is for, the dose, side effects, warnings, whether two can be taken together, pregnancy, storage — is `medicine_info` with the medicine's name and what is wanted in `about`. Answer from the label it returns and say so. For two medicines taken together, look up the `interactions` of each. If the label does not cover the question, say that; do not fill in from memory. When the tool cannot be reached, say the label could not be checked.
+- "What does the research say", "is there evidence", studies, trials or a review on something is `paper_search`. Say what each study was and its year. One paper is not a consensus, and an abstract is not the whole paper.
+- A calculation beyond simple arithmetic, or an exact figure from data, is `ask_wolfram`, when it is offered.
+- If one of these tools says its service cannot be asked, tell the person that in one line and follow what the tool says to do instead.""",
     "integrations": """\
 ## Integration/API rules
 - To query or control a configured service integration (Home Assistant, Miniflux, Gitea, Linkding, Jellyfin, or any other registered service), use `api_call` with the integration name, HTTP method, path, and optional JSON body.
@@ -357,8 +384,11 @@ _DOMAIN_TOOL_MAP = {
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
     "workbench": {"manage_projects", "manage_apps", "manage_hosts", "delegate_agent"},
-    "home": {"manage_lists", "manage_reminders", "manage_trackers", "manage_boards"},
-    "library": {"manage_library"},
+    "home": {"manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_kitchen"},
+    "library": {"manage_library", "library_browse"},
+    "almanac": {"convert_units", "map_position", "sun_moon", "date_math", "weather"},
+    "photo": {"identify_photo"},
+    "lookups": {"news_search", "find_places", "medicine_info", "paper_search", "ask_wolfram"},
 }
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
@@ -433,6 +463,12 @@ Things followed day by day. `create` with `"kind"`: `check` (done / not done), `
 ```
 Boards of links, pictures and notes. `pin` saves `urls` (page title and picture are fetched) or a `text` note to the named board, creating it if needed. `show` lists a board's pins, `list` names the boards.""",
 
+    "manage_kitchen": """\
+```manage_kitchen
+{"action": "save", "text": "<the recipe exactly as the user gave it, unchanged>"}
+```
+The user's kitchen cookbook — food recipes to cook from. `save` sets a recipe out for cooking: it is kept as written, its measures are worked out for today (old ones such as "a teacup", "butter the size of an egg" or "a quick oven" are translated and marked as estimates; cups also in grams, °F also in °C) and the method is broken into steps the user follows one at a time. Give the recipe's own words in `text`, or a `url` (a web page, or a library link from `library_search`); optional `"title"`. It returns the ingredients for today, the steps and a Link to the follow-along view. `show` (`"recipe"`: its name) reads one back, `list` names them, `delete` removes one.""",
+
     "manage_projects": """\
 ```manage_projects
 {"action": "create", "name": "fitness-tracker", "description": "Workout log web app"}
@@ -455,7 +491,85 @@ Runs a command or a whole multi-line script on another machine over SSH and retu
 ```manage_library
 {"action": "add", "urls": ["https://example.org/field-guide.pdf"], "section": "plants"}
 ```
-Adds documents to the offline reference library so `library_search` finds them from then on. `urls` are direct links to PDF files (give a web page and you get back the PDF links on it; `"as_page": true` keeps the page's own text instead); `files` are PDFs the user uploaded in this chat, by the path or id from the uploaded-files list. Other actions: `list` (what was added), `remove` (`document`: its title), `sections`.""",
+Adds documents to the offline reference library so `library_search` finds them from then on. `urls` are direct links to PDF files (give a web page and you get back the PDF links on it; `"as_page": true` keeps the page's own text instead); `files` are PDFs the user uploaded in this chat, by the path or id from the uploaded-files list. Other actions: `list` (what was added), `remove` (`document`: its title), `sections`, `scan` (take in and shelve the files the owner copied into the library folder on the server), `move` (`document`, `shelf`: put it on another shelf), `shelves`.""",
+
+    "translate": """\
+```translate
+{"text": "Where is the nearest pharmacy?", "to": "Spanish"}
+```
+Translates text into another language with the translator on this server (no internet needed; 160 languages). `to` is a language name or code (`"French"`, `"zh-Hant"`, `"pt-BR"`); `from` only when you know what the text is written in — otherwise it is detected. Use it for every translation request, "how do you say…", and "what does this mean". Pass the text exactly as given, give the user the translation as returned, and add a note of your own only when a word needs explaining.""",
+
+    "convert_units": """\
+```convert_units
+{"amount": "5 ft 10 in", "to": "cm"}
+```
+Converts a measurement exactly — arithmetic on the units' definitions, so use it instead of converting in your head. `amount` is the number with its unit and may be compound (`"5 ft 10 in"`, `"2 lb 3 oz"`) or use compound units (`"40 lb/acre"`, `"5 gal/min"`, `"2 kWh/day"`); `to` is the unit wanted (`"C"`, `"L/100km"`, `"ft in"` for feet and inches) and may be left out to get the usual units of the other system. Covers length, area, volume, weight, temperature, speed, pressure, energy and torque, power, flow, density, fuel economy, data, angles (degrees, mils) and radiation. Gallons, quarts, pints and cups are US unless written `imp gal`; `ton` is the US short ton, `t` the tonne; nautical miles are `nmi`. Repeat the answer's units as it gives them.""",
+
+    "map_position": """\
+```map_position
+{"from": "Tulsa, OK", "to": "39.25, -106.29"}
+```
+Positions on the map, worked out exactly and offline. `{"place": …}` gives one place in every notation (latitude/longitude, UTM, MGRS) with its elevation and time zone; `{"from": …, "to": …}` gives the straight-line distance and the true bearing each way; `{"from": …, "bearing": 45, "distance": "5 km"}` gives where that leads. A place is a town (`"Paris, TX"`), coordinates in any notation (`"40.7484, -73.9857"`, `"40°44'54\"N 73°59'08\"W"`, `"18T 585632 4511326"`, `"18TWL8563211326"`), or `"home"` for the user's saved position. Bearings are true, not magnetic — say so when it matters; distances are as the crow flies, not by road.""",
+
+    "sun_moon": """\
+```sun_moon
+{"place": "Denver", "date": "tomorrow"}
+```
+Sunrise, sunset, first and last light, hours of daylight, moonrise, moonset and the moon's phase for a place and date, computed offline (good to a minute or two); plus the next new, quarter and full moons. `place` is a town or coordinates — leave it out for the user's saved home position; `date` defaults to today; `"time": "9 pm"` adds where the sun and moon are in the sky then; `"days": 7` gives a table for a week. Times are on the place's own clock unless `zone` says otherwise. If it reports that no home position is saved, ask where they are.""",
+
+    "date_math": """\
+```date_math
+{"date": "today", "to": "March 12 2027"}
+```
+Calendar arithmetic done by the calendar — use it rather than counting days yourself. `{"date": …, "to": …}` gives the days, weeks, months and weekdays between two dates; `{"date": …, "add": "90 days"}` gives the date that far on (`"6 weeks"`, `"-3 months"`, `"10 business days"`, `"1 year 2 months"`); `{"date": …}` alone gives its weekday, day of the year and week number. Dates may be written `2027-03-12`, `March 12 2027`, `3/12/2027` (month first), `today`, `tomorrow`, `next Friday`.""",
+
+    "identify_photo": """\
+```identify_photo
+{"note": "found on an oak stump in October"}
+```
+Identifies what a photo the user sent shows, with the species identifier and the offline library: for a living thing or an animal's sign, the likely name, how sure, the dangerous lookalikes and what the library says about eating or touching it; for a label, sign or page, its text; for anything else, a description. `photo` is the image's id from the uploaded-files list — leave it out for the photo sent most recently; `note` is what the user said about it. `"as": "text"`, `"describe"` or `"living"` corrects the sorting when it was wrong. Takes about half a minute. Never name a living thing from a photo without it.""",
+
+    "news_search": """\
+```news_search
+{"query": "Artemis moon mission", "when": "week"}
+```
+Recent news articles on a subject, each with where it ran and its date. `when` is `"day"`, `"week"`, `"month"` or `"year"` (leave it out for the most relevant recent ones); `count` up to 15. Use it for anything happening now or lately instead of a general web search, and give the date with whatever you report. To say more than a headline and its summary hold, read the article with `web_fetch`.""",
+
+    "find_places": """\
+```find_places
+{"query": "pharmacy", "open_now": true}
+```
+Real places near the user's home, or near `"near": "Madison, WI"`: each with its address, phone number, today's hours, whether it is open now, rating and website, nearest first. `query` is the kind of place or its name. Never give an address, a phone number or opening hours from memory. If it reports that no home is saved, ask which town.""",
+
+    "medicine_info": """\
+```medicine_info
+{"name": "ibuprofen", "about": "interactions"}
+```
+A medicine's official US label (the maker's, filed with the FDA), one part at a time. `name` is a brand name or the ingredient (a misspelling is corrected); `about` is `"uses"`, `"dose"`, `"side effects"`, `"warnings"`, `"interactions"`, `"pregnancy"`, `"overdose"`, `"storage"`, `"how it works"`, `"ingredients"`, `"for patients"` or `"studies"` — leave it out for an overview. A long section comes a page at a time (`"page": 2`). For a medicine sold both over the counter and on prescription, `"kind"` chooses the label. Use it for every question about a medicine; give its figures as written and say they are from the label.""",
+
+    "paper_search": """\
+```paper_search
+{"query": "creatine cognition older adults", "since": "2020"}
+```
+Published studies on a question, in any field: title, authors, journal, year, times cited, the abstract and a link (the free full text when there is one). `since` is a year or `"last 5 years"`; `sort` is `"newest"` or `"cited"` (leave it out for the best match); `count` up to 10. Use it for what the research or the evidence says. Say what each study was and its year; one paper is not a consensus.""",
+
+    "ask_wolfram": """\
+```ask_wolfram
+{"question": "monthly payment on $320,000 at 6.5% for 30 years"}
+```
+Wolfram|Alpha: mathematics worked out exactly, physics, chemistry and finance calculations, and figures from curated data. One question per call, in plain words or as an expression. Report the result as given. Not for unit conversions (`convert_units`) or dates (`date_math`).""",
+
+    "weather": """\
+```weather
+{"when": "Saturday"}
+```
+The forecast from a live weather service: conditions now, the day's high and low, chance of rain or snow, wind, morning / afternoon / evening, weather alerts in effect and air quality. `place` is a town or coordinates — leave it out for the user's home; `when` is `"now"`, `"today"`, `"tonight"`, `"tomorrow"`, a weekday, a date, `"weekend"` or `"week"` (default today; it reaches 7 days ahead). Use it for anything about the weather instead of a web search. When it says there is no forecast, say so — do not guess.""",
+
+    "library_browse": """\
+```library_browse
+{"shelf": "History/Ancient world"}
+```
+What the offline library HOLDS, without searching its text. No arguments: every category and shelf with how much is on it. `"shelf"`: the collections, books and documents filed there (a category such as `"Cooking"` lists its shelves; `"page"` for more of a long shelf). `"find"`: books and documents by title or author (`{"find": "moby dick"}`, `{"find": "dickens"}`), each with its shelf and a link that opens it in the reader. Use it for "what do you have on…", "do we have…", "anything by…", "show me the cookbooks", and to choose the `shelf` for `library_search`. To find what a book SAYS, use `library_search`.""",
 
     "delegate_agent": """\
 ```delegate_agent
@@ -467,7 +581,8 @@ Hands the task to another coding agent on this server: `claude`, `kimi`, `codex`
 ```library_search
 <key terms>
 ```
-Search the OFFLINE reference library on this server: a full Wikipedia snapshot, medical references, Army field manuals and other survival / first-aid / repair manuals (PDFs, searched page by page), Stack Exchange archives and how-to collections. It needs no internet. Use it for established knowledge and how-to questions, and ALWAYS when `web_search` fails or the internet is down. It is a keyword search over articles and manual pages together: give two to five key terms or the exact name ("bleach drops gallon water", "Amanita phalloides", "figure-four deadfall"), not a whole sentence. If the results miss, search again with different or fewer words rather than longer ones. For doses, quantities and procedures prefer a manual or an official guideline among the results over a forum post, and say which source a number comes from. Not for news or anything that changes: the library is a snapshot. Cite what you use with the links it returns.""",
+Search the OFFLINE reference library on this server: a full Wikipedia snapshot, medical references, Army field manuals and other survival / first-aid / repair manuals (PDFs, searched page by page), cookbooks, histories, philosophy and the Bible, Stack Exchange archives, how-to collections and the owner's own documents. It needs no internet. Use it for established knowledge and how-to questions, and ALWAYS when `web_search` fails or the internet is down. It is a keyword search over articles and manual pages together: give two to five key terms or the exact name ("bleach drops gallon water", "Amanita phalloides", "figure-four deadfall"), not a whole sentence. If the results miss, search again with different or fewer words rather than longer ones. For doses, quantities and procedures prefer a manual or an official guideline among the results over a forum post, and say which source a number comes from. Not for news or anything that changes: the library is a snapshot. Cite what you use with the links it returns.
+Everything is filed on shelves, and each result says which one it is on. To search one shelf only, give JSON: `{"query": "sourdough starter", "shelf": "Cooking"}` — a category (`Survival`, `Medicine`, `Cooking`, `History`, `Literature`, `Philosophy & religion`, `Military`…) or a shelf inside it (`History/Ancient world`, `Survival/Medical & first aid`). Novels, poetry and plays are searched ONLY when the shelf is `Literature` (or one of its shelves): for a passage from a novel, a poem or a play, always give it. A result from an old book (an author's dates, or an "Old …" shelf) is history, not current advice — say when it is from.""",
 
     "web_fetch": """\
 ```web_fetch
@@ -612,18 +727,18 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
     "send_to_session": "- ```send_to_session``` — Send a message to another session. Line 1 = session_id, rest = message. Use for orchestrating work across sessions.",
     "search_chats": "- ```search_chats``` — Search past session transcripts for direct conversation evidence. Use when user asks 'did we discuss X?', 'find the conversation about Y', or when prior chat context is more appropriate than persistent memory.",
     "pipeline": "- ```pipeline``` — Run a multi-step AI pipeline. Args (JSON) with ordered steps, each specifying a model and prompt. Use for complex workflows.",
-    "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, open email reply drafts, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, web/search, research, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), `open_email_reply <uid> <folder> <reply|reply-all|ai-reply> <body text>` (opens an email compose document pre-filled with body, DOES NOT send; use this for normal “write/draft a reply saying X” requests), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" / \"open inbox\" / \"open notes\" / \"open cookbook\" all map to `open_panel <name>`. Built-in theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute. For any other vibe/name, use create_theme.",
+    "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, open email reply drafts, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, web/search, research, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, email, sessions, notes, memories/brain, skills, settings, model_shopper, automations, kitchen), `open_email_reply <uid> <folder> <reply|reply-all|ai-reply> <body text>` (opens an email compose document pre-filled with body, DOES NOT send; use this for normal “write/draft a reply saying X” requests), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" / \"open inbox\" / \"open notes\" / \"open model shopper\" / \"open automations\" all map to `open_panel <name>`. Built-in theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute. For any other vibe/name, use create_theme.",
     "ask_user": "- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {\"question\": \"...\", \"options\": [{\"label\": \"...\", \"description\": \"...\"?}, ...], \"multi\": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.",
     "update_plan": "- ```update_plan``` — While executing an approved plan, write the plan back: tick steps done or revise them. Args (JSON): {\"plan\": \"- [x] done step\\n- [ ] next step\"}. Always pass the COMPLETE checklist, not a diff. Call it after finishing each step (mark it `- [x]`) and whenever the user asks to change the plan. The user's docked plan window updates live. Does nothing if there's no active plan.",
-    "list_served_models": "- ```list_served_models``` — Show what the Cookbook (LLM-serving subsystem) is currently running. NO args. Use this for ANY 'what's running' / 'what's serving' / 'show my cookbook' / 'is anything up' query. DO NOT shell out (`ps aux`, `docker ps`, etc.) — this tool is the source of truth. Failed serve tasks include recent logs plus diagnosis/retry suggestions; use those suggestions to call `serve_model` again with an adjusted command when appropriate.",
-    "stop_served_model": "- ```stop_served_model``` — Stop a running model server. Args (JSON): {\"session_id\": \"<from list_served_models>\"}. Use for 'kill my cookbook' / 'stop the model' / 'shut down vLLM'.",
-    "tail_serve_output": "- ```tail_serve_output``` — Read the actual tmux stderr/traceback of a CURRENTLY failing cookbook task. Args (JSON): {\"session_id\": \"<from list_served_models>\", \"tail\": 150?}. **Use ONLY after** you just launched something via `serve_model` AND `list_served_models` reports YOUR new task as `crashed`/`error`. DO NOT use it on old stopped/completed download tasks (they're historical noise — won't predict whether a new launch succeeds). DO NOT call it before launching a fresh attempt. When you do call it, bump `tail` to 400+ only if the visible error references 'see root cause above'.",
+    "list_served_models": "- ```list_served_models``` — Show what the Model Shopper (LLM-serving subsystem) is currently running. NO args. Use this for ANY 'what's running' / 'what's serving' / 'show the model shopper' / 'is anything up' query. DO NOT shell out (`ps aux`, `docker ps`, etc.) — this tool is the source of truth. Failed serve tasks include recent logs plus diagnosis/retry suggestions; use those suggestions to call `serve_model` again with an adjusted command when appropriate.",
+    "stop_served_model": "- ```stop_served_model``` — Stop a running model server. Args (JSON): {\"session_id\": \"<from list_served_models>\"}. Use for 'kill the model server' / 'stop the model' / 'shut down vLLM'.",
+    "tail_serve_output": "- ```tail_serve_output``` — Read the actual tmux stderr/traceback of a CURRENTLY failing Model Shopper task. Args (JSON): {\"session_id\": \"<from list_served_models>\", \"tail\": 150?}. **Use ONLY after** you just launched something via `serve_model` AND `list_served_models` reports YOUR new task as `crashed`/`error`. DO NOT use it on old stopped/completed download tasks (they're historical noise — won't predict whether a new launch succeeds). DO NOT call it before launching a fresh attempt. When you do call it, bump `tail` to 400+ only if the visible error references 'see root cause above'.",
     "download_model": "- ```download_model``` — Download a HuggingFace model. Args (JSON): {\"repo_id\": \"Qwen/Qwen3-8B\", \"host\": \"user@gpu-box\"?, \"include\": \"*Q4_K_M*\"?}.",
     "serve_model": "- ```serve_model``` — Start serving a model with vLLM / SGLang / llama.cpp / Ollama / Diffusers. Args (JSON): {\"repo_id\": \"...\", \"cmd\": \"vllm serve ... --port 8000\" or \"python3 -m sglang.launch_server ... --port 30000\" or \"python3 scripts/diffusion_server.py --model diffusers/stable-diffusion-xl-1.0-inpainting-0.1 --port 8100\", \"host\": \"user@gpu-box\"?}. For image/inpaint/diffusion models, use the `scripts/diffusion_server.py` command exactly. After launch, call `list_served_models`; if it returns a diagnosis with an adjusted command, retry with that command.",
-    "list_downloads": "- ```list_downloads``` — Show in-progress HuggingFace model downloads (filters Cookbook tasks/status to downloads only). NO args. Use for 'what's downloading' / 'show my downloads' / 'check download progress'.",
+    "list_downloads": "- ```list_downloads``` — Show in-progress HuggingFace model downloads (filters Model Shopper tasks/status to downloads only). NO args. Use for 'what's downloading' / 'show my downloads' / 'check download progress'.",
     "cancel_download": "- ```cancel_download``` — Cancel an in-progress download. Args (JSON): {\"session_id\": \"<from list_downloads>\"}. Use for 'cancel the download' / 'kill the download'.",
     "search_hf_models": "- ```search_hf_models``` — Search HuggingFace for models. Args (JSON): {\"query\": \"qwen 8b\", \"limit\": 10?}. Use for 'find a model for X' / 'search huggingface' / 'what models are there for Y'.",
-    "list_cached_models": "- ```list_cached_models``` — List models already on disk. Args (JSON, all optional): {\"host\": \"ajax or user@gpu-box\"?, \"model_dir\": \"/data/models,/extra\"?}. Friendly Cookbook server names work. Use for 'what models do I have' / 'show cached models' / 'is X downloaded'.",
+    "list_cached_models": "- ```list_cached_models``` — List models already on disk. Args (JSON, all optional): {\"host\": \"ajax or user@gpu-box\"?, \"model_dir\": \"/data/models,/extra\"?}. Friendly Model Shopper server names work. Use for 'what models do I have' / 'show cached models' / 'is X downloaded'.",
     "app_api": """\
 ```app_api
 {"action": "call", "method": "GET", "path": "/api/cookbook/gpus"}
@@ -634,7 +749,7 @@ GENERIC LOOPBACK to allowed Aegis internal endpoints. Use this whenever the user
 
 **Common surfaces (use `endpoints` with filter to discover the full set per domain):**
 - Calendar: `/api/calendar/events`, `/api/calendar/calendars`, `/api/calendar/events/{uid}`
-- Cookbook: `/api/cookbook/gpus`, `/api/cookbook/state`, `/api/cookbook/setup`, `/api/cookbook/packages`, `/api/cookbook/hf-latest`, `/api/model/cached`. Do NOT use `app_api` for package installs, engine rebuilds, or PID signalling.
+- Model Shopper: `/api/cookbook/gpus`, `/api/cookbook/state`, `/api/cookbook/setup`, `/api/cookbook/packages`, `/api/cookbook/hf-latest`, `/api/model/cached`. Do NOT use `app_api` for package installs, engine rebuilds, or PID signalling.
 - Gallery: `/api/gallery/list`, `/api/gallery/delete`, `/api/gallery/{id}`, `/api/gallery/albums`
 - Library / Documents: list all via `/api/documents/library`; docs in a session via `/api/documents/{session_id}`; a single doc via `/api/document/{id}` (singular) and its history via `/api/document/{id}/versions` (singular). Note the plural `/api/documents/...` vs singular `/api/document/{id}` split.
 - Memory: `/api/memory`, `/api/memory/{id}`, `/api/memory/search`
@@ -918,6 +1033,7 @@ def _insert_before_latest_user(messages: List[Dict], context_msg: Dict) -> List[
 _CHANGE_TOOLS = frozenset({
     "bash", "python", "write_file", "edit_file", "manage_library", "manage_projects", "manage_apps", "manage_hosts",
     "delegate_agent", "manage_lists", "manage_reminders", "manage_trackers", "manage_boards", "manage_notes",
+    "manage_kitchen",
     "manage_calendar", "manage_tasks", "manage_memory", "create_document", "edit_document", "update_document",
     "send_email", "reply_to_email",
 })
@@ -1028,7 +1144,7 @@ _CASUAL_OPENING_RE = re.compile(
     re.IGNORECASE,
 )
 _CASUAL_BLOCKLIST_RE = re.compile(
-    r"\b(?:cookbook|serve|serving|launch|start|vllm|sglang|llama\.?cpp|ollama|"
+    r"\b(?:cookbook|shopper|kitchen|recipes?|automations?|serve|serving|launch|start|vllm|sglang|llama\.?cpp|ollama|"
     r"download|model|email|document|doc|note|calendar|task|search|web|research|"
     r"file|folder|repo|git|settings?|endpoint|api|token|mcp)\b",
     re.IGNORECASE,
@@ -1053,7 +1169,7 @@ _RETRY_CONTINUATION_RE = re.compile(
     re.IGNORECASE,
 )
 _COOKBOOK_CONTEXT_RE = re.compile(
-    r"\b(?:cookbook|serve|serving|served|launch|start|preset|vllm|sglang|"
+    r"\b(?:model[ -]?shopper|shopper|serve|serving|served|launch|start|preset|vllm|sglang|"
     r"llama\.?cpp|ollama|download|cached models?|model servers?|running models?|"
     r"gpu box|ajax|qwen|gemma|llama|mistral|minimax)\b",
     re.IGNORECASE,
@@ -1155,7 +1271,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     def has(*patterns: str) -> bool:
         return any(re.search(p, q) for p in patterns)
 
-    if has(r"\b(cookbook|serve|serving|served|launch|start|preset|vllm|sglang|llama\.?cpp|ollama|download|downloading|pull|cached models?|running models?|model servers?|models? (?:are )?running|what models?|model picker|gpu box|kierkegaard|aegis|ajax|qwen|gemma|llama|mistral|minimax)\b"):
+    if has(r"\b(model[ -]?shopper|shopper|serve|serving|served|launch|start|preset|vllm|sglang|llama\.?cpp|ollama|download|downloading|pull|cached models?|running models?|model servers?|models? (?:are )?running|what models?|model picker|gpu box|kierkegaard|aegis|ajax|qwen|gemma|llama|mistral|minimax)\b"):
         domains.add("cookbook")
     if has(r"\b(emails?|mails?|gmail|inbox|reply|forward|cc|bcc|send email|compose email|draft email|message chris|message him|message her)\b"):
         domains.add("email")
@@ -1220,6 +1336,21 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     if has(r"\bapi[ _]call\b", r"\bintegrations?\b",
            r"\b(?:home ?assistant|miniflux|gitea|linkding|jellyfin)\b"):
         domains.add("integrations")
+    # Something to look up where it is kept: a medicine's label, published studies, a
+    # real place nearby, an exact calculation. Without this a first message such as
+    # "what are the side effects of <a medicine>" matched no topic, counted as
+    # low-signal, and was answered from the model's memory with no tool on offer.
+    # Only the look-ups that are set up count, and only the ones asked for are
+    # seeded (not the whole family), so "lookup" is deliberately not a key of
+    # _DOMAIN_TOOL_MAP.
+    lookup_tools: Set[str] = set()
+    try:
+        from src.agent_tools.lookup_tools import wanted as _lookups_wanted
+        lookup_tools = _lookups_wanted(retrieval_query)
+    except Exception:
+        logger.debug("look-up intent check skipped", exc_info=True)
+    if lookup_tools:
+        domains.add("lookup")
 
     low_signal = not continuation and not domains
     return {
@@ -1227,6 +1358,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         "continuation": continuation,
         "domains": domains,
         "retrieval_query": retrieval_query,
+        "lookup_tools": lookup_tools,
     }
 
 
@@ -1686,6 +1818,7 @@ def _build_system_prompt(
     suppress_local_context: bool = False,
     suppress_skills: bool = False,
     active_email: Optional[Dict[str, str]] = None,
+    session_id: Optional[str] = None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -1998,6 +2131,15 @@ def _build_system_prompt(
                 _last_user_text = str(_c).lower()
                 break
         _inject_style = any(tok in _last_user_text for tok in ("email", "mail", "reply", "send", "inbox"))
+        # Once the e-mail rules are in a chat's system prompt they stay for the
+        # chat: taking them out again on a message that happens not to say
+        # "email" changes the top of the prompt and costs a full re-read.
+        if not _inject_style and session_id:
+            try:
+                from src import prompt_stability as _stability
+                _inject_style = bool(_stability.recall(session_id)["email_style"])
+            except Exception:
+                pass
     if _inject_style and not suppress_local_context:
         try:
             from src.settings import load_settings as _load_settings
@@ -2020,6 +2162,9 @@ def _build_system_prompt(
                     "email writing style",
                     "EMAIL WRITING STYLE AND IDENTITY — FOLLOW FOR ANY EMAIL DRAFT OR SEND:\n" + _style,
                 )
+                if session_id:
+                    from src import prompt_stability as _stability
+                    _stability.remember(session_id, email_style=True)
         except Exception:
             pass
 
@@ -2384,8 +2529,17 @@ def _append_tool_results(
     used_native: bool,
     round_num: int,
     round_reasoning: str = "",
+    keep_reasoning: bool = False,
 ):
     """Append tool execution results back into the message history for the next LLM round.
+
+    ``keep_reasoning`` leaves the reasoning on the earlier tool steps of this turn
+    instead of stripping it (see below). For a local gpt-oss that is both what its
+    harmony format expects — the notes between tool calls are kept until the final
+    answer — and what keeps its prompt append-only: with the notes stripped, the
+    step before last reads differently than it did a round ago, so the model threw
+    away its cached reading from that point and read the tool result after it a
+    second time (measured: 20,000 tokens read for 9,000 tokens of results).
 
     `round_reasoning` (DeepSeek / vLLM reasoning-parser deltas) is echoed
     back via `reasoning_content` on the assistant message — DeepSeek's API
@@ -2401,9 +2555,10 @@ def _append_tool_results(
     without the per-round accumulation.
     """
     # Strip reasoning_content from earlier assistant turns; only the newest keeps it.
-    for _m in messages:
-        if _m.get("role") == "assistant":
-            _m.pop("reasoning_content", None)
+    if not keep_reasoning:
+        for _m in messages:
+            if _m.get("role") == "assistant":
+                _m.pop("reasoning_content", None)
     if used_native and native_tool_calls:
         assistant_msg = {"role": "assistant"}
         # When the model emitted ONLY tool calls (no prose), content must be
@@ -2814,6 +2969,8 @@ async def stream_agent_loop(
     _is_teacher_run: bool = False,
     active_toolboxes: Optional[Set[str]] = None,
     code_target: Optional[Dict] = None,
+    research_requested: bool = False,
+    smart_tool: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -2835,11 +2992,19 @@ async def stream_agent_loop(
             mcp_mgr = None
     guide_only = bool(tool_policy and tool_policy.mode == "guide_only")
     public_blocked_tools = blocked_tools_for_owner(owner)
+    # For a non-administrator: the MCP servers they may use (those an administrator
+    # opened to everyone), or None when the caller is not restricted this way.
+    _shared_mcp_only = None
     if public_blocked_tools:
         disabled_tools.update(public_blocked_tools)
-        # MCP tools are namespaced dynamically, so hide all MCP schemas for
-        # public/non-admin users rather than trying to enumerate every tool.
-        mcp_mgr = None
+        # MCP is an administrator's. Unless one has opened particular servers to
+        # everyone (Settings → Integrations), hide every MCP schema; when some are
+        # open, keep the manager and hide the tools of all the others below.
+        from src.tool_security import shared_mcp_servers
+        _shared_mcp_only = shared_mcp_servers() if mcp_mgr else set()
+        if not _shared_mcp_only:
+            mcp_mgr = None
+            _shared_mcp_only = None
 
     if plan_mode:
         # Plan mode: investigate read-only, propose a plan, don't execute. The
@@ -2853,6 +3018,13 @@ async def stream_agent_loop(
     # section nor the callable schema may be offered.
     if not get_setting("image_gen_enabled", False):
         disabled_tools.add("generate_image")
+    # Look-ups (news, places, medicine labels, studies, Wolfram|Alpha) are offered only when the outside
+    # service each one asks is set up in Settings → Integrations.
+    try:
+        from src.agent_tools.lookup_tools import unavailable as _lookups_unavailable
+        disabled_tools.update(_lookups_unavailable())
+    except Exception:
+        logger.debug("look-up availability check skipped", exc_info=True)
 
     uploaded_files = uploaded_files or []
     _upload_msg = _uploaded_files_context_message(uploaded_files)
@@ -2911,6 +3083,12 @@ async def stream_agent_loop(
             _last_user[:80],
         )
     _mcp_disabled_map = _load_mcp_disabled_map() if mcp_mgr else {}
+    if mcp_mgr and _shared_mcp_only is not None:
+        # Not an administrator: every tool of every server that was not opened to
+        # everyone is hidden, and (below) refused if it is called anyway.
+        from src.tool_security import mcp_hidden_from_others
+        for _sid, _names in mcp_hidden_from_others(mcp_mgr.get_all_tools(), _shared_mcp_only).items():
+            _mcp_disabled_map.setdefault(_sid, set()).update(_names)
     # Toolbox servers (OSINT / market / troubleshoot) are opt-in: hide all their
     # tools from the model UNLESS this turn explicitly summoned them via a slash
     # command (active_toolboxes). Without this, their tools flood every request
@@ -3069,7 +3247,9 @@ async def stream_agent_loop(
                 tool_idx = None
                 _relevant_tools = set(ALWAYS_AVAILABLE)
             if tool_idx:
-                if mcp_mgr:
+                # The index of MCP tools is one for the whole server and is built once per
+                # change; it must not be built from one non-administrator's narrowed view.
+                if mcp_mgr and _shared_mcp_only is None:
                     try:
                         await asyncio.wait_for(
                             asyncio.to_thread(tool_idx.index_mcp_tools, mcp_mgr, _mcp_disabled_map),
@@ -3082,8 +3262,13 @@ async def stream_agent_loop(
                         )
                 if _retrieval_query:
                     try:
+                        # A chat that already has its tools takes on a likeness-only
+                        # match only above a floor (src/prompt_stability.py), so an
+                        # unrelated message does not change the list — and the prompt.
+                        from src import prompt_stability as _stability_floor
+                        _add_floor = _stability_floor.floor_for(session_id) if not guide_only else None
                         _relevant_tools = await asyncio.wait_for(
-                            asyncio.to_thread(tool_idx.get_tools_for_query, _retrieval_query, 8),
+                            asyncio.to_thread(tool_idx.get_tools_for_query, _retrieval_query, 8, None, _add_floor),
                             timeout=_TOOL_SELECTION_TIMEOUT_SECONDS,
                         )
                         logger.info(f"[tool-rag] Retrieved tools for query: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
@@ -3143,6 +3328,33 @@ async def stream_agent_loop(
                 )
         if "ui" in (_intent.get("domains") or set()):
             _relevant_tools.add("ui_control")
+        # The look-ups this message asks for (a medicine's label, studies, a place nearby).
+        _relevant_tools.update(_intent.get("lookup_tools") or set())
+
+    # Keep the opening of the prompt the same from message to message in a chat
+    # (src/prompt_stability.py): what this chat was already offered stays on
+    # offer, so on most turns the tool list — and with it everything the model
+    # still has cached — does not change, and the answer starts in about a
+    # second instead of after a full re-read. Ahead of the prunes below on
+    # purpose: a tool taken away for this turn (an open e-mail draft, an open
+    # document) stays away. A caller that chose the tools itself (a scheduled
+    # task) is left alone.
+    _settle_tools = bool(session_id) and not guide_only and not relevant_tools
+    if _settle_tools:
+        from src import prompt_stability as _stability
+        if _relevant_tools is not None:
+            _picked = len(_relevant_tools)
+            # A tool that is always on offer and is missing from this message's pick was
+            # taken out on purpose (memory, for "save this for Anna": the contact tool is
+            # meant). It is not brought back.
+            from src.tool_index import ALWAYS_AVAILABLE as _always
+            _taken_out = set(_always) - set(_relevant_tools)
+            _relevant_tools = _stability.settle(session_id, _relevant_tools, blocked=set(disabled_tools) | _taken_out)
+            if len(_relevant_tools) != _picked:
+                logger.info("[tool-rag] kept %s tool(s) this chat was already offered (%s in all)",
+                            len(_relevant_tools) - _picked, len(_relevant_tools))
+        if not _needs_admin and _stability.recall(session_id)["admin"]:
+            _needs_admin = True
 
     # If this turn targets the open document, keep editing tools available
     # regardless of which selection path (RAG, keyword, caller-provided) ran.
@@ -3311,6 +3523,8 @@ async def stream_agent_loop(
 
     if _relevant_tools is not None:
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
+    if _settle_tools and not _ody_doc_finetune_mode and not _ody_notes_finetune_mode:
+        _stability.remember(session_id, tools=_relevant_tools, admin=_needs_admin)
 
     prep_timings["tool_selection"] = time.time() - _t1
 
@@ -3395,6 +3609,7 @@ async def stream_agent_loop(
         suppress_local_context=guide_only,
         suppress_skills=_low_signal_turn,
         active_email=active_email,
+        session_id=session_id if _settle_tools else None,
     )
     if _ody_doc_finetune_mode and not plan_mode and not approved_plan and not guide_only:
         messages = _minimal_aegis_doc_messages(
@@ -3562,8 +3777,24 @@ async def stream_agent_loop(
     real_output_tokens = 0
     last_round_input_tokens = 0  # Last round's input tokens (for context % peak)
     has_real_usage = False
+    # A local gpt-oss keeps its notes on every tool step of the turn (harmony keeps
+    # them until the final answer; stripping them made it re-read each tool result).
+    _keep_step_reasoning = False
+    try:
+        from src.model_context import is_local_endpoint as _is_local_endpoint
+        from src import prompt_stability as _stability_steps
+        _keep_step_reasoning = (
+            "gpt-oss" in (model or "").lower()
+            and _is_local_endpoint(endpoint_url)
+            and _stability_steps.enabled()
+        )
+    except Exception:
+        _keep_step_reasoning = False
     backend_gen_tps = 0      # backend-reported true gen speed (llama.cpp timings)
     backend_prefill_tps = 0  # backend-reported prefill speed
+    read_tokens = 0          # prompt tokens the backend actually read this turn (all rounds)
+    cached_tokens = 0        # prompt tokens it still had from before (its prompt cache)
+    has_read_counts = False
     requested_model = model
     actual_model = model
     total_tool_calls = 0  # for budget enforcement
@@ -3608,6 +3839,7 @@ async def stream_agent_loop(
     # an action without emitting the tool call. Capped to prevent a model
     # that *can't* call the tool from looping forever.
     _intent_nudge_count = 0
+    _smart_nudges = 0
     _MAX_INTENT_NUDGES = 2
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
@@ -3754,11 +3986,8 @@ async def stream_agent_loop(
         # 12 rounds listing notes). Tell it ONCE, up front, that web is off
         # and how the user can turn it on.
         if round_num == 1 and not _force_answer and _relevant_tools:
-            _web_off = sorted(
-                set(_relevant_tools)
-                & (set(WEB_TOOL_NAMES) | {"trigger_research"})
-                & set(disabled_tools or [])
-            )
+            _off = set(disabled_tools or [])
+            _web_off = sorted(set(_relevant_tools) & set(WEB_TOOL_NAMES) & _off)
             if _web_off:
                 logger.info(
                     f"[agent] web tools relevant but disabled this turn: {_web_off} — injecting web-off notice"
@@ -3776,6 +4005,50 @@ async def stream_agent_loop(
                         "existing knowledge, note that it may be out of date, and "
                         "tell the user they can enable the Web search toggle (the "
                         "magnifier icon) or type /search to re-ask with live results."
+                    ),
+                })
+            # Starting a Deep Research job is a separate matter from the Web
+            # toggle: the chat may start one only when the user asked for
+            # research by name (routes/chat_routes.py). This used to be folded
+            # into the notice above, which told the model the internet was off
+            # even when web search was on.
+            # The user asked for a Deep Research job by name (the route decided
+            # that from their words). Left to itself the model often answered
+            # with a few web searches instead, so say it plainly once.
+            # A smart tool (services/smart_tools.py): a request that needs several
+            # blades at once is done as one job, by fixed steps the person's own
+            # words set off.
+            if smart_tool:
+                try:
+                    from services import smart_tools as _smart_tools
+                    _smart = _smart_tools.get(smart_tool)
+                    if _smart is not None:
+                        messages.append({"role": "system", "content": _smart.rules})
+                        logger.info("[agent] smart tool: %s", _smart.key)
+                except Exception:
+                    logger.debug("smart tool note skipped", exc_info=True)
+            if research_requested and "trigger_research" not in _off:
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "Note: the user has asked for a Deep Research job by name. Your first action must be to call "
+                        "`trigger_research` with `topic` — the subject in the user's own words, with any angle or "
+                        "limits they gave. Do NOT answer the question yourself and do NOT use web_search or web_fetch "
+                        "for it: the research job does the searching and writes the report. When the tool returns, "
+                        "reply in one or two sentences and keep its [..](#research-..) link exactly as given."
+                    ),
+                })
+            if "trigger_research" in set(_relevant_tools) and "trigger_research" in _off:
+                logger.info("[agent] research job not available this turn — telling the model how the user starts one")
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "Note: a Deep Research job cannot be started from this message — "
+                        "`trigger_research` is only available when the user asks for research by name. "
+                        "Do NOT say that research has started or is running. Answer the question now with "
+                        "what you have" + ("" if _web_off else " (searching the web if that helps and is available)") + ". "
+                        "Do not describe buttons or tell the user how to start a report: when a long report "
+                        "with sources would serve better, the screen offers one under your answer by itself."
                     ),
                 })
 
@@ -3812,6 +4085,7 @@ async def stream_agent_loop(
             timeout=agent_stream_timeout,
             session_id=session_id,
             workload=workload,
+            progress=True,
         ):
             if not _round_first_event_logged:
                 _round_first_event_logged = True
@@ -3901,6 +4175,19 @@ async def stream_agent_loop(
                             backend_gen_tps = u["gen_tps"]
                         if u.get("prefill_tps"):
                             backend_prefill_tps = u["prefill_tps"]
+                        if isinstance(u.get("read_tokens"), int) or isinstance(u.get("cached_tokens"), int):
+                            has_read_counts = True
+                            read_tokens += int(u.get("read_tokens") or 0)
+                            cached_tokens += int(u.get("cached_tokens") or 0)
+                            logger.info(
+                                "[agent-timing] round_read round=%s read=%s cached=%s",
+                                round_num, u.get("read_tokens"), u.get("cached_tokens"),
+                            )
+                    elif data.get("type") == "reading":
+                        # How far the local model has read the prompt: the wait
+                        # before the first word, shown as a real bar by the screen.
+                        data["round"] = round_num
+                        yield f"data: {json.dumps(data)}\n\n"
                     elif data.get("type") == "fallback":
                         # The selected model failed and another answered; surface
                         # the notice so a misconfigured provider isn't masked.
@@ -4272,6 +4559,32 @@ async def stream_agent_loop(
                 })
                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                 continue
+            # ── A smart tool is not finished until its steps have run ──
+            # "Plan a day hike" answered after the sunset and the forecast,
+            # with no list saved and no reminder set, is the old paragraph
+            # again. The steps are fixed (services/smart_tools.py), so what is
+            # missing is known without asking a model: say which, and go round
+            # once more. At most twice a turn.
+            if smart_tool and _smart_nudges < 2 and not _force_answer and not plan_mode and not guide_only:
+                try:
+                    from services import smart_tools as _smart_tools
+                    _left = _smart_tools.steps_left(smart_tool, {str(event.get("tool")) for event in tool_events}, disabled_tools)
+                except Exception:
+                    _left = ()
+                if _left:
+                    _smart_nudges += 1
+                    logger.info("[agent] smart tool %s not finished: %s still to do", smart_tool, list(_left))
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "You stopped before the job was done. Still to do, with the tools, now: "
+                            + ", ".join(f"`{name}`" for name in _left)
+                            + ". Make those calls as the steps above describe. Then add ONE short closing line saying "
+                            "what was saved or set; do not repeat anything you have already written."
+                        ),
+                    })
+                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                    continue
             # ── Intent-without-action supervisor ─────────────────────
             # Catch "Let me tail the output" / "I'll check the logs" /
             # "Let me investigate" patterns where the model announces an
@@ -4318,7 +4631,7 @@ async def stream_agent_loop(
                 _cookbook_log_hint = ""
                 if any(_word in _lower_phrase for _word in ("log", "logs", "output", "tail", "status")):
                     _cookbook_log_hint = (
-                        " If this is about a Cookbook/model serve, the concrete calls are: "
+                        " If this is about a Model Shopper/model serve, the concrete calls are: "
                         "`list_served_models` first, then `tail_serve_output` with the "
                         "session_id from the serve/list result. Never answer with "
                         "\"check logs\" when those tools are available."
@@ -4600,7 +4913,7 @@ async def stream_agent_loop(
             # first so the <!-- SOURCES:…--> marker is found and stripped even
             # when the result doesn't carry a "results" or "stdout" key.
             _src_text = result.get("output") or result.get("results") or result.get("stdout") or ""
-            if block.tool_type in ("web_search", "library_search") and _src_text:
+            if block.tool_type in ("web_search", "library_search", "news_search", "paper_search", "medicine_info", "find_places") and _src_text:
                 _src_marker = "<!-- SOURCES:"
                 _src_idx = _src_text.find(_src_marker)
                 if _src_idx >= 0:
@@ -4608,6 +4921,13 @@ async def stream_agent_loop(
                     if _src_end >= 0:
                         try:
                             _extracted_sources = json.loads(_src_text[_src_idx + len(_src_marker):_src_end])
+                            # Each source says where it is from — the home library or the web —
+                            # so the screen can head them honestly (a library page is not a "web source").
+                            try:
+                                from services.search.origin import LIBRARY as _LIB, marked as _marked
+                                _extracted_sources = _marked(_extracted_sources, _LIB if block.tool_type == "library_search" else "")
+                            except Exception:
+                                pass
                             yield f'data: {json.dumps({"type": "web_sources", "data": _extracted_sources})}\n\n'
                             # Strip the marker from the result so it doesn't show in chat
                             _clean = _src_text[:_src_idx].rstrip()
@@ -4762,6 +5082,10 @@ async def stream_agent_loop(
             # Forward a file-write diff for inline before/after rendering
             if "diff" in result:
                 tool_output_data["diff"] = result["diff"]
+            # The result as a card: the few large figures a screen shows
+            # (sunset tiles, a forecast, a translation) instead of plain text.
+            if isinstance(result.get("card"), dict):
+                tool_output_data["card"] = result["card"]
             yield f'data: {json.dumps(tool_output_data)}\n\n'
 
             if block.tool_type == "manage_notes":
@@ -4873,6 +5197,8 @@ async def stream_agent_loop(
             # this the diff shows live but vanishes from saved history.
             if result.get("diff"):
                 tool_event["diff"] = result["diff"]
+            if isinstance(result.get("card"), dict):
+                tool_event["card"] = result["card"]      # so a reopened chat draws it again
             if _pending_ask_user_event:
                 # Persist the structured question with the tool event.  On a
                 # reload, chatRenderer can restore the card; a later user
@@ -4935,7 +5261,8 @@ async def stream_agent_loop(
         # (and left the real call answered empty).
         _append_tool_results(messages, round_response, converted_calls,
                              tool_results, tool_result_texts, used_native, round_num,
-                             round_reasoning=round_reasoning)
+                             round_reasoning=round_reasoning,
+                             keep_reasoning=_keep_step_reasoning)
 
         # Emit agent_step event
         yield (
@@ -5000,6 +5327,11 @@ async def stream_agent_loop(
         backend_prefill_tps=backend_prefill_tps,
     )
     metrics["requested_model"] = requested_model
+    if has_read_counts:
+        # Of everything sent to the model this turn, how much it had to read and
+        # how much it still had: the measure of whether the prompt stayed stable.
+        metrics["read_tokens"] = read_tokens
+        metrics["cached_tokens"] = cached_tokens
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 
     # Local observability: record this whole turn (guarded; never breaks chat).

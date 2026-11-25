@@ -15,8 +15,10 @@ Nothing here is required: without a library Aegis behaves exactly as before.
 | Web search (the globe toggle, the agent's `web_search`) | Unchanged while the internet is up; the library is tried last, after the web providers. **When the internet is down the library is searched first and only**, so "search" keeps answering. The reply says the results came from the offline library. |
 | Agent mode | A `library_search` tool. The assistant uses it for settled knowledge and how-to questions, with or without internet, and cites the article or the manual page. Offered whenever a message is a question or would get web search. |
 | `/lib <words>` | Quick lookup: a list of matching articles and manual pages with links. `/lib` alone shows what is installed. Aliases: `/kiwix`, `/lookup`, `/ref`, `/offline`. |
-| `/identify [what you know]` or **+ → Identify photo** | Take or choose a photo; the answer names the most likely match, what to check in hand, lookalikes (dangerous ones flagged) and what the library says about edibility or hazards, with reference photos. Text in a photo is transcribed. Aliases: `/id`, `/whatis`, `/ocr`. |
-| Browser | The whole library is browsable at `kiwix_public_url` (Kiwix's own reader). |
+| The **camera button** on the message box, or `/identify [what you know]` | Take or choose a photo; the answer names the most likely match, what to check in hand, lookalikes (dangerous ones flagged) and what the library says about edibility or hazards, with reference photos. Text in a photo is transcribed. Aliases: `/id`, `/whatis`, `/ocr`. |
+| **Reader** (`/read`) | Anything in the library opened for reading on Aegis's own page: your place kept, highlights, notes, and *Remember* to hand a passage to Aegis's memory. Links to the library in a chat open here. See [Reader and Kitchen](reader.md). |
+| **Kitchen** (`/kitchen`) | A recipe from the library (or pasted, or from the web) set out for cooking, old measures translated. |
+| Browser | The whole library is also browsable at `kiwix_public_url` (Kiwix's own viewer) — the place for collections whose front page is a menu drawn by script. |
 
 The library has two halves:
 
@@ -98,6 +100,28 @@ A selection that covers "the internet is down and I need to do things", about
   Exchange, a few `devdocs_en_*`.
 - `maps_en_united-states-of-america` (16 GB, road maps) or your own country's.
 
+For reading rather than looking things up — about 55 GB more:
+
+- Books by subject from Project Gutenberg: `gutenberg_en_lcc-q` (science, 12 GB),
+  `-r` (medicine), `-g` (geography, travel), `-h` (social sciences), `-j` / `-k`
+  (politics, law), `-l` (education), `-v` (naval science). The whole of
+  Gutenberg in English is 221 GB; fiction alone (`lcc-p*`) is the bulk of it.
+- `wikisource_en_all` (8 GB) — source texts: constitutions, speeches, old
+  reference works.
+- Textbooks: the `libretexts.org_en_*` shelves (biology, chemistry, physics,
+  math, engineering, geosciences, statistics, humanities, social sciences,
+  business, workforce trades, K-12) and `wikiversity_en_all`.
+- Cooking: `publicdomainrecipes.com_en_all`, `based.cooking_en_all`,
+  `foss.cooking_en_all`, `grimgrains_en_all`, and the cookbooks in
+  `gutenberg_en_lcc-t` — which the [Kitchen](reader.md#kitchen) turns into
+  recipes you can follow.
+
+Everything Kiwix publishes is free to download and keep
+(<https://library.kiwix.org>). Other lawful sources of whole books, to add as
+PDFs: Standard Ebooks, the Internet Archive's public-domain texts, OpenStax
+and the Open Textbook Library, the Directory of Open Access Books, NCBI
+Bookshelf.
+
 Not in Kiwix's catalog at all: modern field guides to plants, mushrooms and
 insects. Wikipedia's species articles (with photos) carry that load; free
 government and extension-service PDFs can be added as described next.
@@ -164,6 +188,15 @@ preservation, plant and mushroom guides), USDA Forest Service (fungi and tree
 field guides), CDC / WHO / the Joint Trauma System (medical), hesperian.org
 (*Where There Is No Doctor*, by chapter), fishwildlife.org (trapping best
 practices), CISA (NIFOG / AUXFOG radio guides).
+
+## Shelves, and your own files
+
+Everything is filed as category › shelf — cookbooks by style of cooking,
+history and literature by era, manuals by skill — and PDFs or e-books copied
+into any folder inside the library folder are read in, filed and searched
+like the rest. A search can be kept to one shelf, and novels are left out of
+a factual lookup unless their shelf is asked for. All of that is in
+[The library's shelves, and your own files](library-shelves.md).
 
 ## Command line
 

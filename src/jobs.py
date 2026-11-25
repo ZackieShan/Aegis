@@ -182,6 +182,18 @@ def save_job(data: Dict[str, Any], owner: Optional[str] = None) -> Dict[str, Any
 
 
 # ── schedule math ─────────────────────────────────────────────────────────────
+def _zone(name: Any = None):
+    """The time zone a schedule is read in: the named one, else the server's own."""
+    if name:
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(str(name))
+        except Exception:
+            pass
+    from datetime import datetime
+    return datetime.now().astimezone().tzinfo
+
+
 def compute_next_run(job: Dict[str, Any], after: Optional[float] = None) -> Optional[float]:
     """Next epoch-seconds this job should fire, or None for manual/disabled."""
     if not job.get("enabled"):
@@ -198,8 +210,12 @@ def compute_next_run(job: Dict[str, Any], after: Optional[float] = None) -> Opti
         expr = sched.get("cron") or ""
         try:
             from croniter import croniter
-            from datetime import datetime, timezone
-            itr = croniter(expr, datetime.fromtimestamp(base, tz=timezone.utc))
+            from datetime import datetime
+            # The hour in "0 7 * * *" is the hour on the clock in this house (the
+            # zone kept with the job, else the server's own), as a scheduled
+            # task's is. It used to be read as UTC, which is seven in the morning
+            # nowhere near here.
+            itr = croniter(expr, datetime.fromtimestamp(base, tz=_zone(sched.get("tz"))))
             return itr.get_next(float)
         except Exception as e:
             logger.warning("job %s bad cron %r: %s", job.get("id"), expr, e)
@@ -230,7 +246,7 @@ async def _resolve_graph(job: Dict[str, Any]):
         graph = recipe_templates.build_graph(source.get("template_id"), model) if model else None
         if not graph:
             return None, ("No capable model is served." if not model
-                          else "This recipe isn't runnable (a preview or unknown template).")
+                          else "This automation isn't runnable (a preview or unknown template).")
         # canned recipe may need a toolbox connected
         meta = recipe_templates.get_template(source.get("template_id"))
         if meta and meta.get("needs_toolbox"):
@@ -242,7 +258,7 @@ async def _resolve_graph(job: Dict[str, Any]):
         from src import recipes as recipes_engine
         graph = recipes_engine.get_recipe(source.get("recipe_id"))
         if not graph:
-            return None, "The saved recipe this automation runs was deleted."
+            return None, "The saved automation this schedule runs was deleted."
         return graph, None
     return None, "Unknown automation source."
 

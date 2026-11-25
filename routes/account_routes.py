@@ -12,6 +12,9 @@ administrator's console for everyone's.
     DELETE /api/admin/users/{name}?data=keep|erase   delete the account; erase or keep what it stored
     POST /api/admin/removed/{name}/erase      erase what a deleted account left behind
     DELETE /api/admin/removed/{name}          free a deleted account's name (a new account would get its data)
+    GET  /api/admin/selfcheck                 the last nightly look at whether the server is well; POST looks now
+    GET  /api/admin/household                 the household's home position, units, language and live sources
+    PUT  /api/admin/household                 change them: {"home"?, "zone"?, "units"?, "language"?, "live"?}
     PUT  /api/admin/roles/{name}              create or change a role
     DELETE /api/admin/roles/{name}            remove a custom role / reset a built-in one
     GET  /api/admin/activity                  sign-ins and administrative changes
@@ -40,13 +43,12 @@ logger = logging.getLogger(__name__)
 PIN_MIN, PIN_MAX = 4, 12
 # Parts of the full interface an administrator can hide for one person. Keys
 # are the ones the app's own Appearance switches use (static/app.js).
+# Only what a non-administrator is shown at all is listed: models, engine,
+# schedules, documents and the rest of the workshop are never drawn for them
+# (static/style.css, data-admin-only), so there is nothing there to hide.
 HIDEABLE_UI = [
-    ("email-section", "Email"), ("tool-calendar", "Calendar"), ("tool-notes", "Notes"), ("tool-tasks", "Tasks"),
-    ("tool-gallery", "Gallery / Studio"), ("tool-library", "Library"), ("tool-memory", "Brain"),
-    ("tool-research", "Deep Research"), ("tool-compare", "Compare"), ("tool-recipes", "Recipes"),
-    ("tool-cookbook", "Cookbook"), ("tool-theme", "Theme"), ("models-section", "Model list"),
-    ("mode-toggle", "Mode switch (Agent / Chat / Code)"), ("bash-toggle-btn", "Shell switch"), ("web-toggle-btn", "Web switch"),
-    ("incognito-btn", "Nobody mode button"),
+    ("tool-calendar", "Calendar"), ("tool-notes", "Notes"), ("tool-gallery", "Studio"),
+    ("incognito-btn", "Nobody mode button"), ("attach-btn", "Attach files"), ("identify-btn", "Identify photo"),
 ]
 
 
@@ -234,6 +236,67 @@ def setup_account_routes(auth_manager: AuthManager, session_manager=None, memory
             "policy": {"password_min_length": PASSWORD_MIN_LENGTH, "pin_min": PIN_MIN, "pin_max": PIN_MAX,
                        "signup_enabled": bool(auth_manager.signup_enabled)},
         }
+
+    # ── is the server well ───────────────────────────────────────────────
+
+    @router.get("/api/admin/selfcheck")
+    def selfcheck_last(request: Request):
+        """The last nightly look at the server (services/selfcheck.py), or {} before the first."""
+        _admin(request)
+        from services import selfcheck
+        return selfcheck.last()
+
+    @router.post("/api/admin/selfcheck")
+    async def selfcheck_now(request: Request):
+        """Look now. Tells nobody: the administrator asking is looking at the answer."""
+        _admin(request)
+        from services import selfcheck
+        return await selfcheck.nightly(tell=False)
+
+    # ── the household: set once, used by everyone ────────────────────────
+
+    @router.get("/api/admin/household")
+    def household_get(request: Request):
+        _admin(request)
+        from services import household
+        return household.describe()
+
+    @router.put("/api/admin/household")
+    def household_put(request: Request, body: dict = Body(...)):
+        admin = _admin(request)
+        from services import household
+        from services.almanac import places
+        changed = []
+        try:
+            if "home" in body:
+                place = str(body.get("home") or "").strip()
+                if place:
+                    household.set_home(place[:200], str(body.get("zone") or "")[:60])
+                    changed.append("home position set")
+                elif household.forget_home():
+                    changed.append("home position removed")
+            wanted = {}
+            if "units" in body:
+                wanted["units"] = str(body.get("units") or "")
+            if "language" in body:
+                wanted["language"] = str(body.get("language") or "")[:60]
+            if "live" in body:
+                wanted["live"] = body.get("live")
+            if wanted:
+                household.update(**wanted)
+                changed.extend(sorted(wanted))
+        except places.PlaceError as problem:
+            raise HTTPException(400, str(problem))
+        except ValueError as problem:
+            raise HTTPException(400, str(problem))
+        if changed:
+            access.audit("household_changed", by=admin, ip=client_address(request), detail="; ".join(changed))
+            try:                                        # the assistant's standing instructions carry these
+                from src.chat_processor import _persona_cache
+                _persona_cache.clear()
+            except Exception:
+                pass
+        return household.describe()
 
     @router.post("/api/admin/users")
     def create_user(request: Request, body: dict = Body(...)):

@@ -406,6 +406,10 @@ models:
   # setup-engine.sh gives the TTS venvs CPU torch by default, so on this box
   # it uses RAM, not GPU memory -- it lives in the `cpu` group below and never
   # evicts the chat model. (Built with --tts-rocm? Move it back to `gpu`.)
+  # Which model speaks: server.py takes --model auto|standard|turbo. The default,
+  # auto, is Chatterbox Turbo when its 4GB of files are already in the Hugging
+  # Face cache (setup-engine.sh --tts-turbo fetches them) and the standard model
+  # otherwise; add `--model standard` to the cmd below to stay with the original.
   "chatterbox-tts":
     cmd: |
       "__ENGINE_DIR__/chatterbox/venv/bin/python"

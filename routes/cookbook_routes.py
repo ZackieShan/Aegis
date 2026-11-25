@@ -1,4 +1,9 @@
-"""Cookbook routes — model download, serve, cache scanning, and cookbook state sync."""
+"""Cookbook routes — model download, serve, cache scanning, and cookbook state sync.
+
+People see this feature as the "Model Shopper" (it was called Cookbook until the
+Kitchen arrived); the code, API paths and tool names keep the old name. Write
+"Model Shopper" in any message that reaches a person or the assistant.
+"""
 
 import asyncio
 import json
@@ -68,7 +73,7 @@ _HF_TOKEN_STATUS_SNIPPET = (
     'echo "[aegis] HF token: applied"; '
     'else '
     'echo "[aegis] HF token: NOT SET — gated/private models will be denied. '
-    'Add one in Aegis Cookbook -> Settings -> HuggingFace Token."; '
+    'Add one in Aegis Model Shopper -> Settings -> HuggingFace Token."; '
     'fi'
 )
 
@@ -129,7 +134,7 @@ def _append_openai_port_preflight_lines(lines: list[str], *, cmd: str, expected_
     lines.append("match = bool(expected) and any((m.lower() == expected.lower() or base(m) == base(expected) or base(expected) in m.lower() or base(m) in expected.lower()) for m in models)")
     lines.append("print(f'ERROR: Port {port} is already serving {models or [\"unknown\"]}.')")
     lines.append("if expected and not match:")
-    lines.append("    print(f'ERROR: Cookbook was about to launch {expected}, but this port is occupied by a different model. Stop the old server or choose another port.')")
+    lines.append("    print(f'ERROR: Model Shopper was about to launch {expected}, but this port is occupied by a different model. Stop the old server or choose another port.')")
     lines.append("else:")
     lines.append("    print('ERROR: Stop the existing server or choose another port before launching a duplicate serve.')")
     lines.append("raise SystemExit(98)")
@@ -187,15 +192,15 @@ def _missing_binary_message(
 ) -> str:
     if binary == "tmux":
         return (
-            f"tmux is required for Cookbook background downloads/serves on {target}. "
+            f"tmux is required for Model Shopper background downloads/serves on {target}. "
             "Install it with your OS package manager (macOS: `brew install tmux`), "
-            "or run Cookbook server setup for that server."
+            "or run Model Shopper server setup for that server."
         )
     if binary == "docker":
         if local_host_docker_blocked:
             return HOST_DOCKER_ACCESS_HINT
         return (
-            f"Docker is required by this Cookbook launch command on {target}, but the docker CLI was not found. "
+            f"Docker is required by this Model Shopper launch command on {target}, but the docker CLI was not found. "
             "Install Docker and make sure this user can run `docker`, then retry."
         )
     return f"{binary} is required on {target}, but it was not found."
@@ -456,7 +461,7 @@ def setup_cookbook_routes() -> APIRouter:
             (
                 r"No CUDA GPUs are available|no GPU.*found|CUDA_VISIBLE_DEVICES.*invalid",
                 "No GPUs are visible to the serve process.",
-                [{"label": "clear Cookbook GPU selection or choose available GPUs", "op": "settings", "field": "gpus", "value": ""}],
+                [{"label": "clear Model Shopper GPU selection or choose available GPUs", "op": "settings", "field": "gpus", "value": ""}],
             ),
             (
                 r"Failed to infer device type|NVML Shared Library Not Found|No module named 'amdsmi'|platform is not available",
@@ -470,7 +475,7 @@ def setup_cookbook_routes() -> APIRouter:
             (
                 r"vllm.*command not found|No module named vllm|ERROR: vLLM is not installed",
                 "vLLM is not installed or not in PATH on this server.",
-                [{"label": "install vLLM in Cookbook Dependencies", "op": "dependency", "package": "vllm"}],
+                [{"label": "install vLLM in Model Shopper Dependencies", "op": "dependency", "package": "vllm"}],
             ),
             (
                 r"sgl_kernel[\s\S]*(Python\.h|libnuma\.so\.1|common_ops|libnvrtc\.so)|"
@@ -486,12 +491,12 @@ def setup_cookbook_routes() -> APIRouter:
             (
                 r"sglang.*command not found|No module named sglang|SGLang is not installed",
                 "SGLang is not installed or not in PATH on this server.",
-                [{"label": "install SGLang in Cookbook Dependencies", "op": "dependency", "package": "sglang[all]"}],
+                [{"label": "install SGLang in Model Shopper Dependencies", "op": "dependency", "package": "sglang[all]"}],
             ),
             (
                 r"No module named ['\"]?mlx_lm|mlx_lm.*command not found|MLX is not installed|MLX LM is not installed",
                 "MLX LM is not installed on this server.",
-                [{"label": "install mlx-lm in Cookbook Dependencies", "op": "dependency", "package": "mlx-lm"}],
+                [{"label": "install mlx-lm in Model Shopper Dependencies", "op": "dependency", "package": "mlx-lm"}],
             ),
             (
                 r"Unable to quantize model of type <class ['\"]mlx_lm\.models\.switch_layers\.QuantizedSwitchLinear['\"]>|QuantizedSwitchLinear",
@@ -533,7 +538,7 @@ def setup_cookbook_routes() -> APIRouter:
             (
                 r"No module named 'torch'|No module named torch|No module named 'diffusers'|No module named diffusers",
                 "Diffusion serving requires PyTorch and diffusers.",
-                [{"label": "install diffusers[torch] in Cookbook Dependencies", "op": "dependency", "package": "diffusers[torch]"}],
+                [{"label": "install diffusers[torch] in Model Shopper Dependencies", "op": "dependency", "package": "diffusers[torch]"}],
             ),
             (
                 r"403 Forbidden|401 Unauthorized|Access to model.*is restricted|gated repo|not in the authorized list|awaiting a review",
@@ -993,7 +998,7 @@ def setup_cookbook_routes() -> APIRouter:
             script_path = TMUX_LOG_DIR / f"{session_id}.cmd"
             script_path.write_text(
                 "@echo off\r\n"
-                f'echo Cookbook LOCAL execution on Windows needs Git Bash ^(bash.exe^) on PATH. > "{log_path}" 2>&1\r\n'
+                f'echo Model Shopper LOCAL execution on Windows needs Git Bash ^(bash.exe^) on PATH. > "{log_path}" 2>&1\r\n'
                 f'echo Install Git for Windows, then retry. >> "{log_path}"\r\n',
                 encoding="utf-8",
             )
@@ -2574,7 +2579,7 @@ def setup_cookbook_routes() -> APIRouter:
                 runner_lines.append('echo')
                 runner_lines.append('echo "=== Process exited with code ${_ody_exit} ==="')
                 runner_lines.append('if [ "$_ody_exit" -eq 0 ]; then')
-                runner_lines.append('  echo "[aegis] Ollama sidecar model is available; keeping Cookbook task attached to the persistent Ollama daemon."')
+                runner_lines.append('  echo "[aegis] Ollama sidecar model is available; keeping Model Shopper task attached to the persistent Ollama daemon."')
                 runner_lines.append('  while true; do sleep 3600; done')
                 runner_lines.append('fi')
                 runner_lines.append('exec bash -i')

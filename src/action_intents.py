@@ -43,7 +43,7 @@ _EXPLANATORY_PREFIX = re.compile(
 
 _PANEL = (
     r"(?:calendar|notes?|inbox|email|mail|documents?|docs|library|gallery|"
-    r"settings|cookbook|sessions?|chats?|skills|memories|memory|brain)"
+    r"settings|cookbook|kitchen|model[ -]?shopper|shopper|automations?|sessions?|chats?|skills|memories|memory|brain)"
 )
 
 _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(

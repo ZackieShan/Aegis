@@ -175,7 +175,7 @@ def test_library_search_merges_ranks_and_dedupes(library_on, monkeypatch):
         _article("Hypothermia", "signs include shivering; treat by rewarming"),
         _article("Tourniquet (band)", "hypothermia is a song"),
     ])
-    monkeypatch.setattr(manuals, "search", lambda q, count=8: [
+    monkeypatch.setattr(manuals, "search", lambda q, count=8, **_: [
         _manual("First Aid", 120, "treat hypothermia: signs are shivering and confusion")])
 
     results = library.library_search("hypothermia", count=6)
@@ -213,7 +213,8 @@ def test_format_for_model_fits_the_callers_cap(library_on, monkeypatch):
         "url": url, "title": "T", "content": "x" * budget, "success": True, "error": ""})
     text, sources = library.format_for_model("anything", results, fetch=3, budget=4000, max_chars=6000)
     assert len(text) <= 6000
-    assert text.rstrip().endswith("not the whole page.")     # closing rules intact
+    assert "not the whole page." in text                      # closing rules intact…
+    assert text.rstrip().endswith("or another shelf to search only there.")   # …to their last word
     assert len(sources) == 8 and "[CONTENT 1]" in text
 
     text, sources = library.format_for_model("nothing", [], fetch=3)
@@ -249,7 +250,7 @@ def test_library_tool_output_contract(library_on, monkeypatch):
 
     seen = {}
 
-    def fake_search(query, count=8, scope="all"):
+    def fake_search(query, count=8, scope="all", shelf=""):
         seen.update(query=query, count=count, scope=scope)
         return [dict(_article("Bowline", "a knot"), kind="article")]
 
@@ -312,6 +313,6 @@ def test_the_same_wikipedia_article_from_three_collections_is_listed_once(librar
         _article("Emergency tourniquet", "a question", book="outdoors.stackexchange.com_en_all"),
         _article("Emergency tourniquet", "a device", book="wikipedia_en_all_maxi"),
     ])
-    monkeypatch.setattr(manuals, "search", lambda q, count=8: [])
+    monkeypatch.setattr(manuals, "search", lambda q, count=8, **_: [])
     results = library.library_search("emergency tourniquet", count=6)
     assert [r["book"] for r in results] == ["wikipedia_en_medicine_maxi", "outdoors.stackexchange.com_en_all"]
